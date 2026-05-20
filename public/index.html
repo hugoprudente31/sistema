@@ -1,0 +1,1465 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sistema de Agendamento — Óticas Target</title>
+  <style>
+    :root {
+      --p:    #fc5102;
+      --s:    #fc7d05;
+      --bg:   #fff5ef;
+      --card: #ffffff;
+      --line: #ffd9c5;
+      --text: #2a2a2a;
+      --muted:#6b6b6b;
+      --ok:   #166534;
+      --err:  #b91c1c;
+      --blue: #1d4ed8;
+      --yellow:#92400e;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: linear-gradient(180deg, #fff8f4 0%, #fff3eb 100%);
+      color: var(--text);
+      padding: 20px;
+    }
+
+    .wrap { max-width: 1550px; margin: 0 auto; }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 22px;
+      box-shadow: 0 10px 24px rgba(0,0,0,.05);
+      margin-bottom: 18px;
+    }
+
+    h1, h2, h3 { margin: 0 0 14px; color: var(--p); }
+    .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 10px; }
+    .hidden { display: none !important; }
+
+    .row   { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .row-3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 14px; }
+    .row-4 { display: grid; grid-template-columns: repeat(4,1fr); gap: 14px; }
+
+    @media(max-width:1100px){ .row-4,.row-3,.row{ grid-template-columns:1fr 1fr; } }
+    @media(max-width:700px) { .row-4,.row-3,.row{ grid-template-columns:1fr; } }
+
+    label { display:block; font-size:13px; font-weight:700; margin-bottom:4px; }
+
+    input, select, textarea, button {
+      width: 100%;
+      padding: 12px;
+      border-radius: 12px;
+      border: 1px solid #f1c7ae;
+      font-size: 14px;
+      background: #fff;
+      outline: none;
+    }
+
+    input:disabled, select:disabled, textarea:disabled {
+      background: #f8fafc; color: #64748b; cursor: not-allowed;
+    }
+
+    textarea { min-height: 90px; resize: vertical; }
+
+    button {
+      background: linear-gradient(135deg, var(--p), var(--s));
+      color: #fff;
+      border: none;
+      font-weight: 700;
+      cursor: pointer;
+      transition: .15s ease;
+    }
+    button:hover  { transform: translateY(-1px); opacity:.94; }
+    button:disabled { opacity:.55; cursor:not-allowed; transform:none; }
+    button.secondary{ background:#f1f5f9; color:#333; border:1px solid #dbe2ea; }
+    button.danger   { background:#b91c1c; }
+    button.success  { background:#166534; }
+    button.blue     { background:#1d4ed8; }
+
+    .notice {
+      margin:4px 0 16px; padding:14px 16px; border-radius:14px;
+      border:1px solid var(--line); background:#fff8f3;
+      font-size:13px; line-height:1.6;
+    }
+    .notice strong { display:block; color:var(--p); margin-bottom:4px; }
+
+    .msg { font-size:13px; margin-top:8px; }
+    .ok  { color:var(--ok);  font-weight:700; }
+    .err { color:var(--err); font-weight:700; }
+
+    .topbar {
+      display:flex; justify-content:space-between;
+      align-items:flex-start; gap:20px; flex-wrap:wrap;
+    }
+
+    .meta { font-size:13px; color:var(--muted); line-height:1.7; }
+
+    .pill {
+      display:inline-block; padding:6px 10px; border-radius:999px;
+      font-size:12px; font-weight:700;
+      background:#fff3eb; color:var(--p); border:1px solid var(--line);
+    }
+
+    .kpi { border:1px solid var(--line); border-radius:16px; padding:16px; background:#fff; }
+    .kpi .label { font-size:13px; color:var(--muted); margin-bottom:8px; }
+    .kpi .value { font-size:24px; font-weight:800; color:var(--p); }
+
+    table { width:100%; border-collapse:collapse; margin-top:10px; }
+    th, td {
+      text-align:left; padding:10px;
+      border-bottom:1px solid #f1dfd3; font-size:13px; vertical-align:top;
+    }
+    th { background:var(--p); color:#fff; position:sticky; top:0; z-index:2; }
+
+    .scroll-x { overflow:auto; max-height:72vh; }
+
+    .status {
+      display:inline-block; padding:6px 10px; border-radius:999px;
+      font-size:11px; font-weight:700;
+      background:#fff3eb; color:var(--p); border:1px solid var(--line);
+      white-space:nowrap;
+    }
+    .status.red    { background:#fee2e2; color:#b91c1c; border-color:#fecaca; }
+    .status.green  { background:#dcfce7; color:#166534; border-color:#bbf7d0; }
+    .status.yellow { background:#fef3c7; color:#92400e; border-color:#fcd34d; }
+    .status.blue   { background:#dbeafe; color:#1d4ed8; border-color:#bfdbfe; }
+    .status.gray   { background:#f3f4f6; color:#4b5563; border-color:#e5e7eb; }
+
+    .row-red    td { background:#fee2e2 !important; }
+    .row-yellow td { background:#fef3c7 !important; }
+    .row-green  td { background:#dcfce7 !important; }
+
+    .actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; min-width:320px; }
+    .actions button, .actions select { max-width:180px; }
+
+    .btn-relatorio {
+      max-width:260px; min-width:220px;
+      padding:14px 18px; font-size:15px; font-weight:700;
+      box-shadow:0 8px 18px rgba(252,81,2,.18);
+    }
+
+    .filters-box {
+      padding:16px; border:1px solid var(--line);
+      border-radius:14px; background:#fffaf7; margin-bottom:14px;
+    }
+
+    .checkbox-line { display:flex; align-items:center; gap:8px; padding-top:28px; }
+    .checkbox-line input { width:auto; }
+
+    .loading-box {
+      padding:18px; border:1px dashed var(--line); border-radius:14px;
+      background:#fffaf7; text-align:center; color:var(--muted); font-weight:700;
+    }
+
+    /* ── Logo Carousel ──────────────────────────────────────── */
+    .logo-shell { display:flex; justify-content:center; align-items:center; padding:8px 0 2px; }
+    .logo-carousel {
+      position:relative; width:min(100%,520px); height:90px;
+      overflow:hidden; border-radius:18px;
+      background:linear-gradient(135deg,#fff 0%,#fff5ef 100%);
+      border:1px solid var(--line); box-shadow:0 10px 20px rgba(252,81,2,.08);
+    }
+    .logo-track {
+      display:flex; width:200%; height:100%;
+      animation:slideLogos 12s linear infinite;
+    }
+    .logo-item { width:50%; display:flex; align-items:center; justify-content:center; padding:12px; }
+    .logo-item img {
+      max-width:88%; max-height:58px; object-fit:contain;
+      filter:drop-shadow(0 8px 12px rgba(0,0,0,.12));
+    }
+    .logo-overlay {
+      position:absolute; inset:0; pointer-events:none;
+      background:linear-gradient(90deg,#fff8f4 0%,transparent 18%,transparent 82%,#fff8f4 100%);
+    }
+    @keyframes slideLogos {
+      0%,42%  { transform:translateX(0); }
+      50%,92% { transform:translateX(-50%); }
+      100%    { transform:translateX(0); }
+    }
+
+    .legend-mini { font-size:12px; color:var(--muted); }
+
+    /* ── Modal ───────────────────────────────────────────────── */
+    .modal-backdrop {
+      position:fixed; inset:0; background:rgba(0,0,0,.35);
+      display:flex; align-items:center; justify-content:center;
+      padding:20px; z-index:9999;
+    }
+    .modal-card {
+      width:min(1060px,100%); max-height:90vh; overflow:auto;
+      background:#fff; border:1px solid var(--line);
+      border-radius:18px; padding:20px;
+      box-shadow:0 20px 40px rgba(0,0,0,.18);
+    }
+
+    .icon-btn { max-width:130px; }
+
+    /* ── Toast ───────────────────────────────────────────────── */
+    .toast {
+      position:fixed; right:20px; bottom:20px;
+      background:#2a2a2a; color:#fff;
+      padding:14px 16px; border-radius:14px;
+      box-shadow:0 12px 28px rgba(0,0,0,.18);
+      display:none; z-index:10000; max-width:460px;
+    }
+    .toast.show{ display:block; }
+    .toast.err  { background:#991b1b; }
+    .toast.ok   { background:#166534; }
+
+    /* ── Page Loading ────────────────────────────────────────── */
+    .page-loading {
+      position:fixed; inset:0; background:rgba(255,255,255,.72);
+      display:none; align-items:center; justify-content:center;
+      z-index:10001; font-weight:800; color:var(--p);
+    }
+    .page-loading.show { display:flex; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ── Login ──────────────────────────────────────────────── -->
+  <div class="card" id="cardLogin">
+    <div class="logo-shell">
+      <div class="logo-carousel">
+        <div class="logo-track">
+          <div class="logo-item">
+            <img src="https://global-files-nginx.builderall.com/184d08cd-6b72-40d2-882c-efd891ebcb21/f5c399ecf564642e5009ea51be228289ab8b18a12e4e198786ad8732a9d9dca9.png" alt="Logo 1">
+          </div>
+          <div class="logo-item">
+            <img src="https://global-files-nginx.builderall.com/184d08cd-6b72-40d2-882c-efd891ebcb21/6fdc590a2d4e0e292855f965be5be0adb1fb501685f5ac69e3661ede9770696c.png" alt="Logo 2">
+          </div>
+        </div>
+        <div class="logo-overlay"></div>
+      </div>
+    </div>
+    <h1>Sistema de Agendamento</h1>
+    <div class="subtitle">Gestão Multiloja + Acompanhamento de OS</div>
+    <div class="notice">
+      <strong>Login por e-mail cadastrado</strong>
+      Digite abaixo o e-mail cadastrado na aba <b>usuarios</b> da planilha.
+    </div>
+    <label for="emailLogin">E-mail de acesso</label>
+    <input id="emailLogin" type="email" placeholder="usuario@empresa.com" autocomplete="email">
+    <button onclick="fazerLogin()">Entrar</button>
+    <div id="msgLogin" class="msg"></div>
+  </div>
+
+  <!-- ── App Principal ─────────────────────────────────────── -->
+  <div id="app" class="hidden">
+
+    <!-- Topbar -->
+    <div class="card">
+      <div class="topbar">
+        <div>
+          <h2>Sistema de Agendamento</h2>
+          <div class="meta">
+            <div><strong id="nomeUsuario"></strong></div>
+            <div id="perfilUsuario"></div>
+            <div id="emailUsuario"></div>
+            <div id="lojaUsuario"></div>
+            <div id="versaoServidor"></div>
+          </div>
+        </div>
+        <div style="min-width:280px">
+          <div class="pill">Painel Multiloja</div>
+          <div class="legend-mini" style="margin-top:6px;">
+            Vermelho: não compareceu &bull; Amarelo: compareceu sem compra &bull; Verde: compareceu e comprou
+          </div>
+          <div style="height:10px"></div>
+          <button class="secondary" onclick="logout()">Sair</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Dashboard -->
+    <div class="card">
+      <h3>Dashboard Operacional</h3>
+      <div class="row-4">
+        <div class="kpi"><div class="label">Agendados/Confirmados</div><div class="value" id="kAgendados">0</div></div>
+        <div class="kpi"><div class="label">Compareceram</div><div class="value" id="kCompareceram">0</div></div>
+        <div class="kpi"><div class="label">Não Compareceram</div><div class="value" id="kNaoCompareceram">0</div></div>
+        <div class="kpi"><div class="label">Concluídos</div><div class="value" id="kConcluidos">0</div></div>
+        <div class="kpi"><div class="label">OS Ativas</div><div class="value" id="kOsAtivas">0</div></div>
+        <div class="kpi"><div class="label">OS Atrasadas</div><div class="value" id="kAtrasadas">0</div></div>
+        <div class="kpi hidden" id="cardFaturamentoKpi"><div class="label">Faturamento</div><div class="value" id="kFaturamento">R$ 0,00</div></div>
+        <div class="kpi"><div class="label">Origem top</div><div class="value" id="kOrigemTop">—</div></div>
+      </div>
+      <div class="row-3 hidden" id="dashboardCentral" style="margin-top:14px;">
+        <div class="kpi"><div class="label">OS 7 dias</div><div class="value" id="kOs7">0 / 0</div></div>
+        <div class="kpi"><div class="label">OS 15 dias</div><div class="value" id="kOs15">0 / 0</div></div>
+        <div class="kpi"><div class="label">OS 30 dias</div><div class="value" id="kOs30">0 / 0</div></div>
+      </div>
+    </div>
+
+    <!-- Novo Agendamento -->
+    <div class="card hidden" id="cardAgendamento">
+      <h3>Novo Agendamento</h3>
+      <div class="notice">
+        <strong>Regras de horário</strong>
+        Segunda a sexta: <b>10:00 às 18:00</b><br>
+        Sábado: <b>10:00 às 16:00</b><br>
+        Domingo e feriados: <b>bloqueados</b>
+      </div>
+      <div class="row">
+        <div><label>Origem *</label><select id="origem"></select></div>
+        <div><label>Nome completo *</label><input id="nomeCompleto" type="text" placeholder="Nome do cliente"></div>
+      </div>
+      <div class="row">
+        <div><label>WhatsApp *</label><input id="whatsApp" type="text" placeholder="13999999999"></div>
+        <div><label>Email *</label><input id="emailCliente" type="email" placeholder="cliente@email.com"></div>
+      </div>
+      <div class="row">
+        <div><label>Loja *</label><select id="loja" onchange="carregarOptometristas()"></select></div>
+        <div><label>Optometrista *</label><select id="optometrista"></select></div>
+      </div>
+      <div class="row">
+        <div><label>Data do agendamento *</label><input id="dataAgendamento" type="date"></div>
+        <div><label>Horário *</label><input id="horario" type="time"></div>
+      </div>
+      <div class="row">
+        <div>
+          <label>Status *</label>
+          <select id="statusAgenda">
+            <option value="">Selecione</option>
+            <option>Agendado</option>
+            <option>Confirmado</option>
+          </select>
+        </div>
+        <div>
+          <label>Tag de acesso</label>
+          <select id="accessTag"></select>
+          <div class="legend-mini" style="margin-top:6px;">Tags de origem, perfil, prioridade, fluxo, comercial, loja e operação.</div>
+        </div>
+      </div>
+      <div class="row">
+        <div><label>Proprietário</label><input id="responsavelTela" type="text" disabled></div>
+        <div><label>Observação *</label><textarea id="observacao" placeholder="Informações importantes"></textarea></div>
+      </div>
+      <div class="row">
+        <div><button onclick="salvarAgendamento()">Salvar agendamento</button></div>
+        <div><button class="secondary" onclick="limparFormulario()">Limpar</button></div>
+      </div>
+      <div id="msgForm" class="msg"></div>
+    </div>
+
+    <!-- Painel Principal OS -->
+    <div class="card">
+      <div class="topbar" style="margin-bottom:14px;">
+        <h3 style="margin:0;">Painel de Acompanhamento de OS</h3>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;min-width:250px;">
+          <button class="btn-relatorio" onclick="gerarRelatorioCSV()">Relatório Operacional</button>
+          <button class="btn-relatorio hidden" id="btnLeadTime" onclick="carregarLeadTime()">Lead Time</button>
+          <button class="btn-relatorio hidden" id="btnHistorico" onclick="carregarHistorico()">Histórico</button>
+          <button class="btn-relatorio secondary hidden" id="btnSyncSistema" onclick="sincronizarSistema()">Sincronizar sistema</button>
+        </div>
+      </div>
+
+      <div class="filters-box">
+        <div class="row-4">
+          <div><label>Data inicial</label><input id="filtroDataDe" type="date" onchange="recarregarComFiltros()"></div>
+          <div><label>Data final</label><input id="filtroDataAte" type="date" onchange="recarregarComFiltros()"></div>
+          <div>
+            <label>Status agendamento</label>
+            <select id="filtroStatus" onchange="recarregarComFiltros()">
+              <option value="">Todos</option>
+              <option>Agendado</option><option>Confirmado</option><option>Compareceu</option>
+              <option>Não Compareceu</option><option>OS em Andamento</option>
+              <option>Concluído</option><option>Cancelado</option>
+            </select>
+          </div>
+          <div>
+            <label>Status OS</label>
+            <select id="filtroStatusOS" onchange="recarregarComFiltros()">
+              <option value="">Todos</option>
+              <option>Aberta</option><option>Em produção</option><option>Recebida</option>
+              <option>Pronta</option><option>Entregue</option><option>Concluído</option>
+              <option>Cancelada</option><option>Cancelado</option>
+            </select>
+          </div>
+        </div>
+        <div class="row-4">
+          <div><label>Cliente</label><input id="filtroCliente" type="text" oninput="debouncedReload()" placeholder="Nome, WhatsApp ou e-mail"></div>
+          <div><label>Loja</label><select id="filtroLoja" onchange="recarregarComFiltros()"></select></div>
+          <div><label>Optometrista</label><input id="filtroOptometrista" type="text" oninput="debouncedReload()" placeholder="Digite o nome"></div>
+          <div><label>Usuário / Proprietário</label><select id="filtroOwner" onchange="recarregarComFiltros()"></select></div>
+        </div>
+        <div class="row-4">
+          <div><label>Tag de acesso</label><select id="filtroAccessTag" onchange="recarregarComFiltros()"></select></div>
+          <div class="checkbox-line"><input id="filtroMeus" type="checkbox" onchange="recarregarComFiltros()"><label for="filtroMeus" style="margin:0;">Meus Serviços</label></div>
+          <div class="checkbox-line"><input id="filtroMinhasOSAtivas" type="checkbox" onchange="recarregarComFiltros()"><label for="filtroMinhasOSAtivas" style="margin:0;">Minhas OS Ativas</label></div>
+          <div>
+            <label>Período relatório</label>
+            <select id="filtroPeriodoDias" onchange="recarregarComFiltros()">
+              <option value="">Sem período</option>
+              <option value="7">7 dias</option><option value="15">15 dias</option>
+              <option value="30">30 dias</option><option value="45">45 dias</option>
+              <option value="90">90 dias</option><option value="120">120 dias</option>
+            </select>
+          </div>
+        </div>
+        <div class="row">
+          <div><label>&nbsp;</label><button class="secondary" onclick="limparFiltros()">Limpar filtros</button></div>
+        </div>
+      </div>
+
+      <div class="scroll-x">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th><th>Data Registro</th><th>Cliente</th><th>Proprietário</th>
+              <th>Dia Agendado</th><th>Status Ag.</th><th>Presença</th><th>Nº OS</th>
+              <th>Status OS</th><th>Entrada / Entrega / Finalização</th>
+              <th>Loja</th><th>Optometrista</th><th>Lead Time</th>
+              <th>Valor</th><th>Desconto</th><th>Tag</th><th>Ações</th>
+            </tr>
+          </thead>
+          <tbody id="agendaBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Lead Time -->
+    <div class="card hidden" id="cardLeadTime">
+      <h3>Relatório de Lead Time</h3>
+      <div class="row-3">
+        <div class="kpi"><div class="label">Média Lead Time</div><div class="value" id="leadTimeMedia">0</div></div>
+        <div class="kpi"><div class="label">Linhas avaliadas</div><div class="value" id="leadTimeQtd">0</div></div>
+      </div>
+      <div class="scroll-x">
+        <table>
+          <thead><tr><th>ID</th><th>Cliente</th><th>Loja</th><th>Vendedor</th><th>Nº OS</th><th>Abertura</th><th>Finalização</th><th>Lead Time</th></tr></thead>
+          <tbody id="leadTimeBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Financeiro -->
+    <div class="card hidden" id="cardFinanceiro">
+      <div class="topbar" style="margin-bottom:14px;">
+        <h3 style="margin:0;">Módulo de Faturamento</h3>
+        <button class="btn-relatorio hidden" id="btnExportFinance" onclick="exportarFaturamentoCSV()">Exportar faturamento</button>
+      </div>
+      <div class="row-4">
+        <div class="kpi"><div class="label">Total faturado</div><div class="value" id="finTotal">R$ 0,00</div></div>
+        <div class="kpi"><div class="label">Total desconto</div><div class="value" id="finDesconto">R$ 0,00</div></div>
+        <div class="kpi"><div class="label">OS com valor</div><div class="value" id="finQtd">0</div></div>
+        <div class="kpi"><div class="label">Ticket médio</div><div class="value" id="finTicket">R$ 0,00</div></div>
+      </div>
+      <div class="scroll-x">
+        <table>
+          <thead><tr><th>ID</th><th>Cliente</th><th>Nº OS</th><th>Status OS</th><th>Valor</th><th>Desconto</th><th>Vendedor</th><th>Proprietário</th><th>Loja</th><th>Finalização</th></tr></thead>
+          <tbody id="financeBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Modal Editar Agendamento / OS -->
+    <div id="editModal" class="hidden">
+      <div class="modal-backdrop">
+        <div class="modal-card">
+          <div class="topbar"><h3 style="margin:0;">Editar Agendamento / OS</h3><button class="secondary icon-btn" onclick="fecharModalEdicao()">Fechar</button></div>
+          <div class="row">
+            <div><label>ID do Agendamento</label><input id="editId" type="text" disabled></div>
+            <div><label>Data de Registro</label><input id="editDataCadastro" type="text" disabled></div>
+          </div>
+          <div class="row">
+            <div><label>Origem</label><input id="editOrigem" type="text"></div>
+            <div><label>Nome completo</label><input id="editNomeCompleto" type="text"></div>
+          </div>
+          <div class="row">
+            <div><label>WhatsApp</label><input id="editWhatsApp" type="text"></div>
+            <div><label>Email</label><input id="editEmail" type="email"></div>
+          </div>
+          <div class="row">
+            <div><label>Loja</label><select id="editLoja"></select></div>
+            <div><label>Optometrista</label><input id="editOptometrista" type="text"></div>
+          </div>
+          <div class="row">
+            <div><label>Data do Agendamento</label><input id="editDataAgendamento" type="date"></div>
+            <div><label>Horário</label><input id="editHorario" type="time"></div>
+          </div>
+          <div class="row">
+            <div>
+              <label>Status do Agendamento</label>
+              <select id="editStatusAgenda">
+                <option>Agendado</option><option>Confirmado</option><option>Compareceu</option>
+                <option>Não Compareceu</option><option>OS em Andamento</option>
+                <option>Concluído</option><option>Cancelado</option>
+              </select>
+            </div>
+            <div>
+              <label>Status da OS</label>
+              <select id="editStatusOS">
+                <option value=""></option>
+                <option>Aberta</option><option>Em produção</option><option>Recebida</option>
+                <option>Pronta</option><option>Entregue</option><option>Concluído</option>
+                <option>Cancelada</option><option>Cancelado</option>
+              </select>
+            </div>
+          </div>
+          <div class="row">
+            <div><label>Número da OS</label><input id="editNumeroOS" type="text"></div>
+            <div><label>Data de Abertura da OS</label><input id="editDataAberturaOS" type="date"></div>
+          </div>
+          <div class="row">
+            <div><label>Data de Entrada da OS</label><input id="editDataEntradaOS" type="date"></div>
+            <div><label>Data prevista de entrega</label><input id="editDataEntregaOS" type="date"></div>
+          </div>
+          <div class="row">
+            <div><label>Data de Finalização da OS</label><input id="editDataFinalizacaoOS" type="date"></div>
+            <div><label>Vendedor Nome</label><input id="editVendedorNome" type="text"></div>
+          </div>
+          <div class="row">
+            <div><label>Valor Venda</label><input id="editValorVenda" type="number" min="0" step="0.01"></div>
+            <div><label>Desconto</label><input id="editDesconto" type="number" min="0" step="0.01"></div>
+          </div>
+          <div><label>Observação</label><textarea id="editObservacao"></textarea></div>
+          <div class="row" style="margin-top:14px;">
+            <div><button onclick="salvarEdicaoLinha()">Salvar edição</button></div>
+            <div><button class="secondary" onclick="fecharModalEdicao()">Cancelar</button></div>
+          </div>
+          <div id="msgEdit" class="msg"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal OS Dedicado -->
+    <div id="osModal" class="hidden">
+      <div class="modal-backdrop">
+        <div class="modal-card">
+          <div class="topbar">
+            <h3 style="margin:0;">Registrar / Atualizar OS</h3>
+            <button class="secondary icon-btn" onclick="fecharModalOS()">Fechar</button>
+          </div>
+          <input type="hidden" id="osIdAgendamento">
+          <div class="row">
+            <div><label>Número da OS</label><input id="osNumeroOS" type="text" placeholder="Ex: 2025-001"></div>
+            <div>
+              <label>Status da OS</label>
+              <select id="osStatusOS">
+                <option value="">Selecione</option>
+                <option>Aberta</option><option>Em produção</option><option>Recebida</option>
+                <option>Pronta</option><option>Entregue</option><option>Concluído</option><option>Cancelada</option>
+              </select>
+            </div>
+          </div>
+          <div class="row">
+            <div><label>Data de Abertura</label><input id="osDataAbertura" type="date"></div>
+            <div><label>Data de Entrada (laboratório)</label><input id="osDataEntrada" type="date"></div>
+          </div>
+          <div class="row">
+            <div><label>Data Prevista de Entrega</label><input id="osDataEntrega" type="date"></div>
+            <div><label>Data de Finalização</label><input id="osDataFinalizacao" type="date"></div>
+          </div>
+          <div class="row" id="osFinanceFields">
+            <div><label>Valor da OS (R$)</label><input id="osValorVenda" type="number" min="0" step="0.01" placeholder="0,00"></div>
+            <div><label>Desconto (R$)</label><input id="osDesconto" type="number" min="0" step="0.01" placeholder="0,00"></div>
+          </div>
+          <div><label>Vendedor responsável</label><input id="osVendedorNome" type="text" placeholder="Nome do vendedor"></div>
+          <div class="row" style="margin-top:14px;">
+            <div><button onclick="salvarModalOS()">Salvar OS</button></div>
+            <div><button class="secondary" onclick="fecharModalOS()">Cancelar</button></div>
+          </div>
+          <div id="msgOS" class="msg"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Histórico -->
+    <div class="card hidden" id="cardHistorico">
+      <h3>Histórico Operacional</h3>
+      <div class="scroll-x">
+        <table>
+          <thead><tr><th>Data</th><th>Loja</th><th>Cliente</th><th>Tipo</th><th>Ação</th><th>Campo</th><th>Antes</th><th>Depois</th><th>Usuário</th><th>Perfil</th></tr></thead>
+          <tbody id="historicoBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Diagnóstico Admin -->
+    <div class="card hidden" id="cardDiagnostico">
+      <h3>Diagnóstico Admin</h3>
+      <button onclick="executarDiagnostico()">Testar backend</button>
+      <div style="height:12px"></div>
+      <pre id="diagnosticoOut">Aguardando...</pre>
+    </div>
+
+  </div><!-- /#app -->
+</div><!-- /.wrap -->
+
+<div id="toast" class="toast"></div>
+<div id="pageLoading" class="page-loading">Processando...</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+//  ESTADO GLOBAL
+// ═══════════════════════════════════════════════════════════════
+var state = {
+  user: null, session: {}, lojas: [], origens: [],
+  agendamentos: [], dashboard: {}, owners: [],
+  accessTags: [], editingRow: null, reloadTimer: null
+};
+
+document.addEventListener('DOMContentLoaded', function() {
+  applyDefaultDateWindow90Dias(false);
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  UTILITÁRIOS
+// ═══════════════════════════════════════════════════════════════
+function byId(id) { return document.getElementById(id); }
+function roleName()    { return String(state.user && state.user.perfil || '').toLowerCase(); }
+function canFinance()  { return !!(state.user && state.user.permissions && state.user.permissions.canViewFinance); }
+function canManageOS() { return !!(state.user && state.user.permissions && state.user.permissions.canManageOS); }
+
+// ── API: substitui google.script.run ─────────────────────────
+// Chama POST /api/gas → Node.js proxeia para GAS
+function gas(fnName) {
+  var args = Array.prototype.slice.call(arguments, 1);
+  return fetch('/api/gas', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fn: fnName, args: args })
+  })
+  .then(function(r) {
+    if (!r.ok) throw new Error('Erro de rede: HTTP ' + r.status);
+    return r.json();
+  })
+  .then(function(data) {
+    if (data && data.ok === false) throw new Error(data.error || data.message || 'Erro na API GAS');
+    // GAS retorna { ok: true, result: <valor original da função> }
+    return (data && data.result !== undefined) ? data.result : data;
+  });
+}
+
+function showLoading(show) { byId('pageLoading').classList.toggle('show', !!show); }
+
+function setMsg(id, text, type) {
+  var el = byId(id);
+  if (!el) return;
+  el.className = 'msg ' + (type || '');
+  el.textContent = text || '';
+}
+
+function toast(text, type) {
+  var el = byId('toast');
+  el.textContent = text || '';
+  el.className = 'toast show ' + (type || '');
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(function() { el.className = 'toast'; }, 4200);
+}
+
+function escapeHtml(v) {
+  return String(v == null ? '' : v)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+}
+
+function escapeJs(v) {
+  return String(v == null ? '' : v)
+    .replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'\\"');
+}
+
+function money(v) {
+  return Number(v || 0).toLocaleString('pt-BR', { style:'currency', currency:'BRL' });
+}
+
+function normalize(v)    { return String(v == null ? '' : v).trim().toLowerCase(); }
+function normalizeKey(v) {
+  return String(v == null ? '' : v).trim().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
+}
+
+function formatDateBR(value) {
+  var s = String(value || '').trim();
+  if (!s) return '';
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) return s;
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    var p = s.slice(0,10).split('-');
+    return p[2]+'/'+p[1]+'/'+p[0];
+  }
+  if (/^\d{8}$/.test(s)) return s.slice(6,8)+'/'+s.slice(4,6)+'/'+s.slice(0,4);
+  return s;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  LOGIN / SESSÃO
+// ═══════════════════════════════════════════════════════════════
+function fazerLogin() {
+  var email = String((byId('emailLogin') && byId('emailLogin').value) || '').trim();
+  if (!email) {
+    setMsg('msgLogin','Informe o e-mail cadastrado na planilha para acessar.','err');
+    return;
+  }
+  showLoading(true);
+  gas('loginSeguro', email)
+    .then(function(res) {
+      if (!res || !res.ok) throw new Error((res && res.message) || 'Falha no login.');
+      state.user    = res.user;
+      state.session = res.session || {};
+
+      byId('cardLogin').classList.add('hidden');
+      byId('app').classList.remove('hidden');
+      byId('nomeUsuario').textContent    = res.user.nome    || '';
+      byId('perfilUsuario').textContent  = 'Perfil: '      + (res.user.perfil || '');
+      byId('emailUsuario').textContent   = 'E-mail: '      + (res.user.email  || '');
+      byId('lojaUsuario').textContent    = 'Loja: '        + ((res.user.loja && res.user.loja !== '') ? res.user.loja : 'Todas');
+      byId('versaoServidor').textContent = 'Versão do servidor: ' + (res.serverVersion || '');
+      byId('responsavelTela').value      = res.user.nome   || '';
+
+      aplicarPermissoesTela();
+      return carregarInfoBase();
+    })
+    .then(function() { return carregarAgendaEDashboard(); })
+    .then(function() { if (canFinance()) return carregarFaturamento(); })
+    .catch(function(err) {
+      setMsg('msgLogin', err.message || String(err), 'err');
+      toast(err.message || String(err), 'err');
+    })
+    .finally(function() { showLoading(false); });
+}
+
+function logout() { location.reload(); }
+
+// ═══════════════════════════════════════════════════════════════
+//  PERMISSÕES DE TELA
+// ═══════════════════════════════════════════════════════════════
+function aplicarPermissoesTela() {
+  var p = state.user.permissions || {};
+  if (p.isAdmin)                byId('cardDiagnostico').classList.remove('hidden');
+  if (p.canCreateAgendamento)   byId('cardAgendamento').classList.remove('hidden');
+  if (p.canViewFinance) {
+    byId('cardFinanceiro').classList.remove('hidden');
+    byId('cardFaturamentoKpi').classList.remove('hidden');
+  }
+  if (p.canExportFinance) byId('btnExportFinance').classList.remove('hidden');
+  if (['admin','atendimento central','gerente de loja'].indexOf(roleName()) > -1) byId('btnLeadTime').classList.remove('hidden');
+  if (p.isAdmin || roleName() === 'gerente de loja') byId('btnHistorico').classList.remove('hidden');
+  if (p.isAdmin) byId('btnSyncSistema').classList.remove('hidden');
+  if (['consultor de vendas','vendedor','outros','optometrista'].indexOf(roleName()) > -1) byId('filtroMeus').checked = true;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  CARREGAMENTO DE DADOS
+// ═══════════════════════════════════════════════════════════════
+function carregarInfoBase() {
+  var emailReq = String((state.user && state.user.email) || '').trim();
+  return gas('getInfoInicial', emailReq).then(function(res) {
+    if (!res || !res.ok) throw new Error((res && res.message) || 'Erro ao carregar dados base.');
+    state.owners     = Array.isArray(res.owners)     ? res.owners     : [];
+    state.accessTags = Array.isArray(res.accessTags) ? res.accessTags : [];
+    state.lojas      = Array.isArray(res.lojas)      ? res.lojas      : [];
+    state.origens    = Array.isArray(res.origens)    ? res.origens    : [];
+    preencherOwners();
+    preencherAccessTags();
+    preencherLojas();
+    preencherFiltroLojas();
+    preencherOrigens();
+    preencherEditLojas();
+  });
+}
+
+function carregarAgendaEDashboard() {
+  state.agendamentos = [];
+  byId('agendaBody').innerHTML = '<tr><td colspan="17"><div class="loading-box">Carregando agendamentos...</div></td></tr>';
+  return Promise.all([
+    gas('getAgendamentos', state.user, coletarFiltros()).then(function(rows) {
+      state.agendamentos = Array.isArray(rows) ? rows : [];
+      renderAgenda(state.agendamentos);
+    }),
+    gas('getDashboard', state.user).then(function(d) {
+      state.dashboard = d || {};
+      preencherDashboard();
+    })
+  ]).catch(function(err) {
+    byId('agendaBody').innerHTML = '<tr><td colspan="17">Erro ao carregar agendamentos.</td></tr>';
+    setMsg('msgForm','Erro ao carregar agenda: '+(err.message||err),'err');
+  });
+}
+
+function recarregarComFiltros() {
+  byId('agendaBody').innerHTML = '<tr><td colspan="17"><div class="loading-box">Carregando...</div></td></tr>';
+  gas('getAgendamentos', state.user, coletarFiltros())
+    .then(function(rows) {
+      state.agendamentos = Array.isArray(rows) ? rows : [];
+      renderAgenda(state.agendamentos);
+    })
+    .catch(function(err) {
+      byId('agendaBody').innerHTML = '<tr><td colspan="17">Erro ao aplicar filtros.</td></tr>';
+    });
+  gas('getDashboard', state.user).then(function(d) {
+    state.dashboard = d || {};
+    preencherDashboard();
+  }).catch(function(){});
+  if (canFinance()) carregarFaturamento();
+}
+
+function debouncedReload() {
+  clearTimeout(state.reloadTimer);
+  state.reloadTimer = setTimeout(recarregarComFiltros, 350);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  DASHBOARD
+// ═══════════════════════════════════════════════════════════════
+function preencherDashboard() {
+  var d = state.dashboard || {};
+  byId('kAgendados').textContent       = d.agendados       || 0;
+  byId('kCompareceram').textContent    = d.compareceram    || 0;
+  byId('kNaoCompareceram').textContent = d.naoCompareceram || 0;
+  byId('kConcluidos').textContent      = d.concluidos      || 0;
+  byId('kOsAtivas').textContent        = d.osAtivas        || 0;
+  byId('kAtrasadas').textContent       = d.atrasadas       || 0;
+  byId('kOrigemTop').textContent       = d.origemTop       || '—';
+  if (canFinance()) byId('kFaturamento').textContent = money(d.faturamento || 0);
+  if (['admin','atendimento central','gerente de loja'].indexOf(roleName()) > -1) {
+    byId('dashboardCentral').classList.remove('hidden');
+    byId('kOs7').textContent  = ((d.os7  || {}).opened||0)+' / '+((d.os7  || {}).finalized||0);
+    byId('kOs15').textContent = ((d.os15 || {}).opened||0)+' / '+((d.os15 || {}).finalized||0);
+    byId('kOs30').textContent = ((d.os30 || {}).opened||0)+' / '+((d.os30 || {}).finalized||0);
+  }
+}
+
+function carregarFaturamento() {
+  if (!canFinance()) return Promise.resolve();
+  return gas('getFinancePanel', state.user, coletarFiltros()).then(function(res) {
+    byId('finTotal').textContent   = money(res.totalFaturado  || 0);
+    byId('finDesconto').textContent= money(res.totalDesconto  || 0);
+    byId('finQtd').textContent     = String(res.totalOSComValor || 0);
+    byId('finTicket').textContent  = money(res.ticketMedio    || 0);
+    var rows = Array.isArray(res.rows) ? res.rows : [];
+    byId('financeBody').innerHTML = rows.map(function(r) {
+      return '<tr><td>'+escapeHtml(r.ID)+'</td><td>'+escapeHtml(r.Cliente)+'</td><td>'+escapeHtml(r.NumeroOS)+'</td><td>'+escapeHtml(r.StatusOS)+'</td><td>'+money(r.ValorVenda||0)+'</td><td>'+money(r.Desconto||0)+'</td><td>'+escapeHtml(r.VendedorNome||'')+'</td><td>'+escapeHtml(r.ProprietarioNome)+'</td><td>'+escapeHtml(r.Loja)+'</td><td>'+escapeHtml(formatDateBR(r.DataFinalizacaoOS))+'</td></tr>';
+    }).join('') || '<tr><td colspan="10">Nenhum dado financeiro.</td></tr>';
+  }).catch(function(err) { setMsg('msgForm', err.message||String(err), 'err'); });
+}
+
+function carregarLeadTime() {
+  if (['admin','atendimento central','gerente de loja'].indexOf(roleName()) === -1) return;
+  gas('getLeadTimeReport', state.user, coletarFiltros()).then(function(res) {
+    byId('cardLeadTime').classList.remove('hidden');
+    byId('leadTimeMedia').textContent = Number(res.mediaLeadTime||0).toFixed(1);
+    byId('leadTimeQtd').textContent   = String(res.totalLinhas||0);
+    var rows = Array.isArray(res.rows) ? res.rows : [];
+    byId('leadTimeBody').innerHTML = rows.map(function(r) {
+      return '<tr><td>'+escapeHtml(r.ID)+'</td><td>'+escapeHtml(r.Cliente)+'</td><td>'+escapeHtml(r.Loja)+'</td><td>'+escapeHtml(r.Vendedor)+'</td><td>'+escapeHtml(r.NumeroOS)+'</td><td>'+escapeHtml(formatDateBR(r.Abertura))+'</td><td>'+escapeHtml(formatDateBR(r.Finalizacao))+'</td><td>'+escapeHtml(r.LeadTimeDias)+'</td></tr>';
+    }).join('') || '<tr><td colspan="8">Nenhum dado.</td></tr>';
+  }).catch(function(err) { setMsg('msgForm', err.message||String(err), 'err'); });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  PREENCHIMENTO DE SELECTS
+// ═══════════════════════════════════════════════════════════════
+function preencherOrigens() {
+  var html = '<option value="">Selecione a origem</option>';
+  html += state.origens.length ? state.origens.map(function(o) {
+    return '<option value="'+escapeHtml(o.Origem)+'">'+escapeHtml(o.Origem)+'</option>';
+  }).join('') : '<option value="">Nenhuma origem encontrada</option>';
+  byId('origem').innerHTML = html;
+}
+
+function preencherLojas() {
+  var el   = byId('loja');
+  var user = state.user || {};
+  var somenteMinha = !(user.permissions && user.permissions.canViewAll) && user.loja && user.loja !== 'Todas';
+  var html = somenteMinha ? '' : '<option value="">Selecione a loja</option>';
+  html += state.lojas.length ? state.lojas.map(function(l) {
+    return '<option value="'+escapeHtml(l.Loja)+'">'+escapeHtml(l.Loja)+'</option>';
+  }).join('') : '<option value="">Nenhuma loja</option>';
+  el.innerHTML = html;
+  if (somenteMinha) { el.value = user.loja; el.disabled = true; carregarOptometristas(); }
+  else              { el.disabled = false; }
+}
+
+function preencherEditLojas() {
+  var html = '<option value="">Selecione a loja</option>';
+  html += state.lojas.map(function(l) {
+    return '<option value="'+escapeHtml(l.Loja)+'">'+escapeHtml(l.Loja)+'</option>';
+  }).join('');
+  byId('editLoja').innerHTML = html;
+}
+
+function preencherFiltroLojas() {
+  var el   = byId('filtroLoja');
+  var html = '<option value="">Todas as lojas</option>';
+  html += state.lojas.map(function(l) {
+    return '<option value="'+escapeHtml(l.Loja)+'">'+escapeHtml(l.Loja)+'</option>';
+  }).join('');
+  el.innerHTML = html;
+  if (['optometrista','consultor de vendas','vendedor','outros','gerente de loja'].indexOf(roleName()) > -1 && state.user && state.user.loja && state.user.loja !== 'Todas') {
+    el.value = state.user.loja; el.disabled = true;
+  } else { el.disabled = false; }
+}
+
+function preencherOwners() {
+  var el   = byId('filtroOwner');
+  var role = roleName();
+  if (role === 'optometrista') {
+    el.innerHTML = '<option value="">Filtrado automaticamente pela sua loja</option>';
+    el.value = ''; el.disabled = true; return;
+  }
+  var owners    = state.owners || [];
+  var lojaUser  = normalizeKey(state.user && state.user.loja);
+  if (['gerente de loja','vendedor','consultor de vendas','outros'].indexOf(role) > -1) {
+    owners = owners.filter(function(o) {
+      var lo = normalizeKey(o.loja || o.Loja || '');
+      return !lo || lo === lojaUser;
+    });
+  }
+  var labelInicial = role === 'gerente de loja' ? 'Todos da minha loja' : 'Todos os proprietários';
+  var html = '<option value="">'+labelInicial+'</option>';
+  html += owners.map(function(o) {
+    var loja = o.loja || o.Loja || '';
+    return '<option value="'+escapeHtml(o.id)+'">'+escapeHtml(o.nome||'')+' — '+escapeHtml(o.perfil||'')+(loja?' — '+escapeHtml(loja):'')+'</option>';
+  }).join('');
+  el.innerHTML = html; el.disabled = false;
+}
+
+function preencherAccessTags() {
+  var tags = Array.isArray(state.accessTags) ? state.accessTags : [];
+  var seen = {}, unique = [];
+  tags.forEach(function(t) {
+    var id   = String((t && t.id)   || '').trim().toLowerCase();
+    var nome = String((t && t.nome) || '').trim();
+    if (!id || seen[id]) return;
+    seen[id] = true; unique.push({ id: id, nome: nome || id });
+  });
+  var opts = unique.map(function(t) {
+    return '<option value="'+escapeHtml(t.id)+'">'+escapeHtml(t.nome)+'</option>';
+  }).join('');
+  byId('accessTag').innerHTML      = '<option value="">Sem tag</option>'       + opts;
+  byId('filtroAccessTag').innerHTML= '<option value="">Todas as tags</option>' + opts;
+}
+
+function carregarOptometristas() {
+  var loja = byId('loja').value;
+  var el   = byId('optometrista');
+  if (!loja) { el.innerHTML = '<option value="">Selecione a loja primeiro</option>'; return; }
+  el.innerHTML = '<option value="">Carregando...</option>';
+  gas('getOptometristasPorLoja', loja).then(function(lista) {
+    var html = '<option value="">Selecione</option>';
+    html += (lista && lista.length) ? lista.map(function(o) {
+      return '<option value="'+escapeHtml(o.Optometrista)+'">'+escapeHtml(o.Optometrista)+'</option>';
+    }).join('') : '<option value="">Nenhum optometrista</option>';
+    el.innerHTML = html;
+  }).catch(function(err) {
+    el.innerHTML = '<option value="">Erro ao carregar</option>';
+    setMsg('msgForm', err.message||String(err), 'err');
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  FILTROS
+// ═══════════════════════════════════════════════════════════════
+function coletarFiltros() {
+  var role   = roleName();
+  var filtros = {
+    dataDe:        byId('filtroDataDe').value.trim(),
+    dataAte:       byId('filtroDataAte').value.trim(),
+    status:        byId('filtroStatus').value.trim(),
+    statusOS:      byId('filtroStatusOS').value.trim(),
+    cliente:       byId('filtroCliente').value.trim(),
+    loja:          byId('filtroLoja').value.trim(),
+    optometrista:  byId('filtroOptometrista').value.trim(),
+    ownerId:       byId('filtroOwner').value.trim(),
+    accessTag:     byId('filtroAccessTag').value.trim(),
+    periodoDias:   byId('filtroPeriodoDias').value.trim(),
+    meus:          byId('filtroMeus').checked ? 'true' : 'false',
+    minhasOSAtivas:byId('filtroMinhasOSAtivas').checked ? 'true' : 'false',
+    userEmail:     String((state.user && state.user.email)  || '').trim(),
+    userId:        String((state.user && state.user.id)     || '').trim(),
+    loginEmail:    String((state.user && (state.user.loginKey || state.user.email)) || '').trim(),
+    userNome:      String((state.user && state.user.nome)   || '').trim(),
+    lojaUsuario:   String((state.user && state.user.loja)   || '').trim()
+  };
+  if (['optometrista','consultor de vendas','vendedor','outros','gerente de loja'].indexOf(role) > -1 && state.user && state.user.loja && state.user.loja !== 'Todas') {
+    filtros.loja = state.user.loja;
+  }
+  if (role === 'gerente de loja') filtros.meus = 'false';
+  if (role === 'optometrista')    filtros.ownerId = '';
+  return filtros;
+}
+
+function limparFiltros() {
+  ['filtroCliente','filtroOptometrista','filtroStatus','filtroStatusOS','filtroOwner','filtroAccessTag','filtroPeriodoDias'].forEach(function(id) { byId(id).value = ''; });
+  byId('filtroMinhasOSAtivas').checked = false;
+  byId('filtroMeus').checked = ['consultor de vendas','vendedor','outros','optometrista'].indexOf(roleName()) > -1;
+  if (state.user && state.user.loja && state.user.loja !== 'Todas') byId('filtroLoja').value = state.user.loja;
+  else byId('filtroLoja').value = '';
+  applyDefaultDateWindow90Dias(true);
+  recarregarComFiltros();
+}
+
+function applyDefaultDateWindow90Dias(force) {
+  var deEl  = byId('filtroDataDe');
+  var ateEl = byId('filtroDataAte');
+  if (!deEl || !ateEl) return;
+  if (force || (!deEl.value && !ateEl.value)) {
+    var hoje = new Date();
+    var de   = new Date();
+    de.setDate(hoje.getDate() - 89);
+    deEl.value  = de.toISOString().slice(0,10);
+    ateEl.value = hoje.toISOString().slice(0,10);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  AGENDAMENTOS — CRIAR
+// ═══════════════════════════════════════════════════════════════
+function validarHorarioVisual() {
+  var data    = byId('dataAgendamento').value || '';
+  var horario = byId('horario').value         || '';
+  if (!data || !horario) return null;
+  var d       = new Date(data + 'T12:00:00');
+  var day     = d.getDay();
+  var parts   = horario.split(':').map(Number);
+  var minutes = parts[0] * 60 + parts[1];
+  if (day === 0) return 'Domingo não está disponível para agendamento.';
+  if (day >= 1 && day <= 5 && (minutes < 600 || minutes > 1080)) return 'De segunda a sexta, escolha entre 10:00 e 18:00.';
+  if (day === 6 && (minutes < 600 || minutes > 960))              return 'Aos sábados, escolha entre 10:00 e 16:00.';
+  return null;
+}
+
+function salvarAgendamento() {
+  var erroHorario = validarHorarioVisual();
+  if (erroHorario) { setMsg('msgForm', erroHorario, 'err'); return; }
+  var payload = {
+    origem:          byId('origem').value.trim(),
+    nomeCompleto:    byId('nomeCompleto').value.trim(),
+    whatsApp:        byId('whatsApp').value.trim(),
+    email:           byId('emailCliente').value.trim(),
+    loja:            byId('loja').value.trim(),
+    optometrista:    byId('optometrista').value.trim(),
+    dataAgendamento: byId('dataAgendamento').value.trim(),
+    horario:         byId('horario').value.trim(),
+    observacao:      byId('observacao').value.trim(),
+    statusAgenda:    byId('statusAgenda').value.trim(),
+    accessTags:      byId('accessTag').value.trim()
+  };
+  showLoading(true);
+  gas('salvarAgendamento', payload, state.user).then(function(res) {
+    if (!res || !res.ok) throw new Error((res && res.message) || 'Falha ao salvar.');
+    setMsg('msgForm', res.message || 'Agendamento salvo.', 'ok');
+    toast('Agendamento salvo com sucesso.', 'ok');
+    limparFormulario(false);
+    return carregarAgendaEDashboard();
+  }).catch(function(err) {
+    setMsg('msgForm', err.message||String(err), 'err');
+  }).finally(function() { showLoading(false); });
+}
+
+function limparFormulario(clearMsg) {
+  if (clearMsg === undefined) clearMsg = true;
+  ['nomeCompleto','whatsApp','emailCliente','dataAgendamento','horario','observacao'].forEach(function(id) { byId(id).value = ''; });
+  byId('origem').value = ''; byId('statusAgenda').value = ''; byId('accessTag').value = '';
+  if (!byId('loja').disabled) {
+    byId('loja').value = '';
+    byId('optometrista').innerHTML = '<option value="">Selecione a loja primeiro</option>';
+  }
+  if (clearMsg) setMsg('msgForm','','');
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  MODAL EDITAR AGENDAMENTO / OS
+// ═══════════════════════════════════════════════════════════════
+function abrirModalEdicao(id) {
+  var row = (state.agendamentos || []).find(function(r) { return String(r.ID) === String(id); });
+  if (!row) { setMsg('msgForm','Registro não encontrado.','err'); return; }
+  state.editingRow = row;
+  byId('editId').value              = row.ID              || '';
+  byId('editDataCadastro').value    = formatDateBR(row.DataCadastroBR || row.DataCadastro || '');
+  byId('editOrigem').value          = row.Origem          || '';
+  byId('editNomeCompleto').value    = row.NomeCompleto    || '';
+  byId('editWhatsApp').value        = row.WhatsApp        || '';
+  byId('editEmail').value           = row.Email           || '';
+  byId('editLoja').value            = row.Loja            || '';
+  byId('editOptometrista').value    = row.Optometrista    || '';
+  byId('editDataAgendamento').value = row.DataAgendamento || '';
+  byId('editHorario').value         = row.Horario         || '';
+  byId('editStatusAgenda').value    = row.StatusAgenda    || 'Agendado';
+  byId('editStatusOS').value        = row.StatusOS        || '';
+  byId('editNumeroOS').value        = row.NumeroOS        || '';
+  byId('editDataAberturaOS').value  = row.DataAberturaOS  || '';
+  byId('editDataEntradaOS').value   = row.DataEntradaOS   || '';
+  byId('editDataEntregaOS').value   = row.DataEntregaOS   || '';
+  byId('editDataFinalizacaoOS').value = row.DataFinalizacaoOS || '';
+  byId('editVendedorNome').value    = row.VendedorNome    || '';
+  byId('editValorVenda').value      = row.ValorVenda      || '';
+  byId('editDesconto').value        = row.Desconto        || '';
+  byId('editObservacao').value      = row.Observacao      || '';
+  aplicarPermissoesModal();
+  byId('editModal').classList.remove('hidden');
+  setMsg('msgEdit','','');
+}
+
+function fecharModalEdicao() {
+  byId('editModal').classList.add('hidden');
+  state.editingRow = null;
+  setMsg('msgEdit','','');
+}
+
+function aplicarPermissoesModal() {
+  var role = roleName();
+  var main = ['editOrigem','editNomeCompleto','editWhatsApp','editEmail','editLoja','editOptometrista','editDataAgendamento','editHorario','editStatusAgenda','editObservacao'];
+  var os   = ['editNumeroOS','editDataAberturaOS','editDataEntradaOS','editDataEntregaOS','editDataFinalizacaoOS','editStatusOS','editVendedorNome','editValorVenda','editDesconto'];
+  main.concat(os).forEach(function(id) { byId(id).disabled = false; });
+  if (['vendedor','consultor de vendas','outros'].indexOf(role) > -1) {
+    main.forEach(function(id) { byId(id).disabled = true; });
+  }
+  if (role === 'optometrista') {
+    main.concat(os).forEach(function(id) { byId(id).disabled = true; });
+    byId('editStatusAgenda').disabled = false;
+  }
+  if (!canManageOS()) os.forEach(function(id) { byId(id).disabled = true; });
+  if (!canFinance() && !canManageOS()) {
+    byId('editValorVenda').disabled = true;
+    byId('editDesconto').disabled   = true;
+  }
+  if (['admin','atendimento central'].indexOf(role) === -1 && state.user && state.user.loja && state.user.loja !== 'Todas') {
+    byId('editLoja').value = state.user.loja;
+    byId('editLoja').disabled = true;
+  }
+}
+
+function salvarEdicaoLinha() {
+  var payload = {
+    id:               byId('editId').value.trim(),
+    origem:           byId('editOrigem').value.trim(),
+    nomeCompleto:     byId('editNomeCompleto').value.trim(),
+    whatsApp:         byId('editWhatsApp').value.trim(),
+    email:            byId('editEmail').value.trim(),
+    loja:             byId('editLoja').value.trim(),
+    optometrista:     byId('editOptometrista').value.trim(),
+    dataAgendamento:  byId('editDataAgendamento').value.trim(),
+    horario:          byId('editHorario').value.trim(),
+    statusAgenda:     byId('editStatusAgenda').value.trim(),
+    statusOS:         byId('editStatusOS').value.trim(),
+    numeroOS:         byId('editNumeroOS').value.trim(),
+    dataAberturaOS:   byId('editDataAberturaOS').value.trim(),
+    dataEntradaOS:    byId('editDataEntradaOS').value.trim(),
+    dataEntregaOS:    byId('editDataEntregaOS').value.trim(),
+    dataFinalizacaoOS:byId('editDataFinalizacaoOS').value.trim(),
+    vendedorNome:     byId('editVendedorNome').value.trim(),
+    valorVenda:       byId('editValorVenda').value.trim(),
+    desconto:         byId('editDesconto').value.trim(),
+    observacao:       byId('editObservacao').value.trim()
+  };
+  showLoading(true);
+  gas('updateRow', payload, state.user).then(function(res) {
+    if (!res || !res.ok) throw new Error((res && res.message) || 'Falha ao atualizar.');
+    setMsg('msgForm', res.message || 'Registro atualizado.', 'ok');
+    toast('Registro atualizado.', 'ok');
+    fecharModalEdicao();
+    recarregarComFiltros();
+  }).catch(function(err) {
+    setMsg('msgEdit', err.message||String(err), 'err');
+  }).finally(function() { showLoading(false); });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  MODAL OS DEDICADO
+// ═══════════════════════════════════════════════════════════════
+function abrirPromptOS(id, row) {
+  row = row || {};
+  byId('osIdAgendamento').value   = id;
+  byId('osNumeroOS').value        = row.NumeroOS        || '';
+  byId('osStatusOS').value        = row.StatusOS        || '';
+  byId('osDataAbertura').value    = row.DataAberturaOS  || new Date().toISOString().slice(0,10);
+  byId('osDataEntrada').value     = row.DataEntradaOS   || '';
+  byId('osDataEntrega').value     = row.DataEntregaOS   || '';
+  byId('osDataFinalizacao').value = row.DataFinalizacaoOS || '';
+  byId('osVendedorNome').value    = row.VendedorNome || row.ProprietarioNome || (state.user && state.user.nome) || '';
+  if (canManageOS()) {
+    byId('osFinanceFields').classList.remove('hidden');
+    byId('osValorVenda').value = row.ValorVenda || '';
+    byId('osDesconto').value   = row.Desconto   || '';
+  } else {
+    byId('osFinanceFields').classList.add('hidden');
+  }
+  setMsg('msgOS','','');
+  byId('osModal').classList.remove('hidden');
+}
+
+function fecharModalOS() {
+  byId('osModal').classList.add('hidden');
+  setMsg('msgOS','','');
+}
+
+function salvarModalOS() {
+  var id = byId('osIdAgendamento').value.trim();
+  if (!id) { setMsg('msgOS','ID de agendamento inválido.','err'); return; }
+  var payload = {
+    id:               id,
+    numeroOS:         byId('osNumeroOS').value.trim(),
+    statusOS:         byId('osStatusOS').value.trim(),
+    dataAberturaOS:   byId('osDataAbertura').value.trim(),
+    dataEntradaOS:    byId('osDataEntrada').value.trim(),
+    dataEntregaOS:    byId('osDataEntrega').value.trim(),
+    dataFinalizacaoOS:byId('osDataFinalizacao').value.trim(),
+    vendedorNome:     byId('osVendedorNome').value.trim()
+  };
+  if (canManageOS()) {
+    payload.valorVenda = byId('osValorVenda').value.trim();
+    payload.desconto   = byId('osDesconto').value.trim();
+  }
+  showLoading(true);
+  gas('salvarOS', payload, state.user).then(function(res) {
+    if (!res || !res.ok) throw new Error((res && res.message) || 'Falha ao salvar OS.');
+    setMsg('msgOS', res.message || 'OS salva com sucesso.', 'ok');
+    toast('OS atualizada com sucesso.', 'ok');
+    fecharModalOS();
+    recarregarComFiltros();
+  }).catch(function(err) {
+    setMsg('msgOS', err.message||String(err), 'err');
+  }).finally(function() { showLoading(false); });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  AÇÕES RÁPIDAS DA TABELA
+// ═══════════════════════════════════════════════════════════════
+function confirmarAgendamento(id)   { runAction('confirmarAgendamento', id); }
+function marcarCompareceu(id)       { runAction('marcarCompareceu', id); }
+function marcarNaoCompareceu(id)    { runAction('marcarNaoCompareceu', id); }
+function cancelarAgendamento(id)    { if (confirm('Cancelar este agendamento?'))            runAction('cancelarAgendamento', id); }
+function excluirAgendamento(id)     { if (confirm('Deseja realmente excluir?'))             runAction('excluirAgendamento', id); }
+
+function marcarComprou(id) {
+  showLoading(true);
+  gas('marcarCompraStatus', id, true, state.user).then(function(res) {
+    if (!res || !res.ok) throw new Error((res && res.message) || 'Falha ao marcar compra.');
+    toast(res.message || 'Compra marcada.', 'ok');
+    recarregarComFiltros();
+  }).catch(function(err) {
+    setMsg('msgForm', err.message||String(err), 'err');
+  }).finally(function() { showLoading(false); });
+}
+
+function marcarNaoComprou(id) {
+  showLoading(true);
+  gas('marcarCompraStatus', id, false, state.user).then(function(res) {
+    if (!res || !res.ok) throw new Error((res && res.message) || 'Falha ao marcar atendimento sem compra.');
+    toast(res.message || 'Atendimento sem compra marcado.', 'ok');
+    recarregarComFiltros();
+  }).catch(function(err) {
+    setMsg('msgForm', err.message||String(err), 'err');
+  }).finally(function() { showLoading(false); });
+}
+
+function runAction(fn, id) {
+  showLoading(true);
+  gas(fn, id, state.user).then(function(res) {
+    if (!res || !res.ok) throw new Error((res && res.message) || 'Falha ao executar ação.');
+    toast(res.message || 'Ação executada.', 'ok');
+    recarregarComFiltros();
+  }).catch(function(err) {
+    setMsg('msgForm', err.message||String(err), 'err');
+  }).finally(function() { showLoading(false); });
+}
+
+function executarAcaoAgenda(id, acao) {
+  if (!acao) return;
+  var row = (state.agendamentos || []).find(function(r) { return String(r.ID) === String(id); });
+  if (acao === 'confirmar') return confirmarAgendamento(id);
+  if (acao === 'cancelar')  return cancelarAgendamento(id);
+  if (acao === 'excluir')   return excluirAgendamento(id);
+  if (acao === 'os')        return abrirPromptOS(id, row);
+  if (acao === 'editar')    return abrirModalEdicao(id);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  RENDERIZAÇÃO DA TABELA
+// ═══════════════════════════════════════════════════════════════
+function statusClassAgendamento(r) {
+  if (r.IsConcluidaVisual)            return 'green';
+  if (r.IsOverdue)                    return 'red';
+  if (r.StatusAgenda === 'OS em Andamento') return 'blue';
+  if (r.StatusAgenda === 'Cancelado') return 'gray';
+  return '';
+}
+
+function statusClassOS(r) {
+  if (r.IsConcluidaVisual || r.StatusOS === 'Concluído' || r.StatusOS === 'Entregue') return 'green';
+  if (r.IsOverdue)                                                       return 'red';
+  if (r.StatusOS === 'Em produção' || r.StatusOS === 'Aberta')           return 'blue';
+  if (r.StatusOS === 'Cancelada'   || r.StatusOS === 'Cancelado')        return 'gray';
+  return '';
+}
+
+function statusClassSemaforo(r) {
+  var s = String((r && r.AtendimentoSemaforo) || '').trim().toLowerCase();
+  if (s === 'vermelho') return 'red';
+  if (s === 'amarelo')  return 'yellow';
+  if (s === 'verde')    return 'green';
+  return 'gray';
+}
+
+function rowClassAtendimento(r) {
+  var s = String((r && r.AtendimentoSemaforo) || '').trim().toLowerCase();
+  if (s === 'vermelho') return 'row-red';
+  if (s === 'amarelo')  return 'row-yellow';
+  if (s === 'verde')    return 'row-green';
+  return '';
+}
+
+function renderAgenda(rowsParam) {
+  var rows = Array.isArray(rowsParam) ? rowsParam : (state.agendamentos || []);
+  var body = byId('agendaBody');
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="17">Nenhum serviço encontrado.</td></tr>';
+    return;
+  }
+  body.innerHTML = rows.map(function(r) {
+    return '<tr class="'+rowClassAtendimento(r)+'">' +
+      '<td>'+escapeHtml(r.ID)+'</td>'+
+      '<td>'+escapeHtml(formatDateBR(r.DataCadastroBR||r.DataCadastro||''))+'</td>'+
+      '<td>'+escapeHtml(r.NomeCompleto)+'</td>'+
+      '<td>'+escapeHtml(r.ProprietarioNome||'')+'</td>'+
+      '<td>'+escapeHtml(formatDateBR(r.DataAgendamentoBR||r.DataAgendamento||''))+'<br>'+escapeHtml(r.Horario||'')+'</td>'+
+      '<td><span class="status '+statusClassAgendamento(r)+'">'+escapeHtml(r.StatusAgenda)+'</span>'+
+        (r.AtendimentoSemaforoLabel ? '<div style="margin-top:6px;"><span class="status '+statusClassSemaforo(r)+'">'+escapeHtml(r.AtendimentoSemaforoLabel)+'</span></div>' : '')+'</td>'+
+      '<td>'+escapeHtml(r.Compareceu||'Pendente')+'</td>'+
+      '<td>'+escapeHtml(r.NumeroOS||'')+'</td>'+
+      '<td><span class="status '+statusClassOS(r)+'">'+escapeHtml(r.StatusOS||'')+'</span></td>'+
+      '<td>Entrada: '+escapeHtml(formatDateBR(r.DataEntradaOSBR||r.DataEntradaOS||''))+'<br>Entrega: '+escapeHtml(formatDateBR(r.DataEntregaOSBR||r.DataEntregaOS||''))+'<br>Finalização: '+escapeHtml(formatDateBR(r.DataFinalizacaoOSBR||r.DataFinalizacaoOS||''))+'</td>'+
+      '<td>'+escapeHtml(r.Loja)+'</td>'+
+      '<td>'+escapeHtml(r.Optometrista)+'</td>'+
+      '<td>'+escapeHtml(r.LeadTimeDias||'')+'</td>'+
+      '<td>'+(canFinance() ? money(r.ValorVenda||0) : '—')+'</td>'+
+      '<td>'+(canFinance() ? money(r.Desconto  ||0) : '—')+'</td>'+
+      '<td>'+escapeHtml(r.AccessTags||'')+'</td>'+
+      '<td>'+getActionHtml(r)+'</td>'+
+      '</tr>';
+  }).join('');
+}
+
+function getActionHtml(r) {
+  var role     = roleName();
+  var st       = String(r.StatusAgenda || '').trim();
+  var id       = escapeJs(r.ID);
+  var ownStore = normalizeKey(r.Loja||'') === normalizeKey(state.user && state.user.loja||'');
+  var central  = ['admin','atendimento central'].indexOf(role) > -1;
+  var gerente  = role === 'gerente de loja' && ownStore;
+  var vendedor = ['consultor de vendas','vendedor','outros'].indexOf(role) > -1;
+  var buttons  = '';
+  var options  = '<option value="">Mais ações</option>';
+
+  // Check-in
+  var podeCheckIn = ['admin','atendimento central','optometrista','gerente de loja'].indexOf(role) > -1;
+  if (podeCheckIn && ['Agendado','Confirmado'].indexOf(st) > -1) {
+    buttons += '<button onclick="marcarCompareceu(\''+id+'\')">✅ Compareceu</button>';
+    buttons += '<button class="secondary" onclick="marcarNaoCompareceu(\''+id+'\')">❌ Faltou</button>';
+  }
+
+  // Comprou / Não Comprou — aparece após comparecimento
+  if ((central || gerente || vendedor) && st === 'Compareceu') {
+    buttons += '<button class="success" onclick="marcarComprou(\''+id+'\')">💰 Comprou</button>';
+    buttons += '<button class="secondary" onclick="marcarNaoComprou(\''+id+'\')">🚫 Não Comprou</button>';
+  }
+
+  // Editar
+  if (['admin','atendimento central','consultor de vendas','vendedor','outros','gerente de loja'].indexOf(role) > -1) {
+    buttons += '<button class="secondary" onclick="abrirModalEdicao(\''+id+'\')">✏️ Editar</button>';
+  }
+
+  // Menu dropdown
+  if (central || gerente) {
+    if (st === 'Agendado') options += '<option value="confirmar">Confirmar agendamento</option>';
+    if (['Agendado','Confirmado'].indexOf(st) > -1) options += '<option value="cancelar">Cancelar</option>';
+    options += '<option value="excluir">Excluir</option>';
+  }
+  if (['admin','atendimento central','consultor de vendas','vendedor','outros','gerente de loja'].indexOf(role) > -1) {
+    options += '<option value="os">Registrar/Atualizar OS</option>';
+  }
+
+  return '<div class="actions">'+buttons+
+    '<select onchange="executarAcaoAgenda(\''+id+'\',this.value);this.value=\'\';">'+options+'</select>'+
+    '</div>';
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  EXPORTAÇÃO CSV
+// ═══════════════════════════════════════════════════════════════
+function gerarRelatorioCSV() {
+  showLoading(true);
+  gas('gerarRelatorioCSV', coletarFiltros(), state.user).then(function(res) {
+    if (!res || !res.ok) throw new Error((res && res.message) || 'Falha ao gerar relatório.');
+    downloadCsv(res.fileName || 'relatorio_sistema_agendamento.csv', res.csv || '');
+    setMsg('msgForm','Relatório gerado com sucesso.','ok');
+  }).catch(function(err) {
+    setMsg('msgForm', err.message||String(err), 'err');
+  }).finally(function() { showLoading(false); });
+}
+
+function exportarFaturamentoCSV() {
+  showLoading(true);
+  gas('exportFinanceCSV', coletarFiltros(), state.user).then(function(res) {
+    if (!res || !res.ok) throw new Error((res && res.message) || 'Falha ao exportar.');
+    downloadCsv(res.fileName || 'relatorio_faturamento.csv', res.csv || '');
+    setMsg('msgForm','Exportação financeira gerada.','ok');
+  }).catch(function(err) {
+    setMsg('msgForm', err.message||String(err), 'err');
+  }).finally(function() { showLoading(false); });
+}
+
+function downloadCsv(fileName, csv) {
+  var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  var url  = URL.createObjectURL(blob);
+  var a    = document.createElement('a');
+  a.href = url; a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  HISTÓRICO + SINCRONIZAÇÃO + DIAGNÓSTICO
+// ═══════════════════════════════════════════════════════════════
+function carregarHistorico() {
+  showLoading(true);
+  gas('getHistoricoOperacional', state.user, { loja: String((state.user && state.user.loja)||''), limit: 250 })
+    .then(function(res) {
+      byId('cardHistorico').classList.remove('hidden');
+      var rows = Array.isArray(res.rows) ? res.rows : [];
+      byId('historicoBody').innerHTML = rows.map(function(r) {
+        return '<tr><td>'+escapeHtml(formatDateBR(r.DataEvento))+'</td><td>'+escapeHtml(r.Loja||'')+'</td><td>'+escapeHtml(r.Cliente||'')+'</td><td>'+escapeHtml(r.Tipo||'')+'</td><td>'+escapeHtml(r.Acao||'')+'</td><td>'+escapeHtml(r.Campo||'')+'</td><td>'+escapeHtml(r.ValorAnterior||'')+'</td><td>'+escapeHtml(r.ValorNovo||'')+'</td><td>'+escapeHtml(r.ExecutadoPor||'')+'</td><td>'+escapeHtml(r.Perfil||'')+'</td></tr>';
+      }).join('') || '<tr><td colspan="10">Sem histórico.</td></tr>';
+    })
+    .catch(function(err) { setMsg('msgForm', err.message||String(err), 'err'); })
+    .finally(function() { showLoading(false); });
+}
+
+function sincronizarSistema() {
+  showLoading(true);
+  gas('atualizarPlanilhaSistemaCompleto')
+    .then(function(res) {
+      if (!res || !res.ok) throw new Error((res && res.message) || 'Falha ao sincronizar.');
+      toast(res.message || 'Sistema sincronizado.', 'ok');
+      return carregarInfoBase();
+    })
+    .then(function() { return carregarAgendaEDashboard(); })
+    .then(function() { if (canFinance()) return carregarFaturamento(); })
+    .catch(function(err) { setMsg('msgForm', err.message||String(err), 'err'); })
+    .finally(function() { showLoading(false); });
+}
+
+function executarDiagnostico() {
+  gas('testarBackend').then(function(res) {
+    byId('diagnosticoOut').textContent = JSON.stringify(res, null, 2);
+  }).catch(function(err) {
+    byId('diagnosticoOut').textContent = err.message || String(err);
+  });
+}
+</script>
+</body>
+</html>
