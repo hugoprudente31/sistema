@@ -275,7 +275,11 @@
           <div class="legend-mini" style="margin-top:6px;">
             Vermelho: não compareceu &bull; Amarelo: compareceu sem compra &bull; Verde: compareceu e comprou
           </div>
-          <div style="height:10px"></div>
+          <div style="height:6px"></div>
+          <div id="autoRefreshIndicator" style="font-size:11px;color:#888;margin-bottom:6px;display:flex;align-items:center;gap:5px;">
+            <span id="refreshDot" style="width:7px;height:7px;border-radius:50%;background:#22c55e;display:inline-block;"></span>
+            <span id="refreshLabel">Atualizado às --:--:--</span>
+          </div>
           <button class="secondary" onclick="logout()">Sair</button>
         </div>
       </div>
@@ -721,6 +725,7 @@ function fazerLogin() {
       return carregarInfoBase();
     })
     .then(function() { return carregarAgendaEDashboard(); })
+    .then(function() { iniciarAutoRefresh(); })
     .then(function() { if (canFinance()) return carregarFaturamento(); })
     .catch(function(err) {
       setMsg('msgLogin', err.message || String(err), 'err');
@@ -729,7 +734,47 @@ function fazerLogin() {
     .finally(function() { showLoading(false); });
 }
 
-function logout() { location.reload(); }
+function logout() {
+  if (window._autoRefreshInterval) clearInterval(window._autoRefreshInterval);
+  location.reload();
+}
+
+// ── Auto-refresh a cada 15 segundos ──────────────────────────
+function iniciarAutoRefresh() {
+  if (window._autoRefreshInterval) clearInterval(window._autoRefreshInterval);
+
+  function atualizarIndicador(atualizando) {
+    var dot   = byId('refreshDot');
+    var label = byId('refreshLabel');
+    if (!dot || !label) return;
+    if (atualizando) {
+      dot.style.background = '#f59e0b';
+      label.textContent    = 'Atualizando...';
+    } else {
+      var agora = new Date();
+      var hh    = String(agora.getHours()).padStart(2,'0');
+      var mm    = String(agora.getMinutes()).padStart(2,'0');
+      var ss    = String(agora.getSeconds()).padStart(2,'0');
+      dot.style.background = '#22c55e';
+      label.textContent    = 'Atualizado às ' + hh + ':' + mm + ':' + ss;
+    }
+  }
+
+  function refreshSilencioso() {
+    if (!state.user) return;
+    atualizarIndicador(true);
+    gas('getAgendamentos', state.user, coletarFiltros())
+      .then(function(rows) {
+        state.agendamentos = Array.isArray(rows) ? rows : [];
+        renderAgenda(state.agendamentos);
+        atualizarIndicador(false);
+      })
+      .catch(function() { atualizarIndicador(false); });
+  }
+
+  atualizarIndicador(false);
+  window._autoRefreshInterval = setInterval(refreshSilencioso, 15000);
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  PERMISSÕES DE TELA

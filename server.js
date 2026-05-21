@@ -16,14 +16,16 @@ const GAS_API_KEY = process.env.GAS_API_KEY    || '';
 
 // ── Cache em memória ─────────────────────────────────────────
 const CACHE_TTL = {
-  getInfoInicial      : 10 * 60 * 1000, // 10 min — lojas, origens, owners raramente mudam
-  getLojas            : 10 * 60 * 1000,
-  getOrigens          : 10 * 60 * 1000,
-  getOwners           : 10 * 60 * 1000,
-  getAccessTags       : 10 * 60 * 1000,
+  getInfoInicial         : 10 * 60 * 1000, // 10 min — lojas, origens, owners raramente mudam
+  getLojas               : 10 * 60 * 1000,
+  getOrigens             : 10 * 60 * 1000,
+  getOwners              : 10 * 60 * 1000,
+  getAccessTags          : 10 * 60 * 1000,
   getOptometristasPorLoja: 10 * 60 * 1000,
-  loginSeguro         :  5 * 60 * 1000, // 5 min por usuário
-  getUsuarioLogado    :  5 * 60 * 1000,
+  loginSeguro            :  5 * 60 * 1000, // 5 min por usuário
+  getUsuarioLogado       :  5 * 60 * 1000,
+  getAgendamentos        :        15_000,  // 15s — sincroniza dashboard em tempo quase-real
+  getAgendamentosSeguro  :        15_000,
 };
 
 // Funções que gravam dados — invalidam o cache ao serem chamadas
