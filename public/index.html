@@ -630,19 +630,43 @@ function canManageOS() { return !!(state.user && state.user.permissions && state
 // Chama POST /api/gas → Node.js proxeia para GAS
 function gas(fnName) {
   var args = Array.prototype.slice.call(arguments, 1);
-  return fetch('/api/gas', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ fn: fnName, args: args })
-  })
-  .then(function(r) {
-    if (!r.ok) throw new Error('Erro de rede: HTTP ' + r.status);
-    return r.json();
-  })
-  .then(function(data) {
-    if (data && data.ok === false) throw new Error(data.error || data.message || 'Erro na API GAS');
-    // GAS retorna { ok: true, result: <valor original da função> }
-    return (data && data.result !== undefined) ? data.result : data;
+
+  function tentativa() {
+    return fetch('/api/gas', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fn: fnName, args: args })
+    })
+    .then(function(r) {
+      if (!r.ok) {
+        // 504 = GAS em cold start: tenta uma vez após 4s
+        if (r.status === 504) {
+          return new Promise(function(_, reject) {
+            reject({ _retry: true, status: 504 });
+          });
+        }
+        throw new Error('Erro de rede: HTTP ' + r.status);
+      }
+      return r.json();
+    })
+    .then(function(data) {
+      if (data && data.ok === false) throw new Error(data.error || data.message || 'Erro na API GAS');
+      return (data && data.result !== undefined) ? data.result : data;
+    });
+  }
+
+  return tentativa().catch(function(err) {
+    if (err && err._retry) {
+      console.warn('[gas] 504 — aguardando servidor, nova tentativa em 4s...');
+      return new Promise(function(resolve, reject) {
+        setTimeout(function() {
+          tentativa().then(resolve).catch(function(err2) {
+            reject(new Error('Servidor demorou para responder. Tente novamente em instantes.'));
+          });
+        }, 4000);
+      });
+    }
+    throw err;
   });
 }
 

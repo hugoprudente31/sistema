@@ -152,11 +152,34 @@ app.get('*', (_req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// ── Keep-alive: mantém o GAS acordado ────────────────────────
+// Chama o GAS a cada 4 minutos para evitar cold start
+async function pingGAS() {
+  if (!GAS_URL) return;
+  try {
+    const params = new URLSearchParams({
+      format: 'api', fn: 'testarBackend',
+      key: GAS_API_KEY, args: '[]'
+    });
+    await fetch(`${GAS_URL}?${params}`, {
+      signal: AbortSignal.timeout(30_000)
+    });
+    console.log(`[keep-alive] GAS acordado — ${new Date().toLocaleTimeString('pt-BR')}`);
+  } catch (e) {
+    console.log(`[keep-alive] falhou: ${e.message}`);
+  }
+}
+
 // ── Start ─────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`\n🚀  Agendamento System`);
   console.log(`    Local:   http://localhost:${PORT}`);
   console.log(`    GAS URL: ${GAS_URL ? '✅ configurado' : '❌ NÃO configurado (.env)'}`);
   console.log(`    API Key: ${GAS_API_KEY ? '✅ configurado' : '❌ NÃO configurado (.env)'}`);
-  console.log(`    Cache:   ✅ ativo (lojas/origens/usuários: 10min)\n`);
+  console.log(`    Cache:   ✅ ativo (lojas/origens/usuários: 10min)`);
+  console.log(`    Keep-alive: ✅ ping GAS a cada 4 minutos\n`);
+
+  // Primeiro ping imediato para acordar o GAS ao subir o servidor
+  pingGAS();
+  setInterval(pingGAS, 4 * 60 * 1000);
 });
