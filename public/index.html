@@ -763,13 +763,28 @@ function iniciarAutoRefresh() {
   function refreshSilencioso() {
     if (!state.user) return;
     atualizarIndicador(true);
-    gas('getAgendamentos', state.user, coletarFiltros())
-      .then(function(rows) {
+    var filtros = coletarFiltros();
+    Promise.all([
+      gas('getAgendamentos', state.user, filtros).then(function(rows) {
         state.agendamentos = Array.isArray(rows) ? rows : [];
         renderAgenda(state.agendamentos);
-        atualizarIndicador(false);
-      })
-      .catch(function() { atualizarIndicador(false); });
+      }),
+      gas('getDashboard', state.user).then(function(d) {
+        state.dashboard = d || {};
+        preencherDashboard();
+      }),
+      canFinance()
+        ? gas('getFinancePanel', state.user, filtros).then(function(res) {
+            if (!res) return;
+            byId('finTotal').textContent    = money(res.totalFaturado  || 0);
+            byId('finDesconto').textContent = money(res.totalDesconto  || 0);
+            byId('finQtd').textContent      = String(res.totalOSComValor || 0);
+            byId('finTicket').textContent   = money(res.ticketMedio    || 0);
+          })
+        : Promise.resolve()
+    ])
+    .then(function()  { atualizarIndicador(false); })
+    .catch(function() { atualizarIndicador(false); });
   }
 
   atualizarIndicador(false);

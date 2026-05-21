@@ -24,8 +24,10 @@ const CACHE_TTL = {
   getOptometristasPorLoja: 10 * 60 * 1000,
   loginSeguro            :  5 * 60 * 1000, // 5 min por usuário
   getUsuarioLogado       :  5 * 60 * 1000,
-  getAgendamentos        :        15_000,  // 15s — sincroniza dashboard em tempo quase-real
+  getAgendamentos        :        15_000,  // 15s — sincroniza em tempo quase-real
   getAgendamentosSeguro  :        15_000,
+  getDashboard           :        15_000,
+  getFinancePanel        :        15_000,
 };
 
 // Funções que gravam dados — invalidam o cache ao serem chamadas
