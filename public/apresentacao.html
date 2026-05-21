@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sistema de Agendamento — Óticas Target</title>
+<style>
+  :root {
+    --p:      #fc5102;
+    --s:      #fc7d05;
+    --dark:   #1a0a00;
+    --dark2:  #2d1200;
+    --line:   rgba(252,81,2,.25);
+    --glass:  rgba(252,81,2,.08);
+    --glassh: rgba(252,81,2,.15);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Segoe UI', sans-serif;
+    background: #0d0500;
+    color: #fff;
+    height: 100vh;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  /* ── SLIDES ── */
+  .deck { width: 100%; height: 100vh; position: relative; }
+
+  .slide {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    justify-content: center; align-items: center;
+    padding: 56px 80px;
+    opacity: 0; pointer-events: none;
+    transition: opacity .4s ease;
+  }
+  .slide.active { opacity: 1; pointer-events: all; }
+  .slide > * { max-width: 980px; width: 100%; }
+
+  /* ── BACKGROUNDS ── */
+  .bg-capa   { background: radial-gradient(ellipse at 60% 40%, #7a2500 0%, #2d0e00 50%, #0d0500 100%); }
+  .bg-dark   { background: linear-gradient(160deg, #1a0800 0%, #0d0500 100%); }
+  .bg-mid    { background: linear-gradient(160deg, #2d1200 0%, #0d0500 100%); }
+  .bg-deep   { background: linear-gradient(160deg, #1a0500 0%, #0d0300 100%); }
+
+  /* ── DIVISOR ── */
+  .divider { width: 56px; height: 4px; background: linear-gradient(90deg, var(--p), var(--s)); border-radius: 2px; margin-bottom: 28px; }
+
+  /* ── TAGS ── */
+  .tag {
+    font-size: 10px; font-weight: 700; letter-spacing: 3px;
+    text-transform: uppercase; color: var(--s); margin-bottom: 14px;
+  }
+
+  /* ── TIPOGRAFIA ── */
+  h1 { font-size: 50px; font-weight: 800; line-height: 1.1; text-align: center; }
+  h1 em { font-style: normal; color: var(--s); }
+  h2 { font-size: 36px; font-weight: 700; margin-bottom: 28px; }
+  h2 span { color: var(--s); }
+  .subtitle { font-size: 18px; color: #b08060; margin-top: 14px; text-align: center; line-height: 1.6; }
+  .subtitle strong { color: var(--s); }
+
+  /* ── LOGO ── */
+  .logo-wrap {
+    width: 160px; height: 80px;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(255,255,255,.04);
+    border: 1px solid var(--line);
+    border-radius: 16px; margin-bottom: 28px; overflow: hidden; padding: 10px;
+  }
+  .logo-wrap img { max-width: 100%; max-height: 100%; object-fit: contain; filter: brightness(1.1); }
+
+  .url-badge {
+    margin-top: 28px;
+    background: var(--glass);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 10px 28px;
+    font-size: 14px; font-weight: 600; color: var(--s);
+    letter-spacing: .5px;
+  }
+
+  /* ── CARDS ── */
+  .grid { display: grid; gap: 14px; width: 100%; }
+  .grid-2 { grid-template-columns: 1fr 1fr; }
+  .grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+
+  .card {
+    background: var(--glass);
+    border: 1px solid var(--line);
+    border-radius: 16px; padding: 22px;
+    transition: background .2s;
+  }
+  .card:hover { background: var(--glassh); }
+  .card-icon { font-size: 26px; margin-bottom: 10px; }
+  .card h3 { font-size: 15px; font-weight: 700; margin-bottom: 6px; color: #ffe0cc; }
+  .card p  { font-size: 13px; color: #a06040; line-height: 1.6; }
+
+  /* ── BADGE PERFIL ── */
+  .badge {
+    display: inline-block; padding: 5px 16px;
+    border-radius: 999px; font-size: 11px; font-weight: 700;
+    letter-spacing: 1px; text-transform: uppercase; margin-bottom: 18px;
+  }
+  .badge-p      { background: rgba(252,81,2,.2);   color: #ff8040; border: 1px solid rgba(252,81,2,.4); }
+  .badge-amber  { background: rgba(252,125,5,.2);  color: #ffa040; border: 1px solid rgba(252,125,5,.4); }
+  .badge-cream  { background: rgba(255,220,180,.1);color: #ffd0a0; border: 1px solid rgba(255,220,180,.2); }
+  .badge-rose   { background: rgba(220,60,60,.2);  color: #ff8080; border: 1px solid rgba(220,60,60,.4); }
+  .badge-green  { background: rgba(34,197,94,.15); color: #4ade80; border: 1px solid rgba(34,197,94,.3); }
+  .badge-blue   { background: rgba(56,189,248,.15);color: #7dd3fc; border: 1px solid rgba(56,189,248,.3); }
+
+  /* ── LISTA PERMISSÕES ── */
+  .perms { list-style: none; display: flex; flex-direction: column; gap: 10px; width: 100%; }
+  .perms li {
+    display: flex; align-items: flex-start; gap: 12px;
+    background: var(--glass); border: 1px solid var(--line);
+    border-radius: 12px; padding: 12px 16px;
+    font-size: 15px; color: #ffe0cc; line-height: 1.4;
+  }
+  .perms li .ic { font-size: 17px; flex-shrink: 0; margin-top: 1px; }
+  .perms li strong { color: var(--s); }
+
+  /* ── LOJAS ── */
+  .lojas { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; width: 100%; }
+  .loja-card {
+    background: var(--glass); border: 1px solid var(--line);
+    border-radius: 14px; padding: 20px 22px;
+    display: flex; align-items: center; gap: 16px;
+  }
+  .loja-card .li { font-size: 26px; }
+  .loja-card .ln { font-size: 14px; font-weight: 700; color: #ffe0cc; }
+  .loja-card .lc { font-size: 12px; color: #7a4020; margin-top: 2px; }
+
+  /* ── KPI ── */
+  .kpis { display: flex; gap: 14px; width: 100%; }
+  .kpi-card {
+    flex: 1; background: var(--glass); border: 1px solid var(--line);
+    border-radius: 14px; padding: 18px; text-align: center;
+  }
+  .kpi-card .kv { font-size: 30px; font-weight: 800; color: var(--p); }
+  .kpi-card .kl { font-size: 11px; color: #7a4020; margin-top: 4px; text-transform: uppercase; letter-spacing: 1px; }
+
+  /* ── FLUXO ── */
+  .flow { display: flex; align-items: center; width: 100%; flex-wrap: wrap; justify-content: center; gap: 0; }
+  .flow-step {
+    background: var(--glass); border: 1px solid var(--line);
+    border-radius: 12px; padding: 14px 16px; text-align: center;
+    flex: 1; min-width: 100px;
+  }
+  .flow-step .num { font-size: 10px; font-weight: 700; letter-spacing: 2px; color: var(--s); margin-bottom: 5px; text-transform: uppercase; }
+  .flow-step .lbl { font-size: 13px; font-weight: 600; color: #ffe0cc; }
+  .flow-arrow { font-size: 18px; color: var(--p); margin: 0 5px; flex-shrink: 0; opacity: .6; }
+
+  /* ── TECH ── */
+  .tech { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; width: 100%; }
+  .tech-item {
+    background: var(--glass); border: 1px solid var(--line);
+    border-radius: 14px; padding: 20px 26px; text-align: center; min-width: 120px;
+  }
+  .tech-item .ti { font-size: 30px; margin-bottom: 8px; }
+  .tech-item .tn { font-size: 13px; font-weight: 700; color: #ffe0cc; }
+  .tech-item .td { font-size: 11px; color: #7a4020; margin-top: 2px; }
+
+  /* ── ARCO DECORATIVO ── */
+  .arc {
+    position: absolute; inset: 0; pointer-events: none; overflow: hidden; border-radius: 0;
+  }
+  .arc::before {
+    content: ''; position: absolute;
+    width: 600px; height: 600px; border-radius: 50%;
+    border: 1px solid rgba(252,81,2,.12);
+    right: -180px; top: -180px;
+  }
+  .arc::after {
+    content: ''; position: absolute;
+    width: 400px; height: 400px; border-radius: 50%;
+    border: 1px solid rgba(252,81,2,.08);
+    right: -60px; top: -60px;
+  }
+
+  /* ── FAIXA DESTAQUE ── */
+  .highlight {
+    background: linear-gradient(135deg, rgba(252,81,2,.15), rgba(252,125,5,.08));
+    border: 1px solid rgba(252,81,2,.3);
+    border-radius: 16px; padding: 20px 28px;
+    margin-top: 20px; width: 100%;
+    font-size: 15px; color: #ffcca0; line-height: 1.7; text-align: center;
+  }
+  .highlight strong { color: var(--s); }
+
+  /* ── NAVEGAÇÃO ── */
+  .nav {
+    position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 14px;
+    background: rgba(13,5,0,.85); backdrop-filter: blur(12px);
+    border: 1px solid var(--line);
+    border-radius: 999px; padding: 8px 18px; z-index: 100;
+  }
+  .nav button {
+    background: var(--glass); border: 1px solid var(--line); color: #ff8040;
+    width: 34px; height: 34px; border-radius: 50%;
+    font-size: 16px; cursor: pointer; transition: background .2s;
+  }
+  .nav button:hover { background: rgba(252,81,2,.3); }
+  .nav button:disabled { opacity: .25; cursor: default; }
+  .nav .counter { font-size: 12px; color: #7a4020; min-width: 52px; text-align: center; }
+
+  /* ── DOTS ── */
+  .dots {
+    position: fixed; right: 24px; top: 50%; transform: translateY(-50%);
+    display: flex; flex-direction: column; gap: 8px; z-index: 100;
+  }
+  .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: rgba(252,81,2,.2); cursor: pointer; transition: all .25s;
+  }
+  .dot.active { background: var(--p); transform: scale(1.5); }
+
+  .hint { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); font-size: 11px; color: #3a1800; letter-spacing: 1px; }
+</style>
+</head>
+<body>
+
+<div class="deck" id="deck">
+
+  <!-- ══ 1 — CAPA ══ -->
+  <div class="slide bg-capa active">
+    <div class="arc"></div>
+    <div class="logo-wrap">
+      <img src="https://global-files-nginx.builderall.com/184d08cd-6b72-40d2-882c-efd891ebcb21/f5c399ecf564642e5009ea51be228289ab8b18a12e4e198786ad8732a9d9dca9.png" alt="Óticas Target">
+    </div>
+    <div class="tag">Apresentação Interna — Óticas Target</div>
+    <h1>Sistema de<br><em>Agendamento</em></h1>
+    <p class="subtitle">Gestão completa de consultas, OS e resultados<br>em tempo real para as 4 lojas da rede</p>
+    <div class="url-badge">sistema.oticastgt.com.br</div>
+  </div>
+
+  <!-- ══ 2 — O QUE É ══ -->
+  <div class="slide bg-dark">
+    <div class="tag">Visão Geral</div>
+    <h2>O que é o <span>Sistema?</span></h2>
+    <div class="divider"></div>
+    <div class="grid grid-2">
+      <div class="card">
+        <div class="card-icon">📅</div>
+        <h3>Agendamentos</h3>
+        <p>Marque, confirme e acompanhe todas as consultas das 4 lojas em um único lugar, com atualização a cada 15 segundos.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon">📋</div>
+        <h3>Ordens de Serviço</h3>
+        <p>Registre OS, acompanhe status, datas de entrada, finalização e entrega diretamente no painel.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon">📊</div>
+        <h3>Dashboard</h3>
+        <p>Indicadores em tempo real: agendados, confirmados, comparecimentos, vendas geradas e lead time.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon">🔗</div>
+        <h3>Integração Kommo</h3>
+        <p>Sincroniza automaticamente com o CRM Kommo para manter o funil de vendas sempre atualizado.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ 3 — LOJAS ══ -->
+  <div class="slide bg-mid">
+    <div class="tag">Rede de Lojas</div>
+    <h2>4 Lojas <span>Conectadas</span></h2>
+    <div class="divider"></div>
+    <div class="lojas">
+      <div class="loja-card">
+        <div class="li">🏪</div>
+        <div><div class="ln">Óticas Target — Ademar de Barros</div><div class="lc">Guarujá · SP</div></div>
+      </div>
+      <div class="loja-card">
+        <div class="li">🏪</div>
+        <div><div class="ln">Óticas TGT — Gonzaga</div><div class="lc">Santos · SP</div></div>
+      </div>
+      <div class="loja-card">
+        <div class="li">🏪</div>
+        <div><div class="ln">Óticas TGT Enseada</div><div class="lc">Guarujá · SP</div></div>
+      </div>
+      <div class="loja-card">
+        <div class="li">🏪</div>
+        <div><div class="ln">Óticas TGT Pitangueiras</div><div class="lc">Guarujá · SP</div></div>
+      </div>
+    </div>
+    <div style="margin-top:24px;">
+      <div class="kpis">
+        <div class="kpi-card"><div class="kv">4</div><div class="kl">Lojas</div></div>
+        <div class="kpi-card"><div class="kv">13</div><div class="kl">Usuários</div></div>
+        <div class="kpi-card"><div class="kv">6</div><div class="kl">Origens</div></div>
+        <div class="kpi-card"><div class="kv">15s</div><div class="kl">Sync</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ 4 — PERFIS OVERVIEW ══ -->
+  <div class="slide bg-dark">
+    <div class="tag">Controle de Acesso</div>
+    <h2>Quem usa o <span>Sistema?</span></h2>
+    <div class="divider"></div>
+    <div class="grid grid-3">
+      <div class="card">
+        <div class="badge badge-p">Admin</div>
+        <p>Acesso total ao sistema. Gerencia usuários, lojas, configurações e visualiza tudo.</p>
+      </div>
+      <div class="card">
+        <div class="badge badge-amber">Atendimento Central</div>
+        <p>Cria, edita e cancela agendamentos de todas as lojas. Acesso ao dashboard operacional.</p>
+      </div>
+      <div class="card">
+        <div class="badge badge-cream">Gerente de Loja</div>
+        <p>Gerencia agendamentos e OS da própria loja. Visualiza painel financeiro.</p>
+      </div>
+      <div class="card">
+        <div class="badge badge-rose">Optometrista</div>
+        <p>Visualiza agenda da sua loja no mês atual e registra presença dos pacientes.</p>
+      </div>
+      <div class="card">
+        <div class="badge badge-green">Consultor / Vendedor</div>
+        <p>Cria agendamentos e OS na sua loja. Registra presença e resultado da venda.</p>
+      </div>
+      <div class="card">
+        <div class="badge badge-blue">Outros</div>
+        <p>Acesso similar ao consultor — cria agendamentos e acompanha OS da loja.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ 5 — ADMIN ══ -->
+  <div class="slide bg-deep">
+    <div class="tag">Perfil 1 de 5</div>
+    <div class="badge badge-p">Admin</div>
+    <h2>O que o <span>Admin</span> faz?</h2>
+    <ul class="perms">
+      <li><span class="ic">✅</span> Acesso completo a <strong>todas as lojas</strong>, sem nenhuma restrição</li>
+      <li><span class="ic">✅</span> Cria, edita, cancela e exclui qualquer agendamento</li>
+      <li><span class="ic">✅</span> Visualiza e exporta o <strong>painel financeiro</strong> (valores, descontos, ticket médio)</li>
+      <li><span class="ic">✅</span> Gerencia usuários, lojas, optometristas e origens na planilha</li>
+      <li><span class="ic">✅</span> Acessa relatório de <strong>Lead Time</strong> e histórico de auditoria</li>
+      <li><span class="ic">✅</span> Configura regras de negócio (horários permitidos, feriados)</li>
+    </ul>
+  </div>
+
+  <!-- ══ 6 — ATENDIMENTO CENTRAL ══ -->
+  <div class="slide bg-mid">
+    <div class="tag">Perfil 2 de 5</div>
+    <div class="badge badge-amber">Atendimento Central</div>
+    <h2>O que o <span>Atendimento Central</span> faz?</h2>
+    <ul class="perms">
+      <li><span class="ic">✅</span> Visualiza e gerencia agendamentos de <strong>todas as lojas</strong></li>
+      <li><span class="ic">✅</span> Cria, edita, confirma e cancela agendamentos</li>
+      <li><span class="ic">✅</span> Registra presença dos pacientes (compareceu / não compareceu)</li>
+      <li><span class="ic">✅</span> Abre e atualiza Ordens de Serviço (OS)</li>
+      <li><span class="ic">✅</span> Acessa o dashboard operacional completo</li>
+      <li><span class="ic">🚫</span> Não visualiza valores financeiros (restrito a Admin e Gerente)</li>
+    </ul>
+  </div>
+
+  <!-- ══ 7 — GERENTE ══ -->
+  <div class="slide bg-dark">
+    <div class="tag">Perfil 3 de 5</div>
+    <div class="badge badge-cream">Gerente de Loja</div>
+    <h2>O que o <span>Gerente</span> faz?</h2>
+    <ul class="perms">
+      <li><span class="ic">✅</span> Visualiza e gerencia agendamentos <strong>da sua loja</strong></li>
+      <li><span class="ic">✅</span> Cria, edita, confirma e cancela agendamentos da loja</li>
+      <li><span class="ic">✅</span> Registra presença e resultado da venda</li>
+      <li><span class="ic">✅</span> Abre e atualiza OS da sua loja</li>
+      <li><span class="ic">✅</span> Visualiza o <strong>painel financeiro</strong> (valores, descontos, ticket médio)</li>
+      <li><span class="ic">✅</span> Acessa relatório de Lead Time da loja</li>
+    </ul>
+  </div>
+
+  <!-- ══ 8 — OPTOMETRISTA ══ -->
+  <div class="slide bg-deep">
+    <div class="tag">Perfil 4 de 5</div>
+    <div class="badge badge-rose">Optometrista</div>
+    <h2>O que o <span>Optometrista</span> faz?</h2>
+    <ul class="perms">
+      <li><span class="ic">✅</span> Visualiza a agenda <strong>da sua loja no mês atual</strong></li>
+      <li><span class="ic">✅</span> Confirma a presença do paciente (compareceu / não compareceu)</li>
+      <li><span class="ic">✅</span> Atualiza o status do agendamento</li>
+      <li><span class="ic">🚫</span> Não cria nem edita agendamentos</li>
+      <li><span class="ic">🚫</span> Não visualiza meses anteriores</li>
+      <li><span class="ic">🚫</span> Não acessa dados financeiros</li>
+    </ul>
+  </div>
+
+  <!-- ══ 9 — CONSULTOR/VENDEDOR ══ -->
+  <div class="slide bg-mid">
+    <div class="tag">Perfil 5 de 5</div>
+    <div class="badge badge-green">Consultor de Vendas · Vendedor · Outros</div>
+    <h2>O que o <span>Consultor / Vendedor</span> faz?</h2>
+    <ul class="perms">
+      <li><span class="ic">✅</span> Cria e edita agendamentos <strong>da sua loja</strong></li>
+      <li><span class="ic">✅</span> Registra presença e resultado da venda (comprou / não comprou)</li>
+      <li><span class="ic">✅</span> Abre e atualiza Ordens de Serviço</li>
+      <li><span class="ic">✅</span> Informa valor de venda e desconto</li>
+      <li><span class="ic">🚫</span> Não cancela ou exclui agendamentos de outros usuários</li>
+      <li><span class="ic">🚫</span> Não acessa outras lojas nem dados financeiros</li>
+    </ul>
+  </div>
+
+  <!-- ══ 10 — FLUXO ══ -->
+  <div class="slide bg-dark">
+    <div class="tag">Processo</div>
+    <h2>Fluxo do <span>Agendamento</span></h2>
+    <div class="divider"></div>
+    <div class="flow">
+      <div class="flow-step"><div class="num">Passo 1</div><div class="lbl">📋 Agendado</div></div>
+      <div class="flow-arrow">›</div>
+      <div class="flow-step"><div class="num">Passo 2</div><div class="lbl">✅ Confirmado</div></div>
+      <div class="flow-arrow">›</div>
+      <div class="flow-step"><div class="num">Passo 3</div><div class="lbl">👤 Compareceu</div></div>
+      <div class="flow-arrow">›</div>
+      <div class="flow-step"><div class="num">Passo 4</div><div class="lbl">📄 OS Aberta</div></div>
+      <div class="flow-arrow">›</div>
+      <div class="flow-step"><div class="num">Passo 5</div><div class="lbl">🔧 Em Andamento</div></div>
+      <div class="flow-arrow">›</div>
+      <div class="flow-step"><div class="num">Passo 6</div><div class="lbl">🎉 Concluído</div></div>
+    </div>
+    <div style="margin-top:24px;" class="grid grid-2">
+      <div class="card">
+        <div class="card-icon">⚡</div>
+        <h3>Atualização Automática</h3>
+        <p>O sistema sincroniza a agenda a cada 15 segundos sem nenhuma ação manual.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon">🔗</div>
+        <h3>Integração Kommo CRM</h3>
+        <p>Cada mudança de status atualiza o lead no CRM automaticamente.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ 11 — DASHBOARD ══ -->
+  <div class="slide bg-deep">
+    <div class="tag">Painel de Controle</div>
+    <h2>O que o <span>Dashboard</span> mostra?</h2>
+    <div class="divider"></div>
+    <div class="grid grid-3">
+      <div class="card"><div class="card-icon">📅</div><h3>Total Agendado</h3><p>Quantidade de agendamentos no período selecionado.</p></div>
+      <div class="card"><div class="card-icon">✅</div><h3>Confirmados</h3><p>Agendamentos que o cliente confirmou presença.</p></div>
+      <div class="card"><div class="card-icon">👤</div><h3>Comparecimentos</h3><p>Quantos clientes efetivamente apareceram.</p></div>
+      <div class="card"><div class="card-icon">💰</div><h3>Vendas Geradas</h3><p>Total faturado, descontos e ticket médio (Admin / Gerente).</p></div>
+      <div class="card"><div class="card-icon">⏱️</div><h3>Lead Time</h3><p>Tempo médio entre abertura e finalização das OS.</p></div>
+      <div class="card"><div class="card-icon">🚨</div><h3>OS em Atraso</h3><p>OS com data de entrega vencida e sem finalização.</p></div>
+    </div>
+  </div>
+
+  <!-- ══ 12 — TECNOLOGIA ══ -->
+  <div class="slide bg-mid">
+    <div class="tag">Arquitetura</div>
+    <h2>Como o sistema <span>funciona?</span></h2>
+    <div class="divider"></div>
+    <div class="tech">
+      <div class="tech-item"><div class="ti">🌐</div><div class="tn">Node.js + Express</div><div class="td">Servidor Web</div></div>
+      <div class="tech-item"><div class="ti">⚙️</div><div class="tn">Google Apps Script</div><div class="td">Lógica de Negócio</div></div>
+      <div class="tech-item"><div class="ti">📊</div><div class="tn">Google Planilhas</div><div class="td">Banco de Dados</div></div>
+      <div class="tech-item"><div class="ti">🚂</div><div class="tn">Railway</div><div class="td">Hospedagem</div></div>
+      <div class="tech-item"><div class="ti">🔗</div><div class="tn">Kommo CRM</div><div class="td">Integração CRM</div></div>
+    </div>
+    <div style="margin-top:28px; width:100%;">
+      <div class="flow" style="justify-content:center; flex-wrap:nowrap;">
+        <div class="flow-step" style="flex:0 0 auto;min-width:120px;"><div class="num">Usuário</div><div class="lbl">🖥️ Navegador</div></div>
+        <div class="flow-arrow">›</div>
+        <div class="flow-step" style="flex:0 0 auto;min-width:120px;"><div class="num">Servidor</div><div class="lbl">⚡ Railway</div></div>
+        <div class="flow-arrow">›</div>
+        <div class="flow-step" style="flex:0 0 auto;min-width:120px;"><div class="num">Backend</div><div class="lbl">⚙️ Apps Script</div></div>
+        <div class="flow-arrow">›</div>
+        <div class="flow-step" style="flex:0 0 auto;min-width:120px;"><div class="num">Dados</div><div class="lbl">📊 Planilha</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ 13 — FINAL ══ -->
+  <div class="slide bg-capa">
+    <div class="arc"></div>
+    <div class="logo-wrap">
+      <img src="https://global-files-nginx.builderall.com/184d08cd-6b72-40d2-882c-efd891ebcb21/f5c399ecf564642e5009ea51be228289ab8b18a12e4e198786ad8732a9d9dca9.png" alt="Óticas Target">
+    </div>
+    <div class="tag">Óticas Target — Rede Multiloja</div>
+    <h1>Gestão inteligente<br>para toda a <em>rede</em></h1>
+    <p class="subtitle">Acesse em qualquer dispositivo:<br><strong>sistema.oticastgt.com.br</strong></p>
+    <div style="margin-top:32px; width:100%;">
+      <div class="kpis">
+        <div class="kpi-card"><div class="kv">4</div><div class="kl">Lojas</div></div>
+        <div class="kpi-card"><div class="kv">5</div><div class="kl">Perfis</div></div>
+        <div class="kpi-card"><div class="kv">15s</div><div class="kl">Sync</div></div>
+        <div class="kpi-card"><div class="kv">24/7</div><div class="kl">Online</div></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- NAVEGAÇÃO -->
+<div class="nav">
+  <button id="btnPrev" onclick="nav(-1)" disabled>‹</button>
+  <span class="counter" id="counter">1 / 13</span>
+  <button id="btnNext" onclick="nav(1)">›</button>
+</div>
+
+<!-- DOTS -->
+<div class="dots" id="dots"></div>
+
+<div class="hint">← → para navegar</div>
+
+<script>
+  const slides = document.querySelectorAll('.slide');
+  const total  = slides.length;
+  let current  = 0;
+
+  const dotsEl = document.getElementById('dots');
+  slides.forEach(function(_, i) {
+    const d = document.createElement('div');
+    d.className = 'dot' + (i === 0 ? ' active' : '');
+    d.onclick = function() { goTo(i); };
+    dotsEl.appendChild(d);
+  });
+
+  function goTo(n) {
+    slides[current].classList.remove('active');
+    dotsEl.children[current].classList.remove('active');
+    current = Math.max(0, Math.min(total - 1, n));
+    slides[current].classList.add('active');
+    dotsEl.children[current].classList.add('active');
+    document.getElementById('counter').textContent = (current + 1) + ' / ' + total;
+    document.getElementById('btnPrev').disabled = current === 0;
+    document.getElementById('btnNext').disabled = current === total - 1;
+  }
+
+  function nav(dir) { goTo(current + dir); }
+
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') nav(1);
+    if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   nav(-1);
+    if (e.key === 'Home') goTo(0);
+    if (e.key === 'End')  goTo(total - 1);
+  });
+
+  let touchX = 0;
+  document.addEventListener('touchstart', function(e) { touchX = e.touches[0].clientX; });
+  document.addEventListener('touchend',   function(e) {
+    const diff = touchX - e.changedTouches[0].clientX;
+    if (Math.abs(diff) > 50) nav(diff > 0 ? 1 : -1);
+  });
+</script>
+</body>
+</html>

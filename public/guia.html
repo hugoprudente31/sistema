@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Manual do Usuário — Sistema de Agendamento Óticas Target</title>
+<style>
+  :root {
+    --p:   #fc5102;
+    --s:   #fc7d05;
+    --g:   rgba(252,81,2,.1);
+    --gb:  rgba(252,81,2,.2);
+    --ln:  rgba(252,81,2,.22);
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Segoe UI',sans-serif; background:#0d0500; color:#fff; height:100vh; overflow:hidden; user-select:none; }
+
+  /* DECK */
+  .deck { width:100%; height:100vh; position:relative; }
+  .slide { position:absolute; inset:0; display:flex; flex-direction:column; justify-content:center; align-items:center; padding:48px 72px; opacity:0; pointer-events:none; transition:opacity .35s; }
+  .slide.active { opacity:1; pointer-events:all; }
+  .slide > * { max-width:1020px; width:100%; }
+
+  .bg-capa { background:radial-gradient(ellipse at 60% 40%,#7a2500 0%,#2d0e00 50%,#0d0500 100%); }
+  .bg-d    { background:linear-gradient(160deg,#1a0800 0%,#0d0500 100%); }
+  .bg-m    { background:linear-gradient(160deg,#2d1200 0%,#0d0500 100%); }
+
+  /* TIPO */
+  .tag  { font-size:10px; font-weight:700; letter-spacing:3px; text-transform:uppercase; color:var(--s); margin-bottom:12px; }
+  h1    { font-size:46px; font-weight:800; line-height:1.1; text-align:center; }
+  h1 em { font-style:normal; color:var(--s); }
+  h2    { font-size:32px; font-weight:700; margin-bottom:20px; }
+  h2 span { color:var(--s); }
+  .sub  { font-size:16px; color:#b08060; margin-top:12px; text-align:center; line-height:1.6; }
+  .divider { width:48px; height:4px; background:linear-gradient(90deg,var(--p),var(--s)); border-radius:2px; margin-bottom:22px; }
+
+  /* LOGO */
+  .logo-w { width:140px; height:70px; display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,.04); border:1px solid var(--ln); border-radius:14px; margin-bottom:24px; overflow:hidden; padding:8px; }
+  .logo-w img { max-width:100%; max-height:100%; object-fit:contain; }
+  .url-b { margin-top:24px; background:var(--g); border:1px solid var(--ln); border-radius:999px; padding:9px 26px; font-size:13px; font-weight:600; color:var(--s); }
+
+  /* STEP BOX (passos numerados) */
+  .steps { display:flex; flex-direction:column; gap:12px; width:100%; }
+  .step  { display:flex; align-items:flex-start; gap:16px; background:var(--g); border:1px solid var(--ln); border-radius:14px; padding:16px 20px; }
+  .step-num { width:32px; height:32px; border-radius:50%; background:linear-gradient(135deg,var(--p),var(--s)); display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:800; flex-shrink:0; }
+  .step-body h4 { font-size:15px; font-weight:700; color:#ffe0cc; margin-bottom:4px; }
+  .step-body p  { font-size:13px; color:#9a5030; line-height:1.5; }
+  .step-body code { background:rgba(252,81,2,.15); border:1px solid var(--ln); border-radius:6px; padding:1px 7px; font-size:12px; color:var(--s); font-family:monospace; }
+
+  /* MOCKUP (simulação de tela) */
+  .mock { background:#1a0800; border:1px solid var(--ln); border-radius:14px; overflow:hidden; width:100%; }
+  .mock-bar { background:linear-gradient(135deg,#3d1500,#2d0e00); padding:10px 16px; display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--ln); }
+  .mock-bar .dot3 { display:flex; gap:5px; }
+  .mock-bar .dot3 span { width:9px; height:9px; border-radius:50%; }
+  .mock-bar .d1 { background:#ff5f57; }
+  .mock-bar .d2 { background:#febc2e; }
+  .mock-bar .d3 { background:#28c840; }
+  .mock-bar .url { background:rgba(255,255,255,.06); border-radius:6px; padding:3px 12px; font-size:11px; color:#7a4020; margin-left:8px; flex:1; }
+  .mock-body { padding:14px 16px; }
+
+  /* CAMPO SIMULADO */
+  .f-row  { display:flex; gap:10px; margin-bottom:8px; }
+  .f-col  { flex:1; }
+  .f-lbl  { font-size:10px; color:#7a4020; margin-bottom:3px; font-weight:600; letter-spacing:.5px; text-transform:uppercase; }
+  .f-inp  { background:rgba(255,255,255,.05); border:1px solid rgba(252,81,2,.2); border-radius:8px; padding:7px 10px; font-size:12px; color:#ffe0cc; width:100%; }
+  .f-inp.filled { border-color:var(--p); background:rgba(252,81,2,.08); }
+  .f-inp.highlight { border-color:var(--s); background:rgba(252,125,5,.12); box-shadow:0 0 0 2px rgba(252,125,5,.2); }
+  .f-sel  { background:rgba(255,255,255,.05); border:1px solid rgba(252,81,2,.2); border-radius:8px; padding:7px 10px; font-size:12px; color:#ffe0cc; width:100%; }
+
+  /* BOTÃO SIMULADO */
+  .f-btn  { background:linear-gradient(135deg,var(--p),var(--s)); color:#fff; border:none; border-radius:8px; padding:8px 18px; font-size:12px; font-weight:700; cursor:default; }
+  .f-btn.sec { background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.12); }
+
+  /* KPI SIMULADOS */
+  .kpi-row { display:flex; gap:8px; margin-bottom:10px; }
+  .kpi-m   { flex:1; background:rgba(255,255,255,.04); border:1px solid var(--ln); border-radius:10px; padding:10px 12px; }
+  .kpi-m .kv { font-size:20px; font-weight:800; color:var(--p); }
+  .kpi-m .kl { font-size:10px; color:#7a4020; text-transform:uppercase; letter-spacing:.5px; margin-top:2px; }
+
+  /* TABELA SIMULADA */
+  .t-head { display:flex; gap:0; background:rgba(252,81,2,.15); border-radius:8px 8px 0 0; }
+  .t-head span, .t-row span { flex:1; font-size:10px; padding:6px 8px; color:#fc5102; font-weight:700; border-right:1px solid var(--ln); overflow:hidden; white-space:nowrap; }
+  .t-head span:last-child, .t-row span:last-child { border-right:none; }
+  .t-row  { display:flex; gap:0; border-top:1px solid rgba(252,81,2,.08); }
+  .t-row span { color:#ffe0cc; font-weight:400; }
+  .t-row.green td, .t-row.green span { background:rgba(34,197,94,.07); }
+  .t-row.yellow span { background:rgba(251,191,36,.07); }
+  .t-row.red span    { background:rgba(220,60,60,.07); }
+
+  /* BADGE STATUS */
+  .badge { display:inline-block; border-radius:999px; padding:2px 9px; font-size:10px; font-weight:700; }
+  .b-ag  { background:rgba(56,189,248,.15); color:#7dd3fc; }
+  .b-cf  { background:rgba(34,197,94,.15);  color:#4ade80; }
+  .b-cp  { background:rgba(74,222,128,.2);  color:#4ade80; }
+  .b-nc  { background:rgba(220,60,60,.15);  color:#f87171; }
+  .b-os  { background:rgba(252,81,2,.15);   color:#ff8040; }
+  .b-cc  { background:rgba(168,85,247,.15); color:#c084fc; }
+  .b-ca  { background:rgba(100,116,139,.15);color:#94a3b8; }
+
+  /* TOOLTIP / SETA */
+  .arrow-box { display:flex; align-items:flex-start; gap:14px; background:rgba(252,125,5,.1); border:1px solid rgba(252,125,5,.3); border-radius:12px; padding:12px 16px; margin-top:10px; }
+  .arrow-box .ico { font-size:20px; flex-shrink:0; }
+  .arrow-box p { font-size:13px; color:#ffcca0; line-height:1.5; }
+  .arrow-box strong { color:var(--s); }
+
+  /* CARDS GRID */
+  .grid { display:grid; gap:12px; width:100%; }
+  .g2 { grid-template-columns:1fr 1fr; }
+  .g3 { grid-template-columns:1fr 1fr 1fr; }
+  .card { background:var(--g); border:1px solid var(--ln); border-radius:14px; padding:18px 20px; }
+  .card h3 { font-size:14px; font-weight:700; color:#ffe0cc; margin-bottom:6px; }
+  .card p  { font-size:13px; color:#9a5030; line-height:1.5; }
+  .card .ico { font-size:24px; margin-bottom:8px; }
+
+  /* LEGENDA CORES */
+  .leg { display:flex; gap:14px; flex-wrap:wrap; width:100%; margin-top:10px; }
+  .leg-i { display:flex; align-items:center; gap:8px; }
+  .leg-dot { width:12px; height:12px; border-radius:3px; flex-shrink:0; }
+  .leg-i span { font-size:12px; color:#b08060; }
+
+  /* TOPBAR SIMULADA */
+  .top-m { display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,.03); border-radius:10px; padding:10px 14px; margin-bottom:10px; border:1px solid var(--ln); }
+  .top-m .user { font-size:12px; color:#ffe0cc; }
+  .top-m .user small { display:block; color:#7a4020; font-size:10px; }
+  .top-m .sync { font-size:11px; color:#4ade80; display:flex; align-items:center; gap:5px; }
+  .top-m .sync::before { content:''; width:7px; height:7px; border-radius:50%; background:#22c55e; display:inline-block; }
+
+  /* NAV */
+  .nav { position:fixed; bottom:24px; left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:12px; background:rgba(13,5,0,.88); backdrop-filter:blur(12px); border:1px solid var(--ln); border-radius:999px; padding:7px 16px; z-index:100; }
+  .nav button { background:var(--g); border:1px solid var(--ln); color:#ff8040; width:32px; height:32px; border-radius:50%; font-size:15px; cursor:pointer; transition:background .2s; }
+  .nav button:hover { background:rgba(252,81,2,.3); }
+  .nav button:disabled { opacity:.2; cursor:default; }
+  .nav .counter { font-size:11px; color:#7a4020; min-width:50px; text-align:center; }
+  .dots { position:fixed; right:20px; top:50%; transform:translateY(-50%); display:flex; flex-direction:column; gap:7px; z-index:100; }
+  .dot  { width:6px; height:6px; border-radius:50%; background:rgba(252,81,2,.2); cursor:pointer; transition:all .25s; }
+  .dot.active { background:var(--p); transform:scale(1.5); }
+  .hint { position:fixed; bottom:72px; left:50%; transform:translateX(-50%); font-size:10px; color:#3a1800; letter-spacing:1px; }
+
+  /* SIDE-BY-SIDE layout */
+  .sbs { display:flex; gap:20px; width:100%; align-items:flex-start; }
+  .sbs-left { flex:0 0 42%; }
+  .sbs-right { flex:1; }
+
+  /* HIGHLIGHT BOX */
+  .hl { background:linear-gradient(135deg,rgba(252,81,2,.12),rgba(252,125,5,.06)); border:1px solid rgba(252,81,2,.28); border-radius:12px; padding:14px 18px; font-size:14px; color:#ffcca0; line-height:1.6; }
+  .hl strong { color:var(--s); }
+
+  /* NUMERO de slide no canto */
+  .slide-num { position:fixed; top:22px; right:58px; font-size:11px; color:#3a1800; z-index:99; }
+
+  /* ARC deco */
+  .arc { position:absolute; inset:0; pointer-events:none; overflow:hidden; }
+  .arc::before { content:''; position:absolute; width:500px; height:500px; border-radius:50%; border:1px solid rgba(252,81,2,.1); right:-150px; top:-150px; }
+  .arc::after  { content:''; position:absolute; width:320px; height:320px; border-radius:50%; border:1px solid rgba(252,81,2,.07); right:-40px; top:-40px; }
+
+  /* FILTRO SIMULADO */
+  .fil-box { background:rgba(255,255,255,.03); border:1px solid var(--ln); border-radius:10px; padding:10px 12px; }
+  .fil-row { display:flex; gap:8px; margin-bottom:7px; flex-wrap:wrap; }
+  .fil-row:last-child { margin-bottom:0; }
+
+  /* ACTION BUTTONS simulados */
+  .act-btns { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
+  .act-btn { font-size:10px; padding:4px 10px; border-radius:6px; font-weight:700; }
+  .act-edit  { background:rgba(56,189,248,.15); color:#7dd3fc; border:1px solid rgba(56,189,248,.3); }
+  .act-cp    { background:rgba(34,197,94,.15);  color:#4ade80; border:1px solid rgba(34,197,94,.3); }
+  .act-nc    { background:rgba(220,60,60,.15);  color:#f87171; border:1px solid rgba(220,60,60,.3); }
+  .act-os    { background:rgba(252,81,2,.15);   color:#ff8040; border:1px solid rgba(252,81,2,.3); }
+  .act-del   { background:rgba(100,116,139,.12);color:#94a3b8; border:1px solid rgba(100,116,139,.3); }
+</style>
+</head>
+<body>
+<div class="deck" id="deck">
+
+<!-- ══ 1 · CAPA ══ -->
+<div class="slide bg-capa active">
+  <div class="arc"></div>
+  <div class="logo-w"><img src="https://global-files-nginx.builderall.com/184d08cd-6b72-40d2-882c-efd891ebcb21/f5c399ecf564642e5009ea51be228289ab8b18a12e4e198786ad8732a9d9dca9.png" alt="Óticas Target"></div>
+  <div class="tag">Manual do Usuário</div>
+  <h1>Como usar o<br><em>Sistema de Agendamento</em></h1>
+  <p class="sub">Guia completo de todas as telas, funções e ações do sistema.<br>Navegue com as setas do teclado ← →</p>
+  <div class="url-b">sistema.oticastgt.com.br</div>
+</div>
+
+<!-- ══ 2 · LOGIN ══ -->
+<div class="slide bg-d">
+  <div class="tag">Passo 1 — Acesso</div>
+  <h2>Como fazer o <span>Login</span></h2>
+  <div class="divider"></div>
+  <div class="sbs">
+    <div class="sbs-left">
+      <div class="steps">
+        <div class="step"><div class="step-num">1</div><div class="step-body"><h4>Abra o sistema</h4><p>Acesse <code>sistema.oticastgt.com.br</code> em qualquer navegador.</p></div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body"><h4>Digite seu e-mail</h4><p>Informe o e-mail que está cadastrado na planilha de usuários.</p></div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body"><h4>Clique em Entrar</h4><p>O sistema valida o e-mail e abre o painel automaticamente.</p></div></div>
+      </div>
+      <div class="arrow-box" style="margin-top:14px;"><div class="ico">💡</div><p>Não existe senha. O acesso é feito só pelo <strong>e-mail cadastrado</strong>. Se seu e-mail não funcionar, fale com o administrador.</p></div>
+    </div>
+    <div class="sbs-right">
+      <div class="mock">
+        <div class="mock-bar"><div class="dot3"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div><div class="url">sistema.oticastgt.com.br</div></div>
+        <div class="mock-body" style="text-align:center; padding:24px 20px;">
+          <div style="font-size:13px; font-weight:700; color:var(--p); margin-bottom:4px;">Sistema de Agendamento</div>
+          <div style="font-size:11px; color:#7a4020; margin-bottom:18px;">Gestão Multiloja + Acompanhamento de OS</div>
+          <div class="f-lbl" style="text-align:left;">E-mail de acesso</div>
+          <div class="f-inp highlight" style="margin-bottom:12px;">seuemail@empresa.com</div>
+          <div class="f-btn" style="width:100%; text-align:center;">Entrar</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ 3 · TELA PRINCIPAL ══ -->
+<div class="slide bg-m">
+  <div class="tag">Visão Geral</div>
+  <h2>A <span>Tela Principal</span></h2>
+  <div class="divider"></div>
+  <div class="mock">
+    <div class="mock-bar"><div class="dot3"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div><div class="url">sistema.oticastgt.com.br</div></div>
+    <div class="mock-body">
+      <div class="top-m">
+        <div class="user"><strong>Sistema de Agendamento</strong><small>Maria Silva · Atendimento Central · maria@oticas.com</small></div>
+        <div style="display:flex; align-items:center; gap:12px;">
+          <div class="sync">Atualizado às 14:35:22</div>
+          <div class="f-btn sec" style="font-size:11px; padding:5px 12px;">Sair</div>
+        </div>
+      </div>
+      <div class="kpi-row">
+        <div class="kpi-m"><div class="kv">12</div><div class="kl">Agendados</div></div>
+        <div class="kpi-m"><div class="kv">8</div><div class="kl">Compareceram</div></div>
+        <div class="kpi-m"><div class="kv">2</div><div class="kl">Não Compareceram</div></div>
+        <div class="kpi-m"><div class="kv">5</div><div class="kl">Concluídos</div></div>
+        <div class="kpi-m"><div class="kv">3</div><div class="kl">OS Ativas</div></div>
+        <div class="kpi-m"><div class="kv" style="color:#f87171;">1</div><div class="kl">OS Atrasadas</div></div>
+      </div>
+      <div style="font-size:11px; color:#7a4020; margin-top:4px;">↑ Dashboard · ↓ Tabela de agendamentos · Novo Agendamento (somente para perfis permitidos)</div>
+    </div>
+  </div>
+  <div class="grid g3" style="margin-top:14px;">
+    <div class="card"><div class="ico">📊</div><h3>Dashboard</h3><p>Números do período selecionado em tempo real.</p></div>
+    <div class="card"><div class="ico">🟢</div><h3>Indicador de Sync</h3><p>Ponto verde = dados atualizados. Amarelo = atualizando.</p></div>
+    <div class="card"><div class="ico">🚪</div><h3>Botão Sair</h3><p>Encerra a sessão e volta para a tela de login.</p></div>
+  </div>
+</div>
+
+<!-- ══ 4 · DASHBOARD ══ -->
+<div class="slide bg-d">
+  <div class="tag">Painel de Números</div>
+  <h2>Entendendo o <span>Dashboard</span></h2>
+  <div class="divider"></div>
+  <div class="mock">
+    <div class="mock-body">
+      <div style="font-size:12px; font-weight:700; color:#ffe0cc; margin-bottom:10px;">Dashboard Operacional</div>
+      <div class="kpi-row">
+        <div class="kpi-m"><div class="kv">18</div><div class="kl">Agendados / Confirmados</div></div>
+        <div class="kpi-m"><div class="kv">11</div><div class="kl">Compareceram</div></div>
+        <div class="kpi-m"><div class="kv">3</div><div class="kl">Não Compareceram</div></div>
+        <div class="kpi-m"><div class="kv">6</div><div class="kl">Concluídos</div></div>
+        <div class="kpi-m"><div class="kv">4</div><div class="kl">OS Ativas</div></div>
+        <div class="kpi-m"><div class="kv" style="color:#f87171;">2</div><div class="kl">OS Atrasadas</div></div>
+        <div class="kpi-m"><div class="kv">Instagram</div><div class="kl">Origem top</div></div>
+      </div>
+    </div>
+  </div>
+  <div class="grid g3" style="margin-top:14px;">
+    <div class="card"><h3>Agendados / Confirmados</h3><p>Total de agendamentos no período, incluindo confirmados.</p></div>
+    <div class="card"><h3>Compareceram</h3><p>Clientes que apareceram na loja para a consulta.</p></div>
+    <div class="card"><h3>Não Compareceram</h3><p>Clientes que não apareceram (marcados como ausentes).</p></div>
+    <div class="card"><h3>Concluídos</h3><p>Agendamentos finalizados com OS encerrada.</p></div>
+    <div class="card"><h3>OS Atrasadas 🚨</h3><p>OS com data de entrega vencida e ainda sem finalização.</p></div>
+    <div class="card"><h3>Origem Top</h3><p>Canal que mais trouxe clientes no período.</p></div>
+  </div>
+</div>
+
+<!-- ══ 5 · NOVO AGENDAMENTO (1) ══ -->
+<div class="slide bg-m">
+  <div class="tag">Criar Agendamento — Parte 1</div>
+  <h2>Novo <span>Agendamento</span> — Dados do Cliente</h2>
+  <div class="divider"></div>
+  <div class="sbs">
+    <div class="sbs-left">
+      <div class="steps">
+        <div class="step"><div class="step-num">1</div><div class="step-body"><h4>Origem</h4><p>Selecione de onde veio o cliente: Google, Instagram, WhatsApp, Indicação…</p></div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body"><h4>Nome completo</h4><p>Nome do cliente como aparecerá no sistema.</p></div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body"><h4>WhatsApp</h4><p>Número com DDD. Ex: <code>13999999999</code></p></div></div>
+        <div class="step"><div class="step-num">4</div><div class="step-body"><h4>E-mail</h4><p>E-mail do cliente (opcional mas recomendado).</p></div></div>
+      </div>
+    </div>
+    <div class="sbs-right">
+      <div class="mock">
+        <div class="mock-bar"><div class="dot3"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div><div class="url">Novo Agendamento</div></div>
+        <div class="mock-body">
+          <div style="background:rgba(252,81,2,.08); border:1px solid var(--ln); border-radius:8px; padding:9px 12px; font-size:11px; color:#b08060; margin-bottom:10px;"><strong style="color:var(--s);">Regras de horário</strong><br>Seg–Sex: 10:00 às 18:00 · Sáb: 10:00 às 16:00 · Dom e feriados: bloqueados</div>
+          <div class="f-row">
+            <div class="f-col"><div class="f-lbl">Origem *</div><div class="f-sel">Instagram ▾</div></div>
+            <div class="f-col"><div class="f-lbl">Nome completo *</div><div class="f-inp filled">João da Silva</div></div>
+          </div>
+          <div class="f-row">
+            <div class="f-col"><div class="f-lbl">WhatsApp *</div><div class="f-inp filled">13999990000</div></div>
+            <div class="f-col"><div class="f-lbl">Email *</div><div class="f-inp filled">joao@email.com</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ 6 · NOVO AGENDAMENTO (2) ══ -->
+<div class="slide bg-d">
+  <div class="tag">Criar Agendamento — Parte 2</div>
+  <h2>Novo <span>Agendamento</span> — Data e Loja</h2>
+  <div class="divider"></div>
+  <div class="sbs">
+    <div class="sbs-left">
+      <div class="steps">
+        <div class="step"><div class="step-num">5</div><div class="step-body"><h4>Loja</h4><p>Selecione a loja. Isso carrega automaticamente os optometristas disponíveis.</p></div></div>
+        <div class="step"><div class="step-num">6</div><div class="step-body"><h4>Optometrista</h4><p>Escolha o optometrista da consulta.</p></div></div>
+        <div class="step"><div class="step-num">7</div><div class="step-body"><h4>Data e Horário</h4><p>O sistema valida automaticamente se o horário está dentro do permitido e se não há conflito.</p></div></div>
+        <div class="step"><div class="step-num">8</div><div class="step-body"><h4>Status inicial</h4><p>Escolha <code>Agendado</code> ou <code>Confirmado</code>.</p></div></div>
+        <div class="step"><div class="step-num">9</div><div class="step-body"><h4>Observação e Salvar</h4><p>Adicione observações e clique em <code>Salvar agendamento</code>.</p></div></div>
+      </div>
+    </div>
+    <div class="sbs-right">
+      <div class="mock">
+        <div class="mock-bar"><div class="dot3"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div><div class="url">Novo Agendamento</div></div>
+        <div class="mock-body">
+          <div class="f-row">
+            <div class="f-col"><div class="f-lbl">Loja *</div><div class="f-sel">Óticas TGT — Gonzaga ▾</div></div>
+            <div class="f-col"><div class="f-lbl">Optometrista *</div><div class="f-sel">Dra. Ana Costa ▾</div></div>
+          </div>
+          <div class="f-row">
+            <div class="f-col"><div class="f-lbl">Data *</div><div class="f-inp filled">21/05/2026</div></div>
+            <div class="f-col"><div class="f-lbl">Horário *</div><div class="f-inp filled">14:00</div></div>
+          </div>
+          <div class="f-row">
+            <div class="f-col"><div class="f-lbl">Status *</div><div class="f-sel">Agendado ▾</div></div>
+            <div class="f-col"><div class="f-lbl">Tag de acesso</div><div class="f-sel">origem:instagram ▾</div></div>
+          </div>
+          <div style="margin-bottom:10px;"><div class="f-lbl">Observação *</div><div class="f-inp filled" style="height:46px; display:flex; align-items:flex-start; padding-top:6px;">Primeira consulta. Usa óculos de grau.</div></div>
+          <div class="f-row">
+            <div class="f-col"><div class="f-btn">Salvar agendamento</div></div>
+            <div class="f-col"><div class="f-btn sec">Limpar</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ 7 · TABELA ══ -->
+<div class="slide bg-m">
+  <div class="tag">Lista de Agendamentos</div>
+  <h2>Entendendo a <span>Tabela</span></h2>
+  <div class="divider"></div>
+  <div class="mock">
+    <div class="mock-body" style="padding:10px 12px;">
+      <div class="t-head">
+        <span>ID</span><span>Data Reg.</span><span>Cliente</span><span>Proprietário</span><span>Dia Ag.</span><span>Status Ag.</span><span>Presença</span><span>Nº OS</span><span>Status OS</span><span>Loja</span><span>Ações</span>
+      </div>
+      <div class="t-row green">
+        <span>AG-001</span><span>20/05</span><span>João Silva</span><span>Maria</span><span>21/05 14:00</span><span><span class="badge b-cp">Compareceu</span></span><span>✅</span><span>2026-001</span><span><span class="badge b-os">Em prod.</span></span><span>Gonzaga</span><span style="display:flex;gap:3px;flex-wrap:wrap;"><span class="act-btn act-edit">Editar</span><span class="act-btn act-os">OS</span></span>
+      </div>
+      <div class="t-row yellow">
+        <span>AG-002</span><span>20/05</span><span>Ana Melo</span><span>Carlos</span><span>21/05 10:00</span><span><span class="badge b-cf">Confirmado</span></span><span>—</span><span>—</span><span>—</span><span>Enseada</span><span style="display:flex;gap:3px;flex-wrap:wrap;"><span class="act-btn act-edit">Editar</span><span class="act-btn act-cp">✓ Compareceu</span></span>
+      </div>
+      <div class="t-row red">
+        <span>AG-003</span><span>19/05</span><span>Pedro Ramos</span><span>Ana</span><span>20/05 15:00</span><span><span class="badge b-nc">Não Comp.</span></span><span>❌</span><span>—</span><span>—</span><span>Target</span><span style="display:flex;gap:3px;flex-wrap:wrap;"><span class="act-btn act-edit">Editar</span></span>
+      </div>
+    </div>
+  </div>
+  <div class="leg">
+    <div class="leg-i"><div class="leg-dot" style="background:rgba(34,197,94,.25);"></div><span>Verde = Compareceu e comprou</span></div>
+    <div class="leg-i"><div class="leg-dot" style="background:rgba(251,191,36,.25);"></div><span>Amarelo = Compareceu sem compra ou Confirmado</span></div>
+    <div class="leg-i"><div class="leg-dot" style="background:rgba(220,60,60,.25);"></div><span>Vermelho = Não compareceu</span></div>
+    <div class="leg-i"><div class="leg-dot" style="background:rgba(255,255,255,.05);"></div><span>Sem cor = Apenas agendado</span></div>
+  </div>
+</div>
+
+<!-- ══ 8 · FILTROS ══ -->
+<div class="slide bg-d">
+  <div class="tag">Pesquisa e Filtros</div>
+  <h2>Como usar os <span>Filtros</span></h2>
+  <div class="divider"></div>
+  <div class="mock">
+    <div class="mock-body" style="padding:10px 12px;">
+      <div class="fil-box">
+        <div class="fil-row">
+          <div class="f-col"><div class="f-lbl">Data inicial</div><div class="f-inp filled">01/05/2026</div></div>
+          <div class="f-col"><div class="f-lbl">Data final</div><div class="f-inp filled">31/05/2026</div></div>
+          <div class="f-col"><div class="f-lbl">Status agendamento</div><div class="f-sel">Todos ▾</div></div>
+          <div class="f-col"><div class="f-lbl">Status OS</div><div class="f-sel">Todos ▾</div></div>
+        </div>
+        <div class="fil-row">
+          <div class="f-col"><div class="f-lbl">Cliente</div><div class="f-inp highlight">João</div></div>
+          <div class="f-col"><div class="f-lbl">Loja</div><div class="f-sel">Gonzaga ▾</div></div>
+          <div class="f-col"><div class="f-lbl">Optometrista</div><div class="f-inp">Digite o nome</div></div>
+          <div class="f-col"><div class="f-lbl">Proprietário</div><div class="f-sel">Todos ▾</div></div>
+        </div>
+        <div class="fil-row">
+          <div style="display:flex; align-items:center; gap:6px;"><div style="width:14px;height:14px;border:1px solid var(--ln);border-radius:3px;background:rgba(252,81,2,.2);"></div><span style="font-size:11px; color:#ffe0cc;">Meus Serviços</span></div>
+          <div style="display:flex; align-items:center; gap:6px; margin-left:14px;"><div style="width:14px;height:14px;border:1px solid var(--ln);border-radius:3px;"></div><span style="font-size:11px; color:#7a4020;">Minhas OS Ativas</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="grid g3" style="margin-top:14px;">
+    <div class="card"><h3>Busca por cliente</h3><p>Digite nome, WhatsApp ou e-mail — filtra automaticamente enquanto você digita.</p></div>
+    <div class="card"><h3>Meus Serviços ✔</h3><p>Marca o checkbox para ver apenas os agendamentos criados por você.</p></div>
+    <div class="card"><h3>Limpar filtros</h3><p>Clique no botão "Limpar filtros" para voltar à visualização completa.</p></div>
+  </div>
+</div>
+
+<!-- ══ 9 · AÇÕES DA TABELA ══ -->
+<div class="slide bg-m">
+  <div class="tag">Botões de Ação</div>
+  <h2>O que cada <span>Ação</span> faz?</h2>
+  <div class="divider"></div>
+  <div class="steps">
+    <div class="step"><div class="act-btn act-edit" style="font-size:13px; padding:6px 14px;">✏️ Editar</div><div class="step-body" style="margin-left:8px;"><h4>Editar agendamento completo</h4><p>Abre o modal de edição — permite alterar dados do cliente, data, horário, status, OS, valores e mais.</p></div></div>
+    <div class="step"><div class="act-btn act-cp" style="font-size:13px; padding:6px 14px;">✓ Compareceu</div><div class="step-body" style="margin-left:8px;"><h4>Marcar presença positiva</h4><p>Registra que o cliente apareceu. Muda o status para "Compareceu" e pinta a linha de verde/amarelo.</p></div></div>
+    <div class="step"><div class="act-btn act-nc" style="font-size:13px; padding:6px 14px;">✗ Não Comp.</div><div class="step-body" style="margin-left:8px;"><h4>Marcar ausência</h4><p>Registra que o cliente não apareceu. Linha fica vermelha. Ação irreversível sem edição.</p></div></div>
+    <div class="step"><div class="act-btn act-os" style="font-size:13px; padding:6px 14px;">📋 OS</div><div class="step-body" style="margin-left:8px;"><h4>Registrar / Atualizar OS</h4><p>Abre o modal de Ordem de Serviço para informar número, datas de entrada, entrega, valor e status.</p></div></div>
+    <div class="step"><div class="act-btn act-del" style="font-size:13px; padding:6px 14px;">🗑️ Excluir</div><div class="step-body" style="margin-left:8px;"><h4>Excluir agendamento</h4><p>Remove o registro permanentemente. Disponível apenas para Admin e Atendimento Central.</p></div></div>
+  </div>
+</div>
+
+<!-- ══ 10 · EDITAR AGENDAMENTO ══ -->
+<div class="slide bg-d">
+  <div class="tag">Modal de Edição</div>
+  <h2>Editando um <span>Agendamento</span></h2>
+  <div class="divider"></div>
+  <div class="sbs">
+    <div class="sbs-left">
+      <div class="steps">
+        <div class="step"><div class="step-num">1</div><div class="step-body"><h4>Abra o modal</h4><p>Clique em <code>Editar</code> na linha do agendamento desejado.</p></div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body"><h4>Altere os campos</h4><p>Edite nome, data, horário, status, OS, valor e qualquer outro dado necessário.</p></div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body"><h4>Salvar edição</h4><p>Clique em <code>Salvar edição</code>. O sistema atualiza e registra no histórico de auditoria.</p></div></div>
+      </div>
+      <div class="arrow-box" style="margin-top:14px;"><div class="ico">⚠️</div><p>Cada perfil tem campos limitados para editar. O optometrista, por exemplo, só pode alterar o <strong>status de presença</strong>.</p></div>
+    </div>
+    <div class="sbs-right">
+      <div class="mock">
+        <div class="mock-bar"><div class="dot3"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div><div class="url">Editar Agendamento / OS</div></div>
+        <div class="mock-body">
+          <div class="f-row"><div class="f-col"><div class="f-lbl">ID</div><div class="f-inp" style="opacity:.5;">AG-20260521</div></div><div class="f-col"><div class="f-lbl">Data Registro</div><div class="f-inp" style="opacity:.5;">21/05/2026</div></div></div>
+          <div class="f-row"><div class="f-col"><div class="f-lbl">Nome completo</div><div class="f-inp filled">João da Silva</div></div><div class="f-col"><div class="f-lbl">WhatsApp</div><div class="f-inp filled">13999990000</div></div></div>
+          <div class="f-row"><div class="f-col"><div class="f-lbl">Data do Agendamento</div><div class="f-inp highlight">22/05/2026</div></div><div class="f-col"><div class="f-lbl">Horário</div><div class="f-inp highlight">15:00</div></div></div>
+          <div class="f-row"><div class="f-col"><div class="f-lbl">Status Agendamento</div><div class="f-sel">Confirmado ▾</div></div><div class="f-col"><div class="f-lbl">Status OS</div><div class="f-sel">Em produção ▾</div></div></div>
+          <div class="f-row"><div class="f-col"><div class="f-lbl">Número OS</div><div class="f-inp filled">2026-042</div></div><div class="f-col"><div class="f-lbl">Valor Venda</div><div class="f-inp filled">R$ 890,00</div></div></div>
+          <div class="f-row" style="margin-top:8px;"><div class="f-col"><div class="f-btn">Salvar edição</div></div><div class="f-col"><div class="f-btn sec">Cancelar</div></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ 11 · REGISTRAR OS ══ -->
+<div class="slide bg-m">
+  <div class="tag">Ordem de Serviço</div>
+  <h2>Como registrar uma <span>OS</span></h2>
+  <div class="divider"></div>
+  <div class="sbs">
+    <div class="sbs-left">
+      <div class="steps">
+        <div class="step"><div class="step-num">1</div><div class="step-body"><h4>Clique em OS</h4><p>Na linha do agendamento, clique no botão <code>OS</code>.</p></div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body"><h4>Número da OS</h4><p>Digite o número da OS gerado no sistema da loja. Ex: <code>2026-042</code></p></div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body"><h4>Datas</h4><p><strong>Abertura:</strong> quando a OS foi aberta.<br><strong>Entrada:</strong> quando foi para o laboratório.<br><strong>Entrega:</strong> prazo previsto.<br><strong>Finalização:</strong> quando ficou pronta.</p></div></div>
+        <div class="step"><div class="step-num">4</div><div class="step-body"><h4>Valor e desconto</h4><p>Informe o valor da venda e o desconto (se houver).</p></div></div>
+      </div>
+    </div>
+    <div class="sbs-right">
+      <div class="mock">
+        <div class="mock-bar"><div class="dot3"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div><div class="url">Registrar / Atualizar OS</div></div>
+        <div class="mock-body">
+          <div class="f-row"><div class="f-col"><div class="f-lbl">Número da OS</div><div class="f-inp highlight">2026-042</div></div><div class="f-col"><div class="f-lbl">Status da OS</div><div class="f-sel">Em produção ▾</div></div></div>
+          <div class="f-row"><div class="f-col"><div class="f-lbl">Data de Abertura</div><div class="f-inp filled">21/05/2026</div></div><div class="f-col"><div class="f-lbl">Data de Entrada (lab.)</div><div class="f-inp filled">22/05/2026</div></div></div>
+          <div class="f-row"><div class="f-col"><div class="f-lbl">Data Prevista Entrega</div><div class="f-inp filled">30/05/2026</div></div><div class="f-col"><div class="f-lbl">Data de Finalização</div><div class="f-inp">—</div></div></div>
+          <div class="f-row"><div class="f-col"><div class="f-lbl">Valor da OS (R$)</div><div class="f-inp highlight">890,00</div></div><div class="f-col"><div class="f-lbl">Desconto (R$)</div><div class="f-inp filled">50,00</div></div></div>
+          <div style="margin-bottom:10px;"><div class="f-lbl">Vendedor responsável</div><div class="f-inp filled">Carlos Mendes</div></div>
+          <div class="f-row"><div class="f-col"><div class="f-btn">Salvar OS</div></div><div class="f-col"><div class="f-btn sec">Cancelar</div></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ 12 · MARCAR PRESENÇA ══ -->
+<div class="slide bg-d">
+  <div class="tag">Controle de Presença</div>
+  <h2>Registrar <span>Comparecimento</span></h2>
+  <div class="divider"></div>
+  <div class="grid g2" style="margin-bottom:16px;">
+    <div class="card">
+      <div style="font-size:28px; margin-bottom:10px;">✅</div>
+      <h3 style="color:#4ade80;">Compareceu</h3>
+      <p>Cliente apareceu na loja. Clique em <strong>"✓ Compareceu"</strong> na linha do agendamento. A linha fica verde (se comprou) ou amarela (se não comprou ainda).</p>
+    </div>
+    <div class="card">
+      <div style="font-size:28px; margin-bottom:10px;">❌</div>
+      <h3 style="color:#f87171;">Não Compareceu</h3>
+      <p>Cliente não apareceu. Clique em <strong>"✗ Não Compareceu"</strong>. A linha fica vermelha e o status muda automaticamente.</p>
+    </div>
+  </div>
+  <div class="mock">
+    <div class="mock-body" style="padding:10px 12px;">
+      <div class="t-head"><span>Cliente</span><span>Dia Ag.</span><span>Status</span><span>Presença</span><span>Ações</span></div>
+      <div class="t-row yellow"><span>Ana Souza</span><span>21/05 10:00</span><span><span class="badge b-cf">Confirmado</span></span><span>—</span><span style="display:flex;gap:4px;"><span class="act-btn act-cp">✓ Compareceu</span><span class="act-btn act-nc">✗ Não Comp.</span></span></div>
+    </div>
+  </div>
+  <div class="arrow-box" style="margin-top:14px;"><div class="ico">💡</div><p>Após marcar <strong>Compareceu</strong>, o botão <strong>OS</strong> aparece para você registrar a ordem de serviço da consulta.</p></div>
+</div>
+
+<!-- ══ 13 · FINANCEIRO ══ -->
+<div class="slide bg-m">
+  <div class="tag">Módulo Financeiro — Admin e Gerente</div>
+  <h2>Painel de <span>Faturamento</span></h2>
+  <div class="divider"></div>
+  <div class="mock">
+    <div class="mock-body">
+      <div style="font-size:12px; font-weight:700; color:#ffe0cc; margin-bottom:10px;">Módulo de Faturamento</div>
+      <div class="kpi-row">
+        <div class="kpi-m"><div class="kv">R$ 14.200</div><div class="kl">Total faturado</div></div>
+        <div class="kpi-m"><div class="kv">R$ 980</div><div class="kl">Total desconto</div></div>
+        <div class="kpi-m"><div class="kv">18</div><div class="kl">OS com valor</div></div>
+        <div class="kpi-m"><div class="kv">R$ 789</div><div class="kl">Ticket médio</div></div>
+      </div>
+      <div style="margin-top:8px;">
+        <div class="t-head"><span>Cliente</span><span>Nº OS</span><span>Status OS</span><span>Valor</span><span>Desconto</span><span>Vendedor</span><span>Loja</span></div>
+        <div class="t-row"><span>João Silva</span><span>2026-041</span><span><span class="badge b-cc">Concluído</span></span><span>R$ 890</span><span>R$ 50</span><span>Carlos</span><span>Gonzaga</span></div>
+        <div class="t-row"><span>Ana Melo</span><span>2026-042</span><span><span class="badge b-os">Em prod.</span></span><span>R$ 620</span><span>—</span><span>Maria</span><span>Enseada</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="grid g3" style="margin-top:14px;">
+    <div class="card"><h3>Quem acessa?</h3><p>Somente <strong>Admin</strong> e <strong>Gerente de Loja</strong> visualizam valores financeiros.</p></div>
+    <div class="card"><h3>Exportar CSV</h3><p>Clique em <strong>"Exportar faturamento"</strong> para baixar os dados em planilha.</p></div>
+    <div class="card"><h3>Filtros</h3><p>Use os filtros de data, loja e status para gerar relatórios do período desejado.</p></div>
+  </div>
+</div>
+
+<!-- ══ 14 · LEAD TIME ══ -->
+<div class="slide bg-d">
+  <div class="tag">Relatório de Desempenho</div>
+  <h2>Relatório de <span>Lead Time</span></h2>
+  <div class="divider"></div>
+  <div class="sbs">
+    <div class="sbs-left">
+      <div class="hl"><strong>Lead Time</strong> é o tempo em dias entre a <strong>abertura da OS</strong> e a <strong>finalização</strong>. Quanto menor, mais rápido o serviço.</div>
+      <div class="steps" style="margin-top:14px;">
+        <div class="step"><div class="step-num">1</div><div class="step-body"><h4>Como acessar</h4><p>No topo do painel, clique no botão <code>Lead Time</code>.</p></div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body"><h4>Média geral</h4><p>O card mostra a média de dias de todas as OS no período filtrado.</p></div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body"><h4>Tabela detalhada</h4><p>Mostra cada OS com data de abertura, finalização e o lead time individual.</p></div></div>
+      </div>
+    </div>
+    <div class="sbs-right">
+      <div class="mock">
+        <div class="mock-bar"><div class="dot3"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div><div class="url">Relatório de Lead Time</div></div>
+        <div class="mock-body">
+          <div class="kpi-row" style="margin-bottom:10px;">
+            <div class="kpi-m"><div class="kv">6,4</div><div class="kl">Média Lead Time (dias)</div></div>
+            <div class="kpi-m"><div class="kv">18</div><div class="kl">Linhas avaliadas</div></div>
+          </div>
+          <div class="t-head"><span>Cliente</span><span>Loja</span><span>Vendedor</span><span>Nº OS</span><span>Abertura</span><span>Finalização</span><span>Dias</span></div>
+          <div class="t-row"><span>João S.</span><span>Gonzaga</span><span>Carlos</span><span>2026-041</span><span>10/05</span><span>16/05</span><span style="color:var(--s); font-weight:700;">6</span></div>
+          <div class="t-row"><span>Ana M.</span><span>Enseada</span><span>Maria</span><span>2026-039</span><span>08/05</span><span>15/05</span><span style="color:#4ade80; font-weight:700;">7</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ 15 · HISTÓRICO ══ -->
+<div class="slide bg-m">
+  <div class="tag">Auditoria</div>
+  <h2>Histórico <span>Operacional</span></h2>
+  <div class="divider"></div>
+  <div class="mock" style="margin-bottom:14px;">
+    <div class="mock-bar"><div class="dot3"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div><div class="url">Histórico Operacional</div></div>
+    <div class="mock-body" style="padding:10px 12px;">
+      <div class="t-head"><span>Data</span><span>Loja</span><span>Cliente</span><span>Ação</span><span>Campo</span><span>Antes</span><span>Depois</span><span>Usuário</span></div>
+      <div class="t-row"><span>21/05 14:32</span><span>Gonzaga</span><span>João Silva</span><span>UPDATE</span><span>StatusAgenda</span><span>Agendado</span><span style="color:#4ade80;">Confirmado</span><span>maria@</span></div>
+      <div class="t-row"><span>21/05 15:10</span><span>Gonzaga</span><span>João Silva</span><span>UPDATE</span><span>NumeroOS</span><span>—</span><span style="color:var(--s);">2026-042</span><span>carlos@</span></div>
+    </div>
+  </div>
+  <div class="grid g2">
+    <div class="card"><h3>Para que serve?</h3><p>Registra toda alteração feita no sistema: quem mudou, o que mudou, quando e de qual valor para qual valor.</p></div>
+    <div class="card"><h3>Como acessar?</h3><p>Clique no botão <code>Histórico</code> no topo do painel. Disponível para Admin, Atendimento Central e Gerente.</p></div>
+  </div>
+</div>
+
+<!-- ══ 16 · RELATÓRIO CSV ══ -->
+<div class="slide bg-d">
+  <div class="tag">Exportação</div>
+  <h2>Exportar <span>Relatório CSV</span></h2>
+  <div class="divider"></div>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-body"><h4>Aplique os filtros desejados</h4><p>Escolha período, loja, status ou qualquer combinação de filtros antes de exportar.</p></div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-body"><h4>Clique em "Relatório Operacional"</h4><p>O botão fica no topo do painel de acompanhamento de OS.</p></div></div>
+    <div class="step"><div class="step-num">3</div><div class="step-body"><h4>Abra no Excel ou Google Planilhas</h4><p>O arquivo <code>.csv</code> baixa automaticamente com todos os dados filtrados: clientes, datas, OS, valores, status.</p></div></div>
+  </div>
+  <div class="arrow-box" style="margin-top:16px;"><div class="ico">💡</div><p>O CSV exporta exatamente os registros visíveis na tabela. Se quiser exportar tudo, limpe os filtros antes de clicar no botão. Para <strong>exportar o financeiro</strong>, vá até o Módulo de Faturamento e clique em "Exportar faturamento".</p></div>
+</div>
+
+<!-- ══ 17 · SYNC / ATUALIZAÇÕES ══ -->
+<div class="slide bg-m">
+  <div class="tag">Sincronização Automática</div>
+  <h2>Indicador de <span>Atualização</span></h2>
+  <div class="divider"></div>
+  <div class="grid g2" style="margin-bottom:16px;">
+    <div class="card">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+        <div style="width:14px;height:14px;border-radius:50%;background:#22c55e;box-shadow:0 0 8px #22c55e;"></div>
+        <h3 style="margin:0; color:#4ade80;">Verde — Dados atualizados</h3>
+      </div>
+      <p>O sistema sincronizou com sucesso. Os dados exibidos estão atualizados há menos de 15 segundos.</p>
+    </div>
+    <div class="card">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+        <div style="width:14px;height:14px;border-radius:50%;background:#f59e0b;box-shadow:0 0 8px #f59e0b;"></div>
+        <h3 style="margin:0; color:#fcd34d;">Amarelo — Atualizando...</h3>
+      </div>
+      <p>O sistema está buscando os dados mais recentes. Aguarde alguns segundos até voltar ao verde.</p>
+    </div>
+  </div>
+  <div class="hl">O sistema atualiza automaticamente a cada <strong>15 segundos</strong> sem precisar recarregar a página. Você sempre verá a informação mais recente enquanto estiver com o sistema aberto.</div>
+  <div class="arrow-box" style="margin-top:14px;"><div class="ico">📱</div><p>O sistema funciona em <strong>celular, tablet e computador</strong>. Basta acessar <strong>sistema.oticastgt.com.br</strong> em qualquer navegador.</p></div>
+</div>
+
+<!-- ══ 18 · DICAS FINAIS ══ -->
+<div class="slide bg-capa">
+  <div class="arc"></div>
+  <div class="logo-w"><img src="https://global-files-nginx.builderall.com/184d08cd-6b72-40d2-882c-efd891ebcb21/f5c399ecf564642e5009ea51be228289ab8b18a12e4e198786ad8732a9d9dca9.png" alt="Óticas Target"></div>
+  <div class="tag">Dicas Importantes</div>
+  <h1>Boas práticas do <em>Sistema</em></h1>
+  <div class="grid g3" style="margin-top:24px;">
+    <div class="card"><div class="ico">🔐</div><h3>Não compartilhe seu e-mail</h3><p>Cada acesso é individual. Não empreste seu e-mail para outros usuários.</p></div>
+    <div class="card"><div class="ico">⏱️</div><h3>Registre a OS logo</h3><p>Abra a OS assim que o cliente comparecer para o Lead Time ficar preciso.</p></div>
+    <div class="card"><div class="ico">✅</div><h3>Confirme presença no dia</h3><p>Marque "Compareceu" ou "Não Compareceu" sempre no dia do agendamento.</p></div>
+    <div class="card"><div class="ico">📅</div><h3>Verifique conflitos</h3><p>O sistema bloqueia horários duplicados no mesmo optometrista e loja.</p></div>
+    <div class="card"><div class="ico">📊</div><h3>Use os filtros</h3><p>Filtre por período e loja para ver apenas o que é relevante para você.</p></div>
+    <div class="card"><div class="ico">❓</div><h3>Problemas?</h3><p>Fale com o administrador do sistema. Não tente adivinhar se algo parecer errado.</p></div>
+  </div>
+</div>
+
+</div><!-- /deck -->
+
+<div class="nav">
+  <button id="btnPrev" onclick="nav(-1)" disabled>‹</button>
+  <span class="counter" id="counter">1 / 18</span>
+  <button id="btnNext" onclick="nav(1)">›</button>
+</div>
+<div class="dots" id="dots"></div>
+<div class="hint">← → para navegar</div>
+
+<script>
+  const slides = document.querySelectorAll('.slide');
+  const total = slides.length;
+  let current = 0;
+  const dotsEl = document.getElementById('dots');
+  slides.forEach(function(_, i) {
+    const d = document.createElement('div');
+    d.className = 'dot' + (i === 0 ? ' active' : '');
+    d.onclick = function() { goTo(i); };
+    dotsEl.appendChild(d);
+  });
+  function goTo(n) {
+    slides[current].classList.remove('active');
+    dotsEl.children[current].classList.remove('active');
+    current = Math.max(0, Math.min(total - 1, n));
+    slides[current].classList.add('active');
+    dotsEl.children[current].classList.add('active');
+    document.getElementById('counter').textContent = (current + 1) + ' / ' + total;
+    document.getElementById('btnPrev').disabled = current === 0;
+    document.getElementById('btnNext').disabled = current === total - 1;
+  }
+  function nav(dir) { goTo(current + dir); }
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') nav(1);
+    if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   nav(-1);
+    if (e.key === 'Home') goTo(0);
+    if (e.key === 'End')  goTo(total - 1);
+  });
+  let tx = 0;
+  document.addEventListener('touchstart', function(e) { tx = e.touches[0].clientX; });
+  document.addEventListener('touchend',   function(e) { if (Math.abs(tx - e.changedTouches[0].clientX) > 50) nav(tx > e.changedTouches[0].clientX ? 1 : -1); });
+</script>
+</body>
+</html>
