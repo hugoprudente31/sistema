@@ -71,11 +71,15 @@ app.use(express.static(path.join(__dirname, 'public'), {
 
 // ── Health check ─────────────────────────────────────────────
 app.get('/health', (_req, res) => {
+  const fs = require('fs');
+  let publicFiles = [];
+  try { publicFiles = fs.readdirSync(path.join(__dirname, 'public')); } catch(e) {}
   res.json({
     ok: true,
     service: 'Agendamento System',
     gasConfigured: !!GAS_URL,
     cacheEntries: cache.size,
+    publicFiles: publicFiles,
     ts: new Date().toISOString()
   });
 });
