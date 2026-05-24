@@ -1,4 +1,4 @@
-// Integração: Kommo CRM — Sistema Óticas Target
+// Kommo CRM Client — Sistema Óticas Target
 
 class KommoClient {
   constructor() {
@@ -27,6 +27,8 @@ class KommoClient {
     return data;
   }
 
+  // ── Contatos ────────────────────────────────────────────────
+
   async findContact(query) {
     try {
       const data = await this.request("GET", `/contacts?query=${encodeURIComponent(query)}&limit=1`);
@@ -46,6 +48,12 @@ class KommoClient {
     return data?._embedded?.contacts?.[0];
   }
 
+  // ── Leads ────────────────────────────────────────────────────
+
+  async getLead(leadId) {
+    return this.request("GET", `/leads/${leadId}?with=contacts,tags`);
+  }
+
   async createLead({ nome, contactId, customFields = [] }) {
     const body = [{
       name:      `Agendamento — ${nome}`,
@@ -60,15 +68,77 @@ class KommoClient {
     return this.request("PATCH", `/leads/${leadId}`, fields);
   }
 
-  async getLead(leadId) {
-    return this.request("GET", `/leads/${leadId}?with=contacts`);
+  // Move o lead para um estágio do pipeline
+  async moveToStage(leadId, stageId) {
+    if (!stageId) return;
+    return this.request("PATCH", `/leads/${leadId}`, { status_id: Number(stageId) });
   }
+
+  // ── Tags (Etiquetas) ─────────────────────────────────────────
+
+  async getLeadTags(leadId) {
+    try {
+      const lead = await this.request("GET", `/leads/${leadId}?with=tags`);
+      return lead?._embedded?.tags || [];
+    } catch { return []; }
+  }
+
+  // Substitui TODAS as tags do lead pela lista fornecida
+  async setLeadTags(leadId, tagNames = []) {
+    const tags = tagNames.map(name => ({ name }));
+    return this.request("PATCH", `/leads/${leadId}`, { _embedded: { tags } });
+  }
+
+  // ── Mensagens (Talks / Inbox) ─────────────────────────────────
+
+  // Retorna as conversas (talks) associadas ao lead
+  async getLeadTalks(leadId) {
+    try {
+      const data = await this.request("GET", `/talks?filter[lead_id]=${leadId}`);
+      return data?._embedded?.talks || [];
+    } catch (e) {
+      console.error("[Kommo] Erro ao buscar talks:", e.message);
+      return [];
+    }
+  }
+
+  // Envia mensagem para uma conversa pelo talkId (obtido do webhook ou getLeadTalks)
+  async sendMessage(talkId, text) {
+    const body = { text, author: { type: "bot" } };
+    return this.request("POST", `/talks/${talkId}/messages`, body);
+  }
+
+  // Envia mensagem buscando o talkId automaticamente pelo leadId
+  async sendMessageToLead(leadId, text) {
+    const talks = await this.getLeadTalks(leadId);
+    if (!talks.length) {
+      throw new Error(`Lead ${leadId}: nenhuma conversa encontrada para enviar mensagem`);
+    }
+    return this.sendMessage(talks[0].id, text);
+  }
+
+  // ── Notas ─────────────────────────────────────────────────────
 
   async addNote(leadId, text) {
     const body = [{ entity_id: Number(leadId), note_type: "common", params: { text } }];
-    return this.request("POST", "/leads/notes", body).catch((e) =>
+    return this.request("POST", "/leads/notes", body).catch(e =>
       console.error("[Kommo] Erro ao adicionar nota:", e.message)
     );
+  }
+
+  // Nota de serviço — usada para persistir estado do bot (não aparece no feed principal)
+  async addServiceNote(leadId, text) {
+    const body = [{ entity_id: Number(leadId), note_type: "service_message", params: { text } }];
+    return this.request("POST", "/leads/notes", body).catch(e =>
+      console.error("[Kommo] Erro ao adicionar nota de serviço:", e.message)
+    );
+  }
+
+  async getLeadNotes(leadId) {
+    try {
+      const data = await this.request("GET", `/leads/${leadId}/notes?limit=50&order[id]=desc`);
+      return data?._embedded?.notes || [];
+    } catch { return []; }
   }
 }
 
