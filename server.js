@@ -151,6 +151,9 @@ app.post('/api/gas', async (req, res) => {
   }
 });
 
+// ── Kommo CRM Integration ─────────────────────────────────────
+app.use(require('./kommo/webhook'));
+
 // ── SPA fallback ──────────────────────────────────────────────
 app.get('*', (_req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
