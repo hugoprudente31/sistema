@@ -152,7 +152,13 @@ app.post('/api/gas', async (req, res) => {
 });
 
 // ── Kommo CRM Integration ─────────────────────────────────────
-app.use(require('./kommo/webhook'));
+try {
+  const kommoRouter = require('./kommo/webhook');
+  app.use(kommoRouter);
+  console.log('    Kommo:   ✅ rotas registradas (/webhook/kommo, /kommo/health)');
+} catch (err) {
+  console.error('    Kommo:   ❌ ERRO ao carregar módulo:', err.message);
+}
 
 // ── SPA fallback ──────────────────────────────────────────────
 app.get('*', (_req, res) => {
