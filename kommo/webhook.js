@@ -1,8 +1,9 @@
-// Integração: Kommo Webhook — Sistema Óticas Target
+// Kommo Webhook Router — Sistema Óticas Target
 
-const express = require("express");
-const router  = express.Router();
-const kommo   = require("./client");
+const express     = require("express");
+const router      = express.Router();
+const kommo       = require("./client");
+const { processMessage, processNewLead } = require("./bot/flowEngine");
 
 const GAS_URL     = () => process.env.GAS_DEPLOY_URL || "";
 const GAS_API_KEY = () => process.env.GAS_API_KEY    || "";
@@ -17,7 +18,6 @@ function getCampo(campos = [], code) {
   return f?.values?.[0]?.value || "";
 }
 
-// ── Chama o GAS para salvar agendamento ──────────────────────
 async function criarAgendamentoNoGAS(dados) {
   const params = new URLSearchParams({
     format: "api",
@@ -25,79 +25,119 @@ async function criarAgendamentoNoGAS(dados) {
     key:    GAS_API_KEY(),
     args:   JSON.stringify([dados]),
   });
-
-  const res  = await fetch(`${GAS_URL()}?${params}`, {
+  const res = await fetch(`${GAS_URL()}?${params}`, {
     method: "GET",
     signal: AbortSignal.timeout(55000),
   });
   return res.json();
 }
 
-// ── POST /webhook/kommo ───────────────────────────────────────
-// Kommo envia aqui quando lead muda de estágio ou é atualizado
+// ── Extrai entrada de mensagem do payload do Kommo ───────────────
+// O Kommo pode enviar o evento em formatos ligeiramente diferentes
+function extractMessageEntry(payload) {
+  // Formato 1: payload.message.add[0]
+  const msg = payload?.message?.add?.[0] || payload?.message?.[0];
+  if (!msg) return null;
+
+  // Tenta múltiplos caminhos para campos críticos
+  const leadId  = msg.lead_id  || msg.conversation?.lead_id  || null;
+  const talkId  = msg.talk_id  || msg.conversation?.id       || null;
+  const text    = msg.text     || msg.content?.text          || "";
+  const authorType = msg.author?.type || msg.author_type || "contact";
+
+  return { leadId, talkId, text, authorType };
+}
+
+// ── POST /webhook/kommo ──────────────────────────────────────────
 router.post("/webhook/kommo", async (req, res) => {
   // Sempre responde 200 — Kommo para de reenviar se receber erro
   res.status(200).json({ received: true });
 
   const payload = req.body;
-  console.log("[Kommo→GAS] Webhook recebido:", JSON.stringify(payload).slice(0, 300));
+  console.log("[Webhook/Kommo] Evento:", JSON.stringify(payload).slice(0, 400));
 
   try {
-    // Kommo envia evento de lead (status ou atualização)
+
+    // ── Evento: nova mensagem no inbox ─────────────────────────
+    if (payload?.message?.add) {
+      const entry = extractMessageEntry(payload);
+      if (!entry?.leadId) {
+        console.log("[Webhook/Kommo] message.add sem lead_id — ignorando");
+        return;
+      }
+
+      console.log(`[Webhook/Kommo] 💬 Mensagem no lead ${entry.leadId} — autor: ${entry.authorType}`);
+      await processMessage({
+        leadId:     String(entry.leadId),
+        talkId:     entry.talkId ? String(entry.talkId) : null,
+        text:       entry.text,
+        authorType: entry.authorType,
+      });
+      return;
+    }
+
+    // ── Evento: novo lead adicionado ao pipeline ───────────────
+    if (payload?.leads?.add) {
+      const leadEntry = payload.leads.add[0];
+      if (!leadEntry?.id) return;
+
+      console.log(`[Webhook/Kommo] 🆕 Novo lead ${leadEntry.id}`);
+      await processNewLead(String(leadEntry.id));
+      return;
+    }
+
+    // ── Evento: mudança de estágio / atualização de lead ───────
     const leadEntry =
       payload?.leads?.status?.[0] ||
-      payload?.leads?.update?.[0] ||
-      payload?.leads?.add?.[0]    || null;
+      payload?.leads?.update?.[0] || null;
 
     if (!leadEntry) {
-      console.log("[Kommo→GAS] Sem dados de lead no payload, ignorando");
+      console.log("[Webhook/Kommo] Payload sem evento mapeado — ignorando");
       return;
     }
 
-    // Verifica se está no estágio de agendamento (se configurado)
+    // Verifica se está no estágio de agendamento manual (via atendente)
     const stageAgendar = process.env.KOMMO_STAGE_AGENDAR;
     if (stageAgendar && String(leadEntry.status_id) !== String(stageAgendar)) {
-      console.log(`[Kommo→GAS] Estágio ${leadEntry.status_id} ignorado`);
+      console.log(`[Webhook/Kommo] Estágio ${leadEntry.status_id} — sem ação de agendamento`);
       return;
     }
 
+    // Se chegou aqui, é um agendamento criado manualmente pelo atendente
     const leadId = leadEntry.id;
-    console.log(`[Kommo→GAS] Processando lead ${leadId}`);
+    console.log(`[Webhook/Kommo] 📅 Agendamento manual — lead ${leadId}`);
 
-    // Busca dados completos do lead
     const lead   = await kommo.getLead(leadId);
     const campos = lead?.custom_fields_values || [];
     const contato = lead?._embedded?.contacts?.[0] || {};
 
-    const loja           = normalizeLoja(getCampo(campos, "LOJA"));
+    const loja            = normalizeLoja(getCampo(campos, "LOJA"));
     const dataAgendamento = getCampo(campos, "DATA_AGENDAMENTO");
-    const horario        = getCampo(campos, "HORARIO");
-    const optometrista   = getCampo(campos, "OPTOMETRISTA");
+    const horario         = getCampo(campos, "HORARIO");
+    const optometrista    = getCampo(campos, "OPTOMETRISTA");
 
     if (!dataAgendamento || !horario) {
-      console.log("[Kommo→GAS] DATA_AGENDAMENTO ou HORARIO não preenchidos no lead, ignorando");
+      console.log("[Webhook/Kommo] DATA_AGENDAMENTO ou HORARIO não preenchidos — ignorando");
       await kommo.addNote(leadId, "⚠️ Para agendar, preencha os campos: DATA_AGENDAMENTO e HORARIO no lead.");
       return;
     }
 
     const agendamento = {
-      nome:            contato.name || lead.name || "Sem nome",
-      whatsapp:        getCampo(campos, "PHONE") || "",
-      email:           getCampo(campos, "EMAIL") || "",
+      nome:             contato.name || lead.name || "Sem nome",
+      whatsapp:         getCampo(campos, "PHONE") || "",
+      email:            getCampo(campos, "EMAIL") || "",
       loja,
       optometrista,
       data_agendamento: dataAgendamento,
       horario,
-      origem:          "Kommo",
-      observacao:      `Lead Kommo #${leadId}`,
-      status:          "Agendado",
-      kommo_lead_id:   String(leadId),
+      origem:           "Kommo",
+      observacao:       `Lead Kommo #${leadId}`,
+      status:           "Agendado",
+      kommo_lead_id:    String(leadId),
     };
 
-    console.log(`[Kommo→GAS] Criando agendamento: ${agendamento.nome} — ${loja} — ${dataAgendamento} ${horario}`);
-
     const gasResult = await criarAgendamentoNoGAS(agendamento);
-    console.log("[Kommo→GAS] GAS respondeu:", JSON.stringify(gasResult).slice(0, 200));
+    console.log("[Webhook/Kommo] GAS:", JSON.stringify(gasResult).slice(0, 200));
 
     if (gasResult?.ok) {
       await kommo.addNote(leadId,
@@ -108,18 +148,19 @@ router.post("/webhook/kommo", async (req, res) => {
     }
 
   } catch (err) {
-    console.error("[ERRO][Kommo→GAS]", err.message);
+    console.error("[ERRO][Webhook/Kommo]", err.message);
   }
 });
 
-// ── GET /kommo/health ─────────────────────────────────────────
+// ── GET /kommo/health ────────────────────────────────────────────
 router.get("/kommo/health", (req, res) => {
   res.json({
-    ok:        true,
-    kommo:     !!process.env.KOMMO_ACCESS_TOKEN,
-    subdomain: process.env.KOMMO_SUBDOMAIN || "não configurado",
-    gas:       !!process.env.GAS_DEPLOY_URL,
-    timestamp: new Date().toISOString(),
+    ok:          true,
+    bot_enabled: process.env.BOT_ENABLED !== "false",
+    kommo:       !!process.env.KOMMO_ACCESS_TOKEN,
+    subdomain:   process.env.KOMMO_SUBDOMAIN || "não configurado",
+    gas:         !!process.env.GAS_DEPLOY_URL,
+    timestamp:   new Date().toISOString(),
   });
 });
 
