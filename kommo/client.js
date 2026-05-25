@@ -102,19 +102,39 @@ class KommoClient {
     }
   }
 
-  // Envia mensagem — tenta /chats/{chatId}/messages, fallback para /talks/{talkId}/messages
+  // Envia mensagem — tenta múltiplos endpoints do Kommo
   async sendMessage(talkId, text, chatId = null) {
     const body = { text };
 
+    // Tentativa 1: POST /chats/messages com chat_id no corpo
     if (chatId) {
       try {
-        return await this.request("POST", `/chats/${chatId}/messages`, body);
+        const r = await this.request("POST", `/chats/messages`, { chat_id: chatId, text });
+        console.log("[Kommo] ✅ Mensagem enviada via /chats/messages");
+        return r;
       } catch (e) {
-        console.log(`[Kommo] /chats falhou (${e.message.slice(0, 60)}), tentando /talks...`);
+        console.log(`[Kommo] /chats/messages falhou: ${e.message.slice(0, 80)}`);
+      }
+
+      // Tentativa 2: POST /chats/{chatId}/messages
+      try {
+        const r = await this.request("POST", `/chats/${chatId}/messages`, body);
+        console.log("[Kommo] ✅ Mensagem enviada via /chats/{id}/messages");
+        return r;
+      } catch (e) {
+        console.log(`[Kommo] /chats/{id}/messages falhou: ${e.message.slice(0, 80)}`);
       }
     }
 
-    return this.request("POST", `/talks/${talkId}/messages`, body);
+    // Tentativa 3: POST /talks/{talkId}/messages
+    try {
+      const r = await this.request("POST", `/talks/${talkId}/messages`, body);
+      console.log("[Kommo] ✅ Mensagem enviada via /talks/{id}/messages");
+      return r;
+    } catch (e) {
+      console.log(`[Kommo] /talks/{id}/messages falhou: ${e.message.slice(0, 80)}`);
+      throw e;
+    }
   }
 
   // Envia mensagem buscando o talkId automaticamente pelo leadId
