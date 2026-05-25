@@ -7,6 +7,7 @@ const LABELS = {
   // Origem / controle
   BOT_ATIVO:               "bot-ativo",
   ATENDIMENTO_HUMANO:      "atendimento-humano",
+  QUER_ATENDIMENTO_HUMANO: "quer-atendimento-humano",
   AGENDAMENTO_SOLICITADO:  "agendamento-solicitado",
   ORCAMENTO_SOLICITADO:    "orcamento-solicitado",
   INFORMACOES_SOLICITADAS: "informacoes-solicitadas",

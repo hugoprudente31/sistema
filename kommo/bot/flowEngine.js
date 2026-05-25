@@ -157,6 +157,7 @@ async function handleMenuPrincipal(leadId, state, text, talkId) {
   }
 
   if (op === "4") {
+    await labels.applyLabel(leadId, labels.LABELS.QUER_ATENDIMENTO_HUMANO);
     await transferToHuman(leadId, state, talkId, "Opção 4 — cliente pediu atendente");
     return;
   }
@@ -189,6 +190,7 @@ async function handleInfoMenu(leadId, state, text, talkId) {
 
   if (op && subEtapas.hasOwnProperty(op)) {
     if (op === "7") {
+      await labels.applyLabel(leadId, labels.LABELS.QUER_ATENDIMENTO_HUMANO);
       await transferToHuman(leadId, state, talkId, "Opção 7 no menu de informações");
       return;
     }
