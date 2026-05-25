@@ -18,8 +18,9 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 async function send(talkId, leadId, text) {
   await sleep(800);
   try {
-    if (talkId) {
-      await kommo.sendMessage(talkId, text);
+    const chatId = SM.getChatId(leadId);
+    if (talkId || chatId) {
+      await kommo.sendMessage(talkId, text, chatId);
     } else {
       await kommo.sendMessageToLead(leadId, text);
     }
@@ -519,7 +520,7 @@ async function handleLembreteCancelar(leadId, state, text, talkId) {
 
 // ── Roteador principal ───────────────────────────────────────────
 
-async function route(leadId, state, text, talkId) {
+async function route(leadId, state, text, talkId, _chatId) {
   const { etapa } = state;
 
   if (etapa === "boas_vindas")            return handleBoasVindas(leadId, state, talkId);
@@ -547,12 +548,13 @@ async function route(leadId, state, text, talkId) {
   console.log(`[BOT][${leadId}] ⚠️ Etapa desconhecida "${etapa}" — resetando para menu_principal`);
   SM.setState(leadId, { etapa: "menu_principal" }, { persist: true });
   await send(talkId, leadId, MSG.menuPrincipal());
+
 }
 
 // ── Entradas públicas ────────────────────────────────────────────
 
 // Processa uma mensagem recebida no inbox
-async function processMessage({ leadId, talkId, text, authorType }) {
+async function processMessage({ leadId, talkId, chatId, text, authorType }) {
   if (process.env.BOT_ENABLED === "false") return;
 
   const log = (msg) => console.log(`[BOT][${leadId}] ${msg}`);
@@ -571,12 +573,17 @@ async function processMessage({ leadId, talkId, text, authorType }) {
   SM.markClientActivity(leadId);
   const state = await SM.getState(leadId);
 
-  // Garante que o talkId fica salvo no estado
+  // Garante que talkId e chatId ficam salvos no estado
   if (talkId && !state.talk_id) {
     SM.setState(leadId, { talk_id: talkId });
     state.talk_id = talkId;
   }
+  if (chatId && !state.chat_id) {
+    SM.setState(leadId, { chat_id: chatId });
+    state.chat_id = chatId;
+  }
   const effectiveTalkId = state.talk_id || talkId;
+  const effectiveChatId = state.chat_id || chatId;
 
   // Verifica regra de 5 minutos
   if (!SM.shouldBotActivate(state)) {
@@ -586,7 +593,7 @@ async function processMessage({ leadId, talkId, text, authorType }) {
 
   // Fora do horário comercial
   if (!SM.isDuringBusinessHours()) {
-    await send(effectiveTalkId, leadId, MSG.foraDoHorario(state.nome));
+    await send(effectiveTalkId, leadId, MSG.foraDoHorario(state.nome), effectiveChatId);
     return;
   }
 
@@ -597,7 +604,7 @@ async function processMessage({ leadId, talkId, text, authorType }) {
   }
 
   log(`← "${(text || "").slice(0, 50)}" | etapa: ${state.etapa}`);
-  await route(leadId, state, (text || "").trim(), effectiveTalkId);
+  await route(leadId, state, (text || "").trim(), effectiveTalkId, effectiveChatId);
 }
 
 // Inicializa o estado quando um novo lead entra no pipeline

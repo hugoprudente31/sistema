@@ -16,7 +16,8 @@ function defaultState(leadId) {
     lead_id:           String(leadId),
     nome:              null,
     loja:              null,
-    talk_id:           null,   // ID da conversa Kommo (vem do webhook)
+    talk_id:           null,   // ID numérico da conversa Kommo
+    chat_id:           null,   // UUID do canal de chat (para envio de mensagens)
     etapa:             "boas_vindas",
     sub_etapa:         null,
     aguardando:        null,   // campo que o bot está esperando o lead responder
@@ -184,6 +185,10 @@ function resetInvalidCount(leadId) {
   setState(leadId, { invalid_count: 0 });
 }
 
+function getChatId(leadId) {
+  return states.get(String(leadId))?.chat_id || null;
+}
+
 module.exports = {
   getState,
   setState,
@@ -193,6 +198,7 @@ module.exports = {
   shouldBotResume,
   isDuringBusinessHours,
   isDuringHumanHours,
+  getChatId,
   incrementInvalidCount,
   resetInvalidCount,
 };

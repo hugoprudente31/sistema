@@ -102,9 +102,18 @@ class KommoClient {
     }
   }
 
-  // Envia mensagem para uma conversa pelo talkId (obtido do webhook ou getLeadTalks)
-  async sendMessage(talkId, text) {
-    const body = { text, author: { type: "bot" } };
+  // Envia mensagem — tenta /chats/{chatId}/messages, fallback para /talks/{talkId}/messages
+  async sendMessage(talkId, text, chatId = null) {
+    const body = { text };
+
+    if (chatId) {
+      try {
+        return await this.request("POST", `/chats/${chatId}/messages`, body);
+      } catch (e) {
+        console.log(`[Kommo] /chats falhou (${e.message.slice(0, 60)}), tentando /talks...`);
+      }
+    }
+
     return this.request("POST", `/talks/${talkId}/messages`, body);
   }
 
@@ -114,7 +123,7 @@ class KommoClient {
     if (!talks.length) {
       throw new Error(`Lead ${leadId}: nenhuma conversa encontrada para enviar mensagem`);
     }
-    return this.sendMessage(talks[0].id, text);
+    return this.sendMessage(String(talks[0].id), text);
   }
 
   // ── Notas ─────────────────────────────────────────────────────

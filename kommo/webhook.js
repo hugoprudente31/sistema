@@ -49,10 +49,11 @@ function extractMessageEntry(payload) {
     null;
 
   const talkId     = msg.talk_id  || msg.conversation?.id || null;
+  const chatId     = msg.chat_id  || null;
   const text       = msg.text     || msg.content?.text    || "";
   const authorType = msg.author?.type || msg.author_type  || "contact";
 
-  return { leadId, talkId, text, authorType };
+  return { leadId, talkId, chatId, text, authorType };
 }
 
 // ── POST /webhook/kommo ──────────────────────────────────────────
@@ -77,6 +78,7 @@ router.post("/webhook/kommo", async (req, res) => {
       await processMessage({
         leadId:     String(entry.leadId),
         talkId:     entry.talkId ? String(entry.talkId) : null,
+        chatId:     entry.chatId  ? String(entry.chatId)  : null,
         text:       entry.text,
         authorType: entry.authorType,
       });
