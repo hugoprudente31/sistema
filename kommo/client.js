@@ -102,39 +102,38 @@ class KommoClient {
     }
   }
 
-  // Envia mensagem — tenta múltiplos endpoints do Kommo
+  // Envia mensagem — testa múltiplos formatos de endpoint do Kommo
   async sendMessage(talkId, text, chatId = null) {
-    const body = { text };
 
-    // Tentativa 1: POST /chats/messages com chat_id no corpo
-    if (chatId) {
+    const attempts = [
+      // 1: endpoint correto da API v4 para inbox — chat_id no corpo
+      ...(chatId ? [
+        () => this.request("POST", `/chats/messages`, { chat_id: chatId, text }),
+      ] : []),
+      // 2: array body em /talks/{id}/messages
+      () => this.request("POST",  `/talks/${talkId}/messages`, [{ text }]),
+      // 3: objeto simples em /talks/{id}/messages
+      () => this.request("POST",  `/talks/${talkId}/messages`, { text }),
+      // 4: /chats/{chatId}/messages — variação de path
+      ...(chatId ? [
+        () => this.request("POST", `/chats/${chatId}/messages`, { text }),
+        () => this.request("POST", `/chats/${chatId}/messages`, [{ text }]),
+      ] : []),
+      // 5: PATCH /talks/{id}
+      () => this.request("PATCH", `/talks/${talkId}`,          { messages: [{ text }] }),
+    ];
+
+    for (let i = 0; i < attempts.length; i++) {
       try {
-        const r = await this.request("POST", `/chats/messages`, { chat_id: chatId, text });
-        console.log("[Kommo] ✅ Mensagem enviada via /chats/messages");
+        const r = await attempts[i]();
+        console.log(`[Kommo] ✅ Mensagem enviada — tentativa ${i + 1}`);
         return r;
       } catch (e) {
-        console.log(`[Kommo] /chats/messages falhou: ${e.message.slice(0, 80)}`);
-      }
-
-      // Tentativa 2: POST /chats/{chatId}/messages
-      try {
-        const r = await this.request("POST", `/chats/${chatId}/messages`, body);
-        console.log("[Kommo] ✅ Mensagem enviada via /chats/{id}/messages");
-        return r;
-      } catch (e) {
-        console.log(`[Kommo] /chats/{id}/messages falhou: ${e.message.slice(0, 80)}`);
+        console.log(`[Kommo] Tentativa ${i + 1} falhou: ${e.message.slice(0, 80)}`);
       }
     }
 
-    // Tentativa 3: POST /talks/{talkId}/messages
-    try {
-      const r = await this.request("POST", `/talks/${talkId}/messages`, body);
-      console.log("[Kommo] ✅ Mensagem enviada via /talks/{id}/messages");
-      return r;
-    } catch (e) {
-      console.log(`[Kommo] /talks/{id}/messages falhou: ${e.message.slice(0, 80)}`);
-      throw e;
-    }
+    throw new Error("Kommo: todos os endpoints de envio falharam");
   }
 
   // Envia mensagem buscando o talkId automaticamente pelo leadId
