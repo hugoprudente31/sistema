@@ -64,6 +64,7 @@ function invalidateCache() {
 // ── Middlewares ──────────────────────────────────────────────
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: true, limit: '2mb' })); // Kommo envia webhooks como form-encoded
 app.use(express.static(path.join(__dirname, 'public'), {
   maxAge: '1h',  // browser faz cache do HTML/CSS/JS por 1 hora
   etag: true
