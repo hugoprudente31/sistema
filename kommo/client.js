@@ -137,7 +137,7 @@ class KommoClient {
 
   // Nota de serviço — usada para persistir estado do bot (não aparece no feed principal)
   async addServiceNote(leadId, text) {
-    const body = [{ entity_id: Number(leadId), note_type: "service_message", params: { text } }];
+    const body = [{ entity_id: Number(leadId), note_type: "service_message", params: { service: "bot", text } }];
     return this.request("POST", "/leads/notes", body).catch(e =>
       console.error("[Kommo] Erro ao adicionar nota de serviço:", e.message)
     );
