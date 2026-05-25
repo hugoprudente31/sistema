@@ -7,22 +7,22 @@ const LOJAS_INFO = [
   {
     nome:     "Gonzaga & Santos",
     endereco: process.env.ENDERECO_GONZAGA     || "Av. Ana Costa, 267 — Gonzaga, Santos/SP",
-    horario:  process.env.HORARIO_GONZAGA      || "Seg a Sex: 9h–18h | Sáb: 9h–17h",
+    horario:  process.env.HORARIO_GONZAGA      || "Seg a Sex: 9h–19h | Sáb: 10h–18h",
   },
   {
     nome:     "Óticas TGT Enseada",
     endereco: process.env.ENDERECO_ENSEADA     || "Consulte-nos para o endereço atualizado",
-    horario:  process.env.HORARIO_ENSEADA      || "Seg a Sex: 9h–18h | Sáb: 9h–17h",
+    horario:  process.env.HORARIO_ENSEADA      || "Seg a Sex: 9h–19h | Sáb: 9h–15h",
   },
   {
     nome:     "Óticas TGT Pitangueiras",
     endereco: process.env.ENDERECO_PITANGUEIRAS || "Consulte-nos para o endereço atualizado",
-    horario:  process.env.HORARIO_PITANGUEIRAS  || "Seg a Sex: 9h–18h | Sáb: 9h–17h",
+    horario:  process.env.HORARIO_PITANGUEIRAS  || "Seg a Sex: 9h–19h | Sáb: 9h–15h",
   },
   {
     nome:     "Óticas Target - Ademar de Barros",
     endereco: process.env.ENDERECO_ADEMAR      || "Consulte-nos para o endereço atualizado",
-    horario:  process.env.HORARIO_ADEMAR       || "Seg a Sex: 9h–18h | Sáb: 9h–17h",
+    horario:  process.env.HORARIO_ADEMAR       || "Seg a Sex: 9h–19h | Sáb: 9h–15h",
   },
 ];
 
@@ -34,8 +34,19 @@ module.exports = {
 
   foraDoHorario: (nome) =>
     `Olá${nome ? `, ${nome}` : ""}! 🌙\n` +
-    `Nosso horário de atendimento é das 8h às 20h.\n` +
     `Sua mensagem foi registrada e responderemos em breve!`,
+
+  foraDoHorarioHumano: (loja = "") => {
+    const isGonzaga = /gonzaga|santos/i.test(loja);
+    const horarios  = isGonzaga
+      ? "Seg a Sex: 9h–19h | Sáb: 10h–18h"
+      : "Seg a Sex: 9h–19h | Sáb: 9h–15h";
+    return `👋 Sua mensagem foi registrada!\n\n` +
+      `Nosso atendimento humano está disponível:\n` +
+      `🕐 ${horarios}\n\n` +
+      `Um de nossos atendentes retornará assim que estiver disponível. 😊\n\n` +
+      `Enquanto isso, posso te ajudar com informações ou agendamentos pelo bot! 🤖`;
+  },
 
   respostaInvalida: () =>
     `Desculpe, não entendi sua resposta. 😅\nPor favor, responda com o *número* da opção desejada.`,
@@ -208,10 +219,15 @@ module.exports = {
 
   // ── Opção 4 — Transferência para humano ─────────────────────
 
-  transferindoParaHumano: () =>
-    `👋 Claro! Estou transferindo você para um de nossos atendentes.\n\n` +
-    `Em breve alguém da nossa equipe vai falar com você! 😊\n` +
-    `Horário de atendimento: Seg a Sex 9h–18h | Sáb 9h–17h`,
+  transferindoParaHumano: (loja = "") => {
+    const isGonzaga = /gonzaga|santos/i.test(loja);
+    const horarios  = isGonzaga
+      ? "Seg a Sex: 9h–19h | Sáb: 10h–18h"
+      : "Seg a Sex: 9h–19h | Sáb: 9h–15h";
+    return `👋 Claro! Estou transferindo você para um de nossos atendentes.\n\n` +
+      `Em breve alguém da nossa equipe vai falar com você! 😊\n` +
+      `Horário de atendimento: ${horarios}`;
+  },
 
   // Nota interna para o atendente (não enviada ao cliente)
   notaParaAtendente: (state) => {

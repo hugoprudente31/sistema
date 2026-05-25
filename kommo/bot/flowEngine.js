@@ -67,7 +67,13 @@ function isPastDate(str) {
 async function transferToHuman(leadId, state, talkId, motivo = "solicitação do cliente") {
   console.log(`[BOT][${leadId}] 👤 Transferindo para humano — ${motivo}`);
 
-  await send(talkId, leadId, MSG.transferindoParaHumano());
+  const loja = state.loja || "";
+  const dentroDoHorario = SM.isDuringHumanHours(loja);
+  const msgTransfer = dentroDoHorario
+    ? MSG.transferindoParaHumano(loja)
+    : MSG.foraDoHorarioHumano(loja);
+
+  await send(talkId, leadId, msgTransfer);
 
   // Nota interna para o atendente
   await kommo.addNote(leadId, MSG.notaParaAtendente(state));

@@ -4,11 +4,45 @@
 const GAS_URL     = () => process.env.GAS_DEPLOY_URL || "";
 const GAS_API_KEY = () => process.env.GAS_API_KEY    || "";
 
-// Todos os horários possíveis de uma loja
+// Fallback — usado quando não há dados suficientes para calcular a loja/data
 const TODOS_HORARIOS = [
-  "09:00","09:30","10:00","10:30","11:00","11:30",
-  "14:00","14:30","15:00","15:30","16:00","16:30",
+  "10:00","10:30","11:00","11:30",
+  "14:00","14:30","15:00","15:30","16:00","16:30","17:00","17:30",
 ];
+
+// Gera slots de 30 em 30 minutos com pausa para almoço 12h-14h
+function generateSlots(startHour, endHour) {
+  const slots = [];
+  for (let h = startHour; h < endHour; h++) {
+    if (h >= 12 && h < 14) continue; // pausa almoço
+    slots.push(`${String(h).padStart(2, "0")}:00`);
+    slots.push(`${String(h).padStart(2, "0")}:30`);
+  }
+  return slots;
+}
+
+// Retorna os horários do optometrista por loja e data (DD/MM/AAAA)
+// Gonzaga & Santos: Seg-Sex 10h-18h | Sáb 10h-18h | Dom fechado
+// Demais lojas:     Seg-Sex 10h-18h | Sáb 9h-15h  | Dom fechado
+function getHorariosLoja(loja, data) {
+  const [dd, mm, yyyy] = (data || "").split("/").map(Number);
+  if (!dd || !mm || !yyyy) return TODOS_HORARIOS;
+
+  const date = new Date(yyyy, mm - 1, dd);
+  const day  = date.getDay(); // 0=Dom, 6=Sáb
+
+  if (day === 0) return []; // Domingo fechado
+
+  const isGonzaga = /gonzaga|santos/i.test(loja || "");
+
+  if (day === 6) { // Sábado
+    if (isGonzaga) return generateSlots(10, 18);
+    return generateSlots(9, 15);
+  }
+
+  // Seg–Sex: optometrista 10h–18h em todas as lojas
+  return generateSlots(10, 18);
+}
 
 // Cache simples para evitar múltiplas chamadas ao GAS no mesmo segundo
 const _cache = new Map();
@@ -81,14 +115,15 @@ async function getHorariosDisponiveis(loja, data) {
 
     console.log(`[Scheduling] Ocupados em ${loja} / ${data}:`, ocupados);
 
-    const livres = TODOS_HORARIOS.filter(h => !ocupados.includes(h));
+    const horariosLoja = getHorariosLoja(loja, data);
+    const livres = horariosLoja.filter(h => !ocupados.includes(h));
     cacheSet(cacheKey, livres);
     return livres;
 
   } catch (e) {
     console.error("[Scheduling] Erro ao buscar disponibilidade:", e.message);
-    // Em caso de erro, retorna todos os horários (não bloqueia o fluxo)
-    return TODOS_HORARIOS;
+    // Em caso de erro, usa horários da loja como fallback
+    return getHorariosLoja(loja, data) || TODOS_HORARIOS;
   }
 }
 
@@ -150,6 +185,7 @@ async function getContatoDoLead(kommoClient, leadId) {
 
 module.exports = {
   TODOS_HORARIOS,
+  getHorariosLoja,
   getHorariosDisponiveis,
   criarAgendamento,
   getContatoDoLead,

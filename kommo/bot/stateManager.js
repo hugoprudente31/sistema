@@ -151,6 +151,26 @@ function isDuringBusinessHours() {
   return true;
 }
 
+// Horário de atendimento humano por loja
+// Gonzaga & Santos: Seg-Sex 9h-19h | Sáb 10h-18h | Dom fechado
+// Demais lojas:     Seg-Sex 9h-19h | Sáb 9h-15h  | Dom fechado
+function isDuringHumanHours(loja = "") {
+  const now      = new Date();
+  const day      = now.getDay(); // 0=Dom, 6=Sáb
+  const timeMin  = now.getHours() * 60 + now.getMinutes();
+  const isGonzaga = /gonzaga|santos/i.test(loja);
+
+  if (day === 0) return false; // Domingo fechado
+
+  if (day === 6) { // Sábado
+    if (isGonzaga) return timeMin >= 10 * 60 && timeMin < 18 * 60;
+    return timeMin >= 9 * 60 && timeMin < 15 * 60;
+  }
+
+  // Seg–Sex: 9h–19h
+  return timeMin >= 9 * 60 && timeMin < 19 * 60;
+}
+
 // Incrementa contador de respostas inválidas e retorna o novo valor
 function incrementInvalidCount(leadId) {
   const key     = String(leadId);
@@ -172,6 +192,7 @@ module.exports = {
   shouldBotActivate,
   shouldBotResume,
   isDuringBusinessHours,
+  isDuringHumanHours,
   incrementInvalidCount,
   resetInvalidCount,
 };
