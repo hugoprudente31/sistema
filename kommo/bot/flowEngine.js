@@ -1,16 +1,14 @@
 // Bot Flow Engine — Sistema Óticas Target
 // Motor de estado do bot. Cada etapa do funil tem um handler.
 
-const kommo   = require("../client");
-const MSG     = require("./messages");
-const SM      = require("./stateManager");
-const labels  = require("../labels");
+const kommo      = require("../client");
+const MSG        = require("./messages");
+const SM         = require("./stateManager");
+const labels     = require("../labels");
+const scheduling = require("../scheduling");
 
 // Nomes das lojas disponíveis (usado no menu de escolha)
 const LOJAS = MSG.LOJAS_INFO.map(l => l.nome);
-
-// Horários padrão (Fase 2 — em Fase 3 serão buscados do GAS em tempo real)
-const HORARIOS_PADRAO = ["09:00","09:30","10:00","10:30","11:00","11:30","14:00","14:30","15:00","15:30","16:00","16:30"];
 
 // ── Utilitários ──────────────────────────────────────────────────
 
@@ -327,9 +325,8 @@ async function handleAgendamentoData(leadId, state, text, talkId) {
 
   const loja = state.dados_agendamento?.loja || state.loja;
 
-  // Fase 2: lista de horários padrão (Fase 3 consultará o GAS em tempo real)
-  // TODO Fase 3: substituir por scheduling.getHorariosDisponiveis(loja, input)
-  const horarios = HORARIOS_PADRAO;
+  // Consulta horários disponíveis no GAS em tempo real
+  const horarios = await scheduling.getHorariosDisponiveis(loja, input);
 
   if (!horarios.length) {
     SM.setState(leadId, { dados_agendamento: { ...state.dados_agendamento, data: input } });
@@ -388,12 +385,20 @@ async function handleAgendamentoConfirmar(leadId, state, text, talkId) {
   if (confirmou) {
     const { loja, data, horario } = state.dados_agendamento;
 
-    // Cria o agendamento no GAS
-    // Fase 2: loga a intenção — Fase 3 (scheduling.js) fará a chamada real ao GAS
-    console.log(`[BOT][${leadId}] 📅 Criando agendamento: ${state.nome} — ${loja} — ${data} ${horario}`);
+    // Busca contato para pegar WhatsApp
+    const contato = await scheduling.getContatoDoLead(kommo, leadId);
 
-    // TODO Fase 3: substituir por scheduling.criarAgendamento({ ... })
-    const gasOk = true; // placeholder
+    // Cria o agendamento no GAS
+    const gasResult = await scheduling.criarAgendamento({
+      nome:     state.nome || contato.nome,
+      whatsapp: contato.whatsapp,
+      email:    contato.email,
+      loja,
+      data,
+      horario,
+      leadId,
+    });
+    const gasOk = gasResult?.ok;
 
     if (gasOk) {
       SM.setState(leadId, { etapa: "agendado" }, { persist: true });
