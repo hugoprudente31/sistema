@@ -140,6 +140,34 @@ class KommoClient {
       return data?._embedded?.notes || [];
     } catch { return []; }
   }
+
+  // Busca leads que possuem uma etiqueta específica
+  async searchLeadsByTag(tagName, limit = 50) {
+    try {
+      const data = await this.request(
+        "GET",
+        `/leads?filter[tags][]=${encodeURIComponent(tagName)}&limit=${limit}&with=tags`
+      );
+      return data?._embedded?.leads || [];
+    } catch (e) {
+      console.error(`[Kommo] Erro ao buscar leads por tag "${tagName}":`, e.message);
+      return [];
+    }
+  }
+
+  // Busca leads em um estágio específico
+  async searchLeadsByStage(stageId, limit = 50) {
+    try {
+      const data = await this.request(
+        "GET",
+        `/leads?filter[statuses][0][status_id]=${stageId}&limit=${limit}`
+      );
+      return data?._embedded?.leads || [];
+    } catch (e) {
+      console.error(`[Kommo] Erro ao buscar leads por estágio ${stageId}:`, e.message);
+      return [];
+    }
+  }
 }
 
 module.exports = new KommoClient();

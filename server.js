@@ -195,4 +195,10 @@ app.listen(PORT, () => {
   // Primeiro ping imediato para acordar o GAS ao subir o servidor
   pingGAS();
   setInterval(pingGAS, 4 * 60 * 1000);
+
+  // ── Crons do bot Kommo ──────────────────────────────────────
+  if (process.env.BOT_ENABLED !== 'false') {
+    require('./kommo/reminder').startReminderCron();
+    require('./kommo/recovery').startRecoveryCron();
+  }
 });
