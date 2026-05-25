@@ -146,10 +146,9 @@ function shouldBotResume(state) {
   return Date.now() - state.last_human_at > resumeMs;
 }
 
-// Horário comercial? (08h–20h)
+// Sempre disponível — bot funciona 24h
 function isDuringBusinessHours() {
-  const hour = new Date().getHours();
-  return hour >= 8 && hour < 20;
+  return true;
 }
 
 // Incrementa contador de respostas inválidas e retorna o novo valor
