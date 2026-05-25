@@ -40,10 +40,17 @@ function extractMessageEntry(payload) {
   if (!msg) return null;
 
   // Tenta múltiplos caminhos para campos críticos
-  const leadId  = msg.lead_id  || msg.conversation?.lead_id  || null;
-  const talkId  = msg.talk_id  || msg.conversation?.id       || null;
-  const text    = msg.text     || msg.content?.text          || "";
-  const authorType = msg.author?.type || msg.author_type || "contact";
+  // element_type "2" = lead no Kommo
+  const leadId =
+    msg.lead_id ||
+    msg.conversation?.lead_id ||
+    (msg.element_type === "2" || msg.element_type === 2 ? msg.element_id : null) ||
+    msg.entity_id ||
+    null;
+
+  const talkId     = msg.talk_id  || msg.conversation?.id || null;
+  const text       = msg.text     || msg.content?.text    || "";
+  const authorType = msg.author?.type || msg.author_type  || "contact";
 
   return { leadId, talkId, text, authorType };
 }
