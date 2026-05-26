@@ -68,6 +68,12 @@ router.post("/webhook/kommo", async (req, res) => {
 
     // ── Evento: nova mensagem no inbox ─────────────────────────
     if (payload?.message?.add) {
+      // No modo Salesbot o Kommo mesmo chama /api/salesbot — não reprocessamos aqui
+      if (process.env.KOMMO_USE_SALESBOT === "true") {
+        console.log("[Webhook/Kommo] Modo Salesbot — message.add ignorado (Salesbot processa)");
+        return;
+      }
+
       const entry = extractMessageEntry(payload);
       if (!entry?.leadId) {
         console.log("[Webhook/Kommo] message.add sem lead_id — ignorando");

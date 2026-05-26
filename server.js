@@ -154,9 +154,12 @@ app.post('/api/gas', async (req, res) => {
 
 // ── Kommo CRM Integration ─────────────────────────────────────
 try {
-  const kommoRouter = require('./kommo/webhook');
+  const kommoRouter    = require('./kommo/webhook');
+  const salsbotRouter  = require('./kommo/salesbot');
   app.use(kommoRouter);
-  console.log('    Kommo:   ✅ rotas registradas (/webhook/kommo, /kommo/health)');
+  app.use(salsbotRouter);
+  const mode = process.env.KOMMO_USE_SALESBOT === 'true' ? 'Salesbot' : 'REST API';
+  console.log(`    Kommo:   ✅ rotas registradas (/webhook/kommo, /api/salesbot) — modo: ${mode}`);
 } catch (err) {
   console.error('    Kommo:   ❌ ERRO ao carregar módulo:', err.message);
 }

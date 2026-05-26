@@ -10,6 +10,27 @@ const scheduling = require("../scheduling");
 // Nomes das lojas disponíveis (usado no menu de escolha)
 const LOJAS = MSG.LOJAS_INFO.map(l => l.nome);
 
+// ── Fila de respostas (modo Salesbot) ────────────────────────────
+// Quando KOMMO_USE_SALESBOT=true, o Salesbot do Kommo é quem envia
+// as mensagens. O bot coleta o texto aqui e retorna via HTTP response.
+
+const pendingResponses = new Map(); // leadId -> string[]
+
+function queueResponse(leadId, text) {
+  const key = String(leadId);
+  const arr  = pendingResponses.get(key) || [];
+  arr.push(text);
+  pendingResponses.set(key, arr);
+}
+
+// Drena e retorna as mensagens acumuladas para o lead
+function flushResponses(leadId) {
+  const key = String(leadId);
+  const arr = pendingResponses.get(key) || [];
+  pendingResponses.delete(key);
+  return arr;
+}
+
 // ── Utilitários ──────────────────────────────────────────────────
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -17,6 +38,16 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 // Envia uma mensagem com pequeno delay (evita spam/bloqueio)
 async function send(talkId, leadId, text) {
   await sleep(800);
+
+  // Modo Salesbot: acumula o texto e retorna — o Salesbot envia nativamente
+  if (process.env.KOMMO_USE_SALESBOT === "true") {
+    queueResponse(leadId, text);
+    const preview = text.slice(0, 70).replace(/\n/g, " ");
+    console.log(`[BOT][${leadId}] ↑ queued "${preview}${text.length > 70 ? "…" : ""}"`);
+    return;
+  }
+
+  // Modo direto: tenta enviar via REST API do Kommo
   try {
     const chatId = SM.getChatId(leadId);
     if (talkId || chatId) {
@@ -621,4 +652,4 @@ async function processNewLead(leadId) {
   // O bot envia boas-vindas quando a primeira mensagem do cliente chegar
 }
 
-module.exports = { processMessage, processNewLead };
+module.exports = { processMessage, processNewLead, flushResponses };
