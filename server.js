@@ -1,208 +1,283 @@
-// ═══════════════════════════════════════════════════════════════
-//  server.js — Agendamento System
-//  Node.js + Express | Proxy para Google Apps Script
-// ═══════════════════════════════════════════════════════════════
+const express = require("express");
+const cors = require("cors");
+const path = require("path");
+const fs = require("fs");
+const { Pool } = require("pg");
+require("dotenv").config();
 
-require('dotenv').config();
-const express = require('express');
-const cors    = require('cors');
-const path    = require('path');
+const app = express();
 
-const app  = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 
-const GAS_URL     = process.env.GAS_DEPLOY_URL || '';
-const GAS_API_KEY = process.env.GAS_API_KEY    || '';
-
-// ── Cache em memória ─────────────────────────────────────────
-const CACHE_TTL = {
-  getInfoInicial         : 10 * 60 * 1000, // 10 min — lojas, origens, owners raramente mudam
-  getLojas               : 10 * 60 * 1000,
-  getOrigens             : 10 * 60 * 1000,
-  getOwners              : 10 * 60 * 1000,
-  getAccessTags          : 10 * 60 * 1000,
-  getOptometristasPorLoja: 10 * 60 * 1000,
-  loginSeguro            :  5 * 60 * 1000, // 5 min por usuário
-  getUsuarioLogado       :  5 * 60 * 1000,
-  getAgendamentos        :        15_000,  // 15s — sincroniza em tempo quase-real
-  getAgendamentosSeguro  :        15_000,
-  getDashboard           :        15_000,
-  getFinancePanel        :        15_000,
-};
-
-// Funções que gravam dados — invalidam o cache ao serem chamadas
-const WRITE_FNS = new Set([
-  'salvarAgendamento', 'updateRow', 'confirmarAgendamento',
-  'marcarCompareceu', 'marcarNaoCompareceu', 'marcarCompraStatus',
-  'cancelarAgendamento', 'excluirAgendamento', 'salvarOS',
-  'atualizarPlanilhaSistemaCompleto'
-]);
-
-const cache = new Map();
-
-function cacheKey(fn, args) {
-  return fn + '|' + JSON.stringify(args);
-}
-
-function getCache(fn, args) {
-  const entry = cache.get(cacheKey(fn, args));
-  if (!entry) return null;
-  if (Date.now() > entry.expiresAt) { cache.delete(cacheKey(fn, args)); return null; }
-  return entry.data;
-}
-
-function setCache(fn, args, data) {
-  const ttl = CACHE_TTL[fn];
-  if (!ttl) return;
-  cache.set(cacheKey(fn, args), { data, expiresAt: Date.now() + ttl });
-}
-
-function invalidateCache() {
-  cache.clear();
-}
-
-// ── Middlewares ──────────────────────────────────────────────
 app.use(cors());
-app.use(express.json({ limit: '2mb' }));
-app.use(express.urlencoded({ extended: true, limit: '2mb' })); // Kommo envia webhooks como form-encoded
-app.use(express.static(path.join(__dirname, 'public'), {
-  maxAge: '1h',  // browser faz cache do HTML/CSS/JS por 1 hora
-  etag: true
-}));
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true }));
 
-// ── Health check ─────────────────────────────────────────────
-app.get('/health', (_req, res) => {
-  const fs = require('fs');
-  let publicFiles = [];
-  try { publicFiles = fs.readdirSync(path.join(__dirname, 'public')); } catch(e) {}
+const publicPath = path.join(__dirname, "public");
+
+if (fs.existsSync(publicPath)) {
+  app.use(express.static(publicPath));
+}
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL
+});
+
+async function initDatabase() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS agendamentos (
+      id SERIAL PRIMARY KEY,
+      nome TEXT NOT NULL,
+      whatsapp TEXT,
+      email TEXT,
+      loja TEXT,
+      optometrista TEXT,
+      origem TEXT,
+      data_agendamento DATE,
+      horario TEXT,
+      observacao TEXT,
+      status TEXT DEFAULT 'Agendado',
+      compareceu TEXT DEFAULT 'Pendente',
+      criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS usuarios (
+      id SERIAL PRIMARY KEY,
+      nome TEXT NOT NULL,
+      email TEXT UNIQUE NOT NULL,
+      senha TEXT NOT NULL,
+      cargo TEXT,
+      loja TEXT,
+      ativo BOOLEAN DEFAULT true,
+      criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS lojas (
+      id SERIAL PRIMARY KEY,
+      nome TEXT NOT NULL,
+      endereco TEXT,
+      ativo BOOLEAN DEFAULT true,
+      criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS optometristas (
+      id SERIAL PRIMARY KEY,
+      nome TEXT NOT NULL,
+      loja TEXT,
+      ativo BOOLEAN DEFAULT true,
+      criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS origens (
+      id SERIAL PRIMARY KEY,
+      nome TEXT NOT NULL,
+      ativo BOOLEAN DEFAULT true,
+      criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS feriados (
+      id SERIAL PRIMARY KEY,
+      data DATE NOT NULL,
+      descricao TEXT,
+      ativo BOOLEAN DEFAULT true,
+      criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+}
+
+app.get("/health", async (req, res) => {
+  try {
+    const db = await pool.query("SELECT NOW() as agora");
+
+    res.json({
+      ok: true,
+      service: "Agendamento System",
+      database: true,
+      databaseTime: db.rows[0].agora,
+      ts: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      service: "Agendamento System",
+      database: false,
+      error: error.message
+    });
+  }
+});
+
+app.post("/api/agendamentos", async (req, res) => {
+  try {
+    const {
+      nome,
+      whatsapp,
+      email,
+      loja,
+      optometrista,
+      origem,
+      data_agendamento,
+      data,
+      horario,
+      observacao,
+      status
+    } = req.body;
+
+    if (!nome) {
+      return res.status(400).json({
+        ok: false,
+        message: "Nome é obrigatório."
+      });
+    }
+
+    const dataFinal = data_agendamento || data || null;
+
+    const result = await pool.query(
+      `
+      INSERT INTO agendamentos (
+        nome,
+        whatsapp,
+        email,
+        loja,
+        optometrista,
+        origem,
+        data_agendamento,
+        horario,
+        observacao,
+        status
+      )
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      RETURNING *
+      `,
+      [
+        nome,
+        whatsapp || null,
+        email || null,
+        loja || null,
+        optometrista || null,
+        origem || null,
+        dataFinal,
+        horario || null,
+        observacao || null,
+        status || "Agendado"
+      ]
+    );
+
+    res.json({
+      ok: true,
+      message: "Agendamento salvo no PostgreSQL.",
+      agendamento: result.rows[0]
+    });
+  } catch (error) {
+    console.error("Erro ao salvar agendamento:", error);
+    res.status(500).json({
+      ok: false,
+      message: "Erro ao salvar agendamento.",
+      error: error.message
+    });
+  }
+});
+
+app.get("/api/agendamentos", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT *
+      FROM agendamentos
+      ORDER BY id DESC
+      LIMIT 200
+    `);
+
+    res.json({
+      ok: true,
+      total: result.rows.length,
+      agendamentos: result.rows
+    });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      message: "Erro ao buscar agendamentos.",
+      error: error.message
+    });
+  }
+});
+
+app.patch("/api/agendamentos/:id/status", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, compareceu } = req.body;
+
+    const result = await pool.query(
+      `
+      UPDATE agendamentos
+      SET
+        status = COALESCE($1, status),
+        compareceu = COALESCE($2, compareceu),
+        atualizado_em = CURRENT_TIMESTAMP
+      WHERE id = $3
+      RETURNING *
+      `,
+      [status || null, compareceu || null, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        ok: false,
+        message: "Agendamento não encontrado."
+      });
+    }
+
+    res.json({
+      ok: true,
+      message: "Agendamento atualizado.",
+      agendamento: result.rows[0]
+    });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      message: "Erro ao atualizar agendamento.",
+      error: error.message
+    });
+  }
+});
+
+app.get("/", (req, res) => {
+  const indexPath = path.join(publicPath, "index.html");
+
+  if (fs.existsSync(indexPath)) {
+    return res.sendFile(indexPath);
+  }
+
   res.json({
     ok: true,
-    service: 'Agendamento System',
-    gasConfigured: !!GAS_URL,
-    cacheEntries: cache.size,
-    publicFiles: publicFiles,
-    ts: new Date().toISOString()
+    service: "Agendamento System",
+    message: "Servidor rodando com PostgreSQL.",
+    routes: [
+      "GET /health",
+      "GET /api/agendamentos",
+      "POST /api/agendamentos",
+      "PATCH /api/agendamentos/:id/status"
+    ]
   });
 });
 
-// ── Limpar cache manualmente ──────────────────────────────────
-app.post('/api/cache/clear', (_req, res) => {
-  invalidateCache();
-  res.json({ ok: true, message: 'Cache limpo.' });
-});
-
-// ── Proxy GAS function calls ──────────────────────────────────
-app.post('/api/gas', async (req, res) => {
-  if (!GAS_URL) {
-    return res.status(503).json({
-      ok: false,
-      error: 'GAS_DEPLOY_URL não configurado. Verifique o arquivo .env'
+initDatabase()
+  .then(() => {
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Sistema rodando na porta ${PORT}`);
+      console.log("PostgreSQL conectado e tabelas verificadas.");
     });
-  }
-
-  const { fn, args = [] } = req.body;
-  if (!fn) {
-    return res.status(400).json({ ok: false, error: 'Parâmetro "fn" obrigatório.' });
-  }
-
-  // Retorna do cache se disponível
-  const cached = getCache(fn, args);
-  if (cached) {
-    return res.json({ ...cached, _cached: true });
-  }
-
-  // Invalida cache ao gravar
-  if (WRITE_FNS.has(fn)) invalidateCache();
-
-  try {
-    const params = new URLSearchParams({
-      format: 'api',
-      fn:     fn,
-      key:    GAS_API_KEY,
-      args:   JSON.stringify(args)
-    });
-
-    const gasUrl = `${GAS_URL}?${params.toString()}`;
-    const response = await fetch(gasUrl, {
-      method:  'GET',
-      headers: { 'Accept': 'application/json' },
-      signal:  AbortSignal.timeout(55_000)
-    });
-
-    if (!response.ok) {
-      return res.status(502).json({ ok: false, error: `GAS retornou HTTP ${response.status}`, fn });
-    }
-
-    const text = await response.text();
-    let data;
-    try   { data = JSON.parse(text); }
-    catch { data = { ok: false, error: 'Resposta inválida do GAS', raw: text.slice(0, 500) }; }
-
-    // Salva no cache só se a resposta for ok
-    if (data && data.ok) setCache(fn, args, data);
-
-    return res.json(data);
-  } catch (err) {
-    const isTimeout = err.name === 'TimeoutError' || err.name === 'AbortError';
-    return res.status(isTimeout ? 504 : 500).json({
-      ok:    false,
-      error: isTimeout ? 'GAS demorou demais para responder.' : (err.message || String(err)),
-      fn
-    });
-  }
-});
-
-// ── Kommo CRM Integration ─────────────────────────────────────
-try {
-  const kommoRouter    = require('./kommo/webhook');
-  const salsbotRouter  = require('./kommo/salesbot');
-  app.use(kommoRouter);
-  app.use(salsbotRouter);
-  const mode = process.env.KOMMO_USE_SALESBOT === 'true' ? 'Salesbot' : 'REST API';
-  console.log(`    Kommo:   ✅ rotas registradas (/webhook/kommo, /api/salesbot) — modo: ${mode}`);
-} catch (err) {
-  console.error('    Kommo:   ❌ ERRO ao carregar módulo:', err.message);
-}
-
-// ── SPA fallback ──────────────────────────────────────────────
-app.get('*', (_req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
-// ── Keep-alive: mantém o GAS acordado ────────────────────────
-// Chama o GAS a cada 4 minutos para evitar cold start
-async function pingGAS() {
-  if (!GAS_URL) return;
-  try {
-    const params = new URLSearchParams({
-      format: 'api', fn: 'testarBackend',
-      key: GAS_API_KEY, args: '[]'
-    });
-    await fetch(`${GAS_URL}?${params}`, {
-      signal: AbortSignal.timeout(30_000)
-    });
-    console.log(`[keep-alive] GAS acordado — ${new Date().toLocaleTimeString('pt-BR')}`);
-  } catch (e) {
-    console.log(`[keep-alive] falhou: ${e.message}`);
-  }
-}
-
-// ── Start ─────────────────────────────────────────────────────
-app.listen(PORT, () => {
-  console.log(`\n🚀  Agendamento System`);
-  console.log(`    Local:   http://localhost:${PORT}`);
-  console.log(`    GAS URL: ${GAS_URL ? '✅ configurado' : '❌ NÃO configurado (.env)'}`);
-  console.log(`    API Key: ${GAS_API_KEY ? '✅ configurado' : '❌ NÃO configurado (.env)'}`);
-  console.log(`    Cache:   ✅ ativo (lojas/origens/usuários: 10min)`);
-  console.log(`    Keep-alive: ✅ ping GAS a cada 4 minutos\n`);
-
-  // Primeiro ping imediato para acordar o GAS ao subir o servidor
-  pingGAS();
-  setInterval(pingGAS, 4 * 60 * 1000);
-
-  // ── Crons do bot Kommo ──────────────────────────────────────
-  if (process.env.BOT_ENABLED !== 'false') {
-    require('./kommo/reminder').startReminderCron();
-    require('./kommo/recovery').startRecoveryCron();
-  }
-});
+  })
+  .catch((error) => {
+    console.error("Erro ao iniciar banco:", error);
+    process.exit(1);
+  });
