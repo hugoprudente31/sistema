@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
+    "db:migrate": "node src/scripts/migrate.js"
     "import:sheets": "node src/scripts/import-sheets.js"
   },
   "engines": {
