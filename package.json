@@ -1,11 +1,11 @@
 {
-  "name": "agendamento-system",
+  "name": "sistema-de-agendamento",
   "version": "1.0.0",
   "description": "Sistema de Agendamento Multiloja — Óticas TGT",
-  "main": "server.js",
+  "main": "servidor.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js",
+    "start": "node servidor.js",
+    "dev": "nodemon servidor.js",
     "db:migrate": "node src/scripts/migrate.js",
     "import:sheets": "node src/scripts/import-sheets.js"
   },
