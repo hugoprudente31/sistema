@@ -1,13 +1,25 @@
 {
-  "type": "service_account",
-  "project_id": "sistema-de-agendamento-498519",
-  "private_key_id": "c107c1d5d51e699207d894f428edc0c5e90e74e9",
-  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC6uvewgP5X9kkr\nCor5P+OIUerrt5g73j0qhgA8DNbrBYgvHEa3K/h92NgNak10hk6F/pj7u95VKbTQ\nIXxlENtNq55Ae7W1i+YplRdgE052hbZEDg/8xazTaONilg/HOnKn4xUFKbfq6Juf\n8echVn2T/GfKhWXNMGxGn/psRo9C3Rj3aD0q4vnW/i22G5DD1XHIKJ9PG0WtoymB\ne0gYrgg9Ua70YmNRWl5xB5wJceDKLmcEl0W4mPymq+zqYzuuTduHczr7lGkSOyaN\nGLjVIRmHsegX7S1DK65lHsl9CzOe2ZaYLBm8KS+bAatbDb4YyIyAHwH2n43tcQL6\ndu1wYHADAgMBAAECggEACCOLFTniHCJjeQlKGmgS+kebxi9n5sAeiWJy0ys6GN9S\nWr9QQ76aY53WeOs3ugr6lDOPJnW/UJXzSBkVi3ArJt0ClkvuFR4mZ4yUir78rgTQ\n93Fnd/yDtmk9c/gXcvcUtUWcDnANkKMX2WZZTSYwbglT2stqrwFbzs49Q4flyaO3\nTPZiz+7zQ0Muf3BX0NQESk3XNHwf5FHMDCuwAHtlrAUq69JwQLnFCgBWkZ8qBGmi\nVrUxWkkvzm0JTWuldP0pJO7Z1wrIEz4Nb81Ga0LyA802zK7P8ysuGee1RxSj5D39\nHJQ9BemWQ9yTIbhlOKwMtkQ5MRV6TI7Qf9IrqAu1EQKBgQDrTXMDPYopkf04iD0q\neS5jeepiQWkzFBHyIi28ci+xsvUVDqk5fdgiWo4Hu07R/CEoD6sSN2Ph8bM/n5sB\nDQLGAgQt6I/iOQKfd1zAx+OdYdCXKKsCePKBmcdUx3hB3j+5ZIPnjXytB4nvtAhm\nGL0J/Uq/uLvs0Y4f2hJtvz6uUwKBgQDLJ8SVLTj7FsPExgNjz8xfP6sJW7moF2CF\nB/JuX8rQp8WBvuKyFDZkb/i+eaBsimt1gThfdx8jnTD7lEZ4UkhWtiSNYAkKxGrg\nzsfp1/kf85UsvL9ayIJH5ZKWvTL2sSb773gx/VP+hny1IObgzJ+eFfJJBn0dRkQ1\np5HCTh0hkQKBgQCC1VWV/6nK43nA7T/VVfwNI8THTUeJNyejUo3LslICpFbRlo1R\ngj+jGmbOtb9l0qM8+zlLr7DB+PqJ7dzqAKoCHyzjueQHDVv//wZ7yqks4S5yXhJ4\nFXgBx9eltCORvFoCY3lUTr98Fi0EMz5YRnkWDNh7MeSMERjNbRvCGgxoMQKBgA7a\nwY0G2XvCll30/Jp3v0HXrfHpOxIHY49WnWtkpbfMDK0IABt1TuTZKx8CVbCaDnFx\nGWYhl61K+SHsHZr+qTtt5g5QT1jyM75sYEHBAP5NGUNEKdnBf4UyTB2ph+hx25/g\nSrGdDF84BjZYSYl2bNVqVWTxjIRvdt1Ve1rxyz+BAoGBAJjNjiK2Ya9adWwQzZRQ\nGpyJp9ugbpeg93zYd5liGcfG0+REWLUOybQrKXo14yLmD6HUvWOz0N1iDhwg2lPC\nTpxK11mBkYjYMc9rSvLd2oa6BZ9MG8pCItsm/NuN2Xonf9bi3Vm4e5AN/KcxaZHq\nvnrQHqF57mH8JT/ZMgpbB/S+\n-----END PRIVATE KEY-----\n",
-  "client_email": "sistema-de-agendamento@sistema-de-agendamento-498519.iam.gserviceaccount.com",
-  "client_id": "116011358483418457773",
-  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-  "token_uri": "https://oauth2.googleapis.com/token",
-  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/sistema-de-agendamento%40sistema-de-agendamento-498519.iam.gserviceaccount.com",
-  "universe_domain": "googleapis.com"
+  "name": "agendamento-system",
+  "version": "1.0.0",
+  "description": "Sistema de Agendamento Multiloja — Óticas TGT",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "db:migrate": "node src/scripts/migrate.js",
+    "import:sheets": "node src/scripts/import-sheets.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "pg": "^8.12.0",
+    "googleapis": "^140.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4"
+  }
 }
