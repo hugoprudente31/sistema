@@ -271,9 +271,59 @@ app.post("/api/gas", async (req, res) => {
     });
   }
 });
+// ===============================
+// PROXY GAS - LOGIN E DADOS BASE
+// ===============================
 
+const GAS_URL =
+  process.env.GAS_URL ||
+  process.env.GAS_WEBAPP_URL ||
+  process.env.URL_GAS ||
+  process.env.URL_DE_IMPLANTACAO_DE_GAS ||
+  process.env.URL_DE_IMPLANTACAO_GAS;
 
-app.post("/api/agendamentos", async (req, res) => {
+app.post("/api/gas", async (req, res) => {
+  try {
+    if (!GAS_URL) {
+      return res.status(500).json({
+        ok: false,
+        message: "URL do GAS não configurada no Railway."
+      });
+    }
+
+    const response = await fetch(GAS_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(req.body)
+    });
+
+    const text = await response.text();
+
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      data = {
+        ok: false,
+        message: "Resposta do GAS não veio em JSON.",
+        raw: text
+      };
+    }
+
+    return res.status(response.status).json(data);
+  } catch (error) {
+    console.error("Erro no proxy /api/gas:", error);
+
+    return res.status(502).json({
+      ok: false,
+      message: "Falha ao comunicar com o Google Apps Script.",
+      error: error.message
+    });
+  }
+});
+
 app.post("/api/agendamentos", async (req, res) => {
   try {
     const {
