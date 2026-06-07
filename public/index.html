@@ -670,6 +670,169 @@ function gas(fnName) {
   });
 }
 
+// ── API PostgreSQL: dados rápidos em tempo quase real ─────────
+function apiGet(url) {
+  return fetch(url, { headers: { 'Accept': 'application/json' } })
+    .then(function(r) {
+      if (!r.ok) throw new Error('Erro HTTP ' + r.status + ' em ' + url);
+      return r.json();
+    });
+}
+
+function apiPost(url, payload) {
+  return fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    body: JSON.stringify(payload || {})
+  }).then(function(r) {
+    return r.json().then(function(data) {
+      if (!r.ok || data.ok === false) {
+        throw new Error((data && (data.message || data.error)) || ('Erro HTTP ' + r.status + ' em ' + url));
+      }
+      return data;
+    });
+  });
+}
+
+function apiPatch(url, payload) {
+  return fetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    body: JSON.stringify(payload || {})
+  }).then(function(r) {
+    return r.json().then(function(data) {
+      if (!r.ok || data.ok === false) {
+        throw new Error((data && (data.message || data.error)) || ('Erro HTTP ' + r.status + ' em ' + url));
+      }
+      return data;
+    });
+  });
+}
+
+function isoDateOnly(v) {
+  if (!v) return '';
+  var s = String(v);
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
+  return s;
+}
+
+function mapAgendamentoPostgres(r) {
+  r = r || {};
+  var dataAg = isoDateOnly(r.data_agendamento);
+  var criado = isoDateOnly(r.criado_em);
+  return {
+    ID: r.id,
+    DataCadastro: criado,
+    DataCadastroBR: formatDateBR(criado),
+    Origem: r.origem || '',
+    NomeCompleto: r.nome || '',
+    WhatsApp: r.whatsapp || '',
+    Email: r.email || '',
+    Loja: r.loja || '',
+    Optometrista: r.optometrista || '',
+    DataAgendamento: dataAg,
+    DataAgendamentoBR: formatDateBR(dataAg),
+    Horario: r.horario || '',
+    Observacao: r.observacao || '',
+    StatusAgenda: r.status || 'Agendado',
+    Presenca: r.compareceu || '',
+    ProprietarioNome: r.proprietario_nome || ((state.user && state.user.nome) || ''),
+    AccessTags: r.access_tags || '',
+    StatusOS: r.status_os || '',
+    NumeroOS: r.numero_os || '',
+    DataAberturaOS: isoDateOnly(r.data_abertura_os),
+    DataEntradaOS: isoDateOnly(r.data_entrada_os),
+    DataEntregaOS: isoDateOnly(r.data_entrega_os),
+    DataFinalizacaoOS: isoDateOnly(r.data_finalizacao_os),
+    VendedorNome: r.vendedor_nome || '',
+    ValorVenda: r.valor_venda || '',
+    Desconto: r.desconto || '',
+    AtendimentoSemaforoLabel: ''
+  };
+}
+
+function aplicarFiltrosLocaisAgendamentos(rows, filtros) {
+  filtros = filtros || {};
+  return (rows || []).filter(function(r) {
+    var data = isoDateOnly(r.DataAgendamento);
+    if (filtros.dataDe && data && data < filtros.dataDe) return false;
+    if (filtros.dataAte && data && data > filtros.dataAte) return false;
+    if (filtros.status && normalizeKey(r.StatusAgenda) !== normalizeKey(filtros.status)) return false;
+    if (filtros.statusOS && normalizeKey(r.StatusOS) !== normalizeKey(filtros.statusOS)) return false;
+    if (filtros.loja && normalizeKey(r.Loja) !== normalizeKey(filtros.loja)) return false;
+    if (filtros.optometrista && normalizeKey(r.Optometrista).indexOf(normalizeKey(filtros.optometrista)) === -1) return false;
+    if (filtros.cliente) {
+      var q = normalizeKey(filtros.cliente);
+      var alvo = normalizeKey([r.NomeCompleto, r.WhatsApp, r.Email].join(' '));
+      if (alvo.indexOf(q) === -1) return false;
+    }
+    if (filtros.accessTag && normalizeKey(r.AccessTags).indexOf(normalizeKey(filtros.accessTag)) === -1) return false;
+    return true;
+  });
+}
+
+function carregarAgendamentosPostgres(filtros) {
+  return apiGet('/api/agendamentos').then(function(res) {
+    var rows = Array.isArray(res.agendamentos) ? res.agendamentos : [];
+    var mapped = rows.map(mapAgendamentoPostgres);
+    return aplicarFiltrosLocaisAgendamentos(mapped, filtros || {});
+  });
+}
+
+function carregarDashboardPostgres() {
+  return apiGet('/api/dashboard').then(function(res) {
+    var d = (res && res.dashboard) || {};
+    return {
+      totalClientes: d.total_clientes || 0,
+      totalAgendamentos: d.total_agendamentos || 0,
+      totalVendas: d.total_vendas || 0,
+      faturamento: Number(d.faturamento_total || 0)
+    };
+  });
+}
+
+function calcularDashboardLocal(rows, dashboardApi) {
+  rows = Array.isArray(rows) ? rows : [];
+  dashboardApi = dashboardApi || {};
+  var d = {
+    agendados: 0,
+    compareceram: 0,
+    naoCompareceram: 0,
+    concluidos: 0,
+    osAtivas: 0,
+    atrasadas: 0,
+    origemTop: '—',
+    faturamento: dashboardApi.faturamento || 0,
+    totalClientes: dashboardApi.totalClientes || 0,
+    totalVendas: dashboardApi.totalVendas || 0,
+    os7: { opened: 0, finalized: 0 },
+    os15: { opened: 0, finalized: 0 },
+    os30: { opened: 0, finalized: 0 }
+  };
+
+  var origemCount = {};
+  rows.forEach(function(r) {
+    var st = normalizeKey(r.StatusAgenda);
+    if (st === 'agendado' || st === 'confirmado') d.agendados++;
+    if (st === 'compareceu' || st === 'os em andamento' || st === 'concluido') d.compareceram++;
+    if (st === 'nao compareceu') d.naoCompareceram++;
+    if (st === 'concluido') d.concluidos++;
+    if (r.StatusOS && ['entregue','concluido','cancelada','cancelado'].indexOf(normalizeKey(r.StatusOS)) === -1) d.osAtivas++;
+    if (r.Origem) origemCount[r.Origem] = (origemCount[r.Origem] || 0) + 1;
+  });
+
+  var top = Object.keys(origemCount).sort(function(a,b){ return origemCount[b] - origemCount[a]; })[0];
+  if (top) d.origemTop = top;
+  return d;
+}
+
+function carregarFaturamentosPostgres() {
+  return apiGet('/api/faturamentos').then(function(res) {
+    return Array.isArray(res.faturamentos) ? res.faturamentos : [];
+  });
+}
+
+
 function showLoading(show) { byId('pageLoading').classList.toggle('show', !!show); }
 
 function setMsg(id, text, type) {
@@ -773,7 +936,7 @@ function iniciarAutoRefresh() {
     if (!dot || !label) return;
     if (atualizando) {
       dot.style.background = '#f59e0b';
-      label.textContent    = 'Atualizando...';
+      label.textContent    = 'Atualizando em tempo real...';
     } else {
       var agora = new Date();
       var hh    = String(agora.getHours()).padStart(2,'0');
@@ -785,35 +948,40 @@ function iniciarAutoRefresh() {
   }
 
   function refreshSilencioso() {
-    if (!state.user) return;
+    if (!state.user || window._refreshBusy) return;
+    window._refreshBusy = true;
     atualizarIndicador(true);
+
     var filtros = coletarFiltros();
+
     Promise.all([
-      gas('getAgendamentos', state.user, filtros).then(function(rows) {
-        state.agendamentos = Array.isArray(rows) ? rows : [];
+      carregarAgendamentosPostgres(filtros).then(function(rows) {
+        state.agendamentos = rows;
         renderAgenda(state.agendamentos);
       }),
-      gas('getDashboard', state.user).then(function(d) {
-        state.dashboard = d || {};
+      carregarDashboardPostgres().then(function(d) {
+        state.dashboard = calcularDashboardLocal(state.agendamentos, d);
         preencherDashboard();
       }),
-      canFinance()
-        ? gas('getFinancePanel', state.user, filtros).then(function(res) {
-            if (!res) return;
-            byId('finTotal').textContent    = money(res.totalFaturado  || 0);
-            byId('finDesconto').textContent = money(res.totalDesconto  || 0);
-            byId('finQtd').textContent      = String(res.totalOSComValor || 0);
-            byId('finTicket').textContent   = money(res.ticketMedio    || 0);
-          })
-        : Promise.resolve()
+      canFinance() ? carregarFaturamento() : Promise.resolve()
     ])
-    .then(function()  { atualizarIndicador(false); })
-    .catch(function() { atualizarIndicador(false); });
+    .then(function() { atualizarIndicador(false); })
+    .catch(function(err) {
+      console.warn('[auto-refresh]', err && err.message ? err.message : err);
+      atualizarIndicador(false);
+    })
+    .finally(function() {
+      window._refreshBusy = false;
+    });
   }
 
   atualizarIndicador(false);
-  window._autoRefreshInterval = setInterval(refreshSilencioso, 15000);
+  refreshSilencioso();
+
+  // Atualização rápida: busca novos dados a cada 1 segundo.
+  window._autoRefreshInterval = setInterval(refreshSilencioso, 1000);
 }
+
 
 // ═══════════════════════════════════════════════════════════════
 //  PERMISSÕES DE TELA
@@ -855,38 +1023,50 @@ function carregarInfoBase() {
 
 function carregarAgendaEDashboard() {
   state.agendamentos = [];
-  byId('agendaBody').innerHTML = '<tr><td colspan="17"><div class="loading-box">Carregando agendamentos...</div></td></tr>';
-  return Promise.all([
-    gas('getAgendamentos', state.user, coletarFiltros()).then(function(rows) {
-      state.agendamentos = Array.isArray(rows) ? rows : [];
-      renderAgenda(state.agendamentos);
-    }),
-    gas('getDashboard', state.user).then(function(d) {
-      state.dashboard = d || {};
-      preencherDashboard();
-    })
-  ]).catch(function(err) {
-    byId('agendaBody').innerHTML = '<tr><td colspan="17">Erro ao carregar agendamentos.</td></tr>';
-    setMsg('msgForm','Erro ao carregar agenda: '+(err.message||err),'err');
-  });
-}
+  byId('agendaBody').innerHTML = '<tr><td colspan="17"><div class="loading-box">Carregando agendamentos do PostgreSQL...</div></td></tr>';
 
-function recarregarComFiltros() {
-  byId('agendaBody').innerHTML = '<tr><td colspan="17"><div class="loading-box">Carregando...</div></td></tr>';
-  gas('getAgendamentos', state.user, coletarFiltros())
+  var filtros = coletarFiltros();
+
+  return carregarAgendamentosPostgres(filtros)
     .then(function(rows) {
       state.agendamentos = Array.isArray(rows) ? rows : [];
       renderAgenda(state.agendamentos);
+      return carregarDashboardPostgres();
+    })
+    .then(function(d) {
+      state.dashboard = calcularDashboardLocal(state.agendamentos, d || {});
+      preencherDashboard();
+    })
+    .catch(function(err) {
+      byId('agendaBody').innerHTML = '<tr><td colspan="17">Erro ao carregar agendamentos do banco.</td></tr>';
+      setMsg('msgForm','Erro ao carregar agenda: '+(err.message||err),'err');
+    });
+}
+
+
+function recarregarComFiltros() {
+  byId('agendaBody').innerHTML = '<tr><td colspan="17"><div class="loading-box">Carregando do PostgreSQL...</div></td></tr>';
+
+  var filtros = coletarFiltros();
+
+  carregarAgendamentosPostgres(filtros)
+    .then(function(rows) {
+      state.agendamentos = Array.isArray(rows) ? rows : [];
+      renderAgenda(state.agendamentos);
+      return carregarDashboardPostgres();
+    })
+    .then(function(d) {
+      state.dashboard = calcularDashboardLocal(state.agendamentos, d || {});
+      preencherDashboard();
     })
     .catch(function(err) {
       byId('agendaBody').innerHTML = '<tr><td colspan="17">Erro ao aplicar filtros.</td></tr>';
+      setMsg('msgForm', err.message || String(err), 'err');
     });
-  gas('getDashboard', state.user).then(function(d) {
-    state.dashboard = d || {};
-    preencherDashboard();
-  }).catch(function(){});
+
   if (canFinance()) carregarFaturamento();
 }
+
 
 function debouncedReload() {
   clearTimeout(state.reloadTimer);
@@ -914,19 +1094,46 @@ function preencherDashboard() {
   }
 }
 
+
 function carregarFaturamento() {
   if (!canFinance()) return Promise.resolve();
-  return gas('getFinancePanel', state.user, coletarFiltros()).then(function(res) {
-    byId('finTotal').textContent   = money(res.totalFaturado  || 0);
-    byId('finDesconto').textContent= money(res.totalDesconto  || 0);
-    byId('finQtd').textContent     = String(res.totalOSComValor || 0);
-    byId('finTicket').textContent  = money(res.ticketMedio    || 0);
-    var rows = Array.isArray(res.rows) ? res.rows : [];
+
+  return carregarFaturamentosPostgres().then(function(rows) {
+    var total = 0;
+    var qtd = 0;
+
+    rows.forEach(function(r) {
+      var valor = Number(r.valor_total || 0);
+      if (valor > 0) {
+        total += valor;
+        qtd++;
+      }
+    });
+
+    byId('finTotal').textContent    = money(total);
+    byId('finDesconto').textContent = money(0);
+    byId('finQtd').textContent      = String(qtd);
+    byId('finTicket').textContent   = money(qtd ? total / qtd : 0);
+
     byId('financeBody').innerHTML = rows.map(function(r) {
-      return '<tr><td>'+escapeHtml(r.ID)+'</td><td>'+escapeHtml(r.Cliente)+'</td><td>'+escapeHtml(r.NumeroOS)+'</td><td>'+escapeHtml(r.StatusOS)+'</td><td>'+money(r.ValorVenda||0)+'</td><td>'+money(r.Desconto||0)+'</td><td>'+escapeHtml(r.VendedorNome||'')+'</td><td>'+escapeHtml(r.ProprietarioNome)+'</td><td>'+escapeHtml(r.Loja)+'</td><td>'+escapeHtml(formatDateBR(r.DataFinalizacaoOS))+'</td></tr>';
+      return '<tr>'+
+        '<td>'+escapeHtml(r.id)+'</td>'+
+        '<td>'+escapeHtml(r.cliente_id || '')+'</td>'+
+        '<td>'+escapeHtml(r.agendamento_id || '')+'</td>'+
+        '<td>'+escapeHtml(r.status_pagamento || '')+'</td>'+
+        '<td>'+money(r.valor_total || 0)+'</td>'+
+        '<td>'+money(0)+'</td>'+
+        '<td>'+escapeHtml(r.vendedor || '')+'</td>'+
+        '<td>'+escapeHtml((state.user && state.user.nome) || '')+'</td>'+
+        '<td>'+escapeHtml(r.loja || '')+'</td>'+
+        '<td>'+escapeHtml(formatDateBR(r.data_venda || ''))+'</td>'+
+      '</tr>';
     }).join('') || '<tr><td colspan="10">Nenhum dado financeiro.</td></tr>';
-  }).catch(function(err) { setMsg('msgForm', err.message||String(err), 'err'); });
+  }).catch(function(err) {
+    setMsg('msgForm', err.message||String(err), 'err');
+  });
 }
+
 
 function carregarLeadTime() {
   if (['admin','atendimento central','gerente de loja'].indexOf(roleName()) === -1) return;
@@ -1117,6 +1324,7 @@ function validarHorarioVisual() {
 function salvarAgendamento() {
   var erroHorario = validarHorarioVisual();
   if (erroHorario) { setMsg('msgForm', erroHorario, 'err'); return; }
+
   var payload = {
     origem:          byId('origem').value.trim(),
     nomeCompleto:    byId('nomeCompleto').value.trim(),
@@ -1130,17 +1338,58 @@ function salvarAgendamento() {
     statusAgenda:    byId('statusAgenda').value.trim(),
     accessTags:      byId('accessTag').value.trim()
   };
+
+  if (!payload.nomeCompleto || !payload.whatsApp || !payload.email || !payload.loja || !payload.optometrista || !payload.dataAgendamento || !payload.horario) {
+    setMsg('msgForm', 'Preencha todos os campos obrigatórios do agendamento.', 'err');
+    return;
+  }
+
   showLoading(true);
-  gas('salvarAgendamento', payload, state.user).then(function(res) {
-    if (!res || !res.ok) throw new Error((res && res.message) || 'Falha ao salvar.');
-    setMsg('msgForm', res.message || 'Agendamento salvo.', 'ok');
-    toast('Agendamento salvo com sucesso.', 'ok');
-    limparFormulario(false);
-    return carregarAgendaEDashboard();
-  }).catch(function(err) {
-    setMsg('msgForm', err.message||String(err), 'err');
-  }).finally(function() { showLoading(false); });
+
+  var clientePayload = {
+    nome: payload.nomeCompleto,
+    whatsapp: payload.whatsApp,
+    email: payload.email,
+    origem: payload.origem,
+    loja_origem: payload.loja,
+    observacoes: payload.observacao
+  };
+
+  var agendaPayload = {
+    nome: payload.nomeCompleto,
+    whatsapp: payload.whatsApp,
+    email: payload.email,
+    loja: payload.loja,
+    optometrista: payload.optometrista,
+    origem: payload.origem,
+    data_agendamento: payload.dataAgendamento,
+    horario: payload.horario,
+    observacao: payload.observacao,
+    status: payload.statusAgenda || 'Agendado'
+  };
+
+  apiPost('/api/clientes', clientePayload)
+    .catch(function(err) {
+      console.warn('[clientes] Não bloqueou o agendamento:', err && err.message ? err.message : err);
+      return null;
+    })
+    .then(function() {
+      return apiPost('/api/agendamentos', agendaPayload);
+    })
+    .then(function(res) {
+      if (!res || !res.ok) throw new Error((res && res.message) || 'Falha ao salvar no PostgreSQL.');
+      setMsg('msgForm', res.message || 'Agendamento salvo no PostgreSQL.', 'ok');
+      toast('Agendamento salvo no banco com sucesso.', 'ok');
+      limparFormulario(false);
+      return carregarAgendaEDashboard();
+    })
+    .catch(function(err) {
+      setMsg('msgForm', err.message||String(err), 'err');
+      toast(err.message||String(err), 'err');
+    })
+    .finally(function() { showLoading(false); });
 }
+
 
 function limparFormulario(clearMsg) {
   if (clearMsg === undefined) clearMsg = true;
