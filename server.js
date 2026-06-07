@@ -272,6 +272,454 @@ app.get("/", (req, res) => {
     ]
   });
 });
+// ===============================
+// ROTAS POSTGRESQL - CLIENTES
+// ===============================
+
+app.post("/api/clientes", async (req, res) => {
+  try {
+    const {
+      nome,
+      whatsapp,
+      email,
+      cpf,
+      data_nascimento,
+      origem,
+      loja_origem,
+      observacoes
+    } = req.body;
+
+    if (!nome) {
+      return res.status(400).json({
+        ok: false,
+        message: "Nome do cliente é obrigatório."
+      });
+    }
+
+    const result = await pool.query(
+      `
+      INSERT INTO clientes (
+        nome,
+        whatsapp,
+        email,
+        cpf,
+        data_nascimento,
+        origem,
+        loja_origem,
+        observacoes
+      )
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+      RETURNING *
+      `,
+      [
+        nome,
+        whatsapp || null,
+        email || null,
+        cpf || null,
+        data_nascimento || null,
+        origem || null,
+        loja_origem || null,
+        observacoes || null
+      ]
+    );
+
+    res.json({
+      ok: true,
+      message: "Cliente salvo no banco.",
+      cliente: result.rows[0]
+    });
+  } catch (error) {
+    console.error("Erro ao salvar cliente:", error);
+    res.status(500).json({
+      ok: false,
+      message: "Erro ao salvar cliente.",
+      error: error.message
+    });
+  }
+});
+
+app.get("/api/clientes", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT *
+      FROM clientes
+      ORDER BY id DESC
+      LIMIT 300
+    `);
+
+    res.json({
+      ok: true,
+      total: result.rows.length,
+      clientes: result.rows
+    });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      message: "Erro ao buscar clientes.",
+      error: error.message
+    });
+  }
+});
+
+
+// ===============================
+// ROTAS POSTGRESQL - FATURAMENTOS
+// ===============================
+
+app.post("/api/faturamentos", async (req, res) => {
+  try {
+    const {
+      cliente_id,
+      agendamento_id,
+      loja,
+      vendedor,
+      valor_total,
+      forma_pagamento,
+      status_pagamento,
+      data_venda,
+      observacao
+    } = req.body;
+
+    const result = await pool.query(
+      `
+      INSERT INTO faturamentos (
+        cliente_id,
+        agendamento_id,
+        loja,
+        vendedor,
+        valor_total,
+        forma_pagamento,
+        status_pagamento,
+        data_venda,
+        observacao
+      )
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      RETURNING *
+      `,
+      [
+        cliente_id || null,
+        agendamento_id || null,
+        loja || null,
+        vendedor || null,
+        valor_total || 0,
+        forma_pagamento || null,
+        status_pagamento || "Pendente",
+        data_venda || null,
+        observacao || null
+      ]
+    );
+
+    res.json({
+      ok: true,
+      message: "Faturamento salvo no banco.",
+      faturamento: result.rows[0]
+    });
+  } catch (error) {
+    console.error("Erro ao salvar faturamento:", error);
+    res.status(500).json({
+      ok: false,
+      message: "Erro ao salvar faturamento.",
+      error: error.message
+    });
+  }
+});
+
+app.get("/api/faturamentos", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT *
+      FROM faturamentos
+      ORDER BY id DESC
+      LIMIT 300
+    `);
+
+    res.json({
+      ok: true,
+      total: result.rows.length,
+      faturamentos: result.rows
+    });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      message: "Erro ao buscar faturamentos.",
+      error: error.message
+    });
+  }
+});
+
+
+// ===============================
+// ROTAS POSTGRESQL - HISTÓRICO DE USUÁRIOS
+// ===============================
+
+app.post("/api/historico/usuarios", async (req, res) => {
+  try {
+    const {
+      usuario_id,
+      usuario_nome,
+      acao,
+      modulo,
+      descricao
+    } = req.body;
+
+    const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress || null;
+
+    if (!acao) {
+      return res.status(400).json({
+        ok: false,
+        message: "Ação é obrigatória."
+      });
+    }
+
+    const result = await pool.query(
+      `
+      INSERT INTO historico_usuarios (
+        usuario_id,
+        usuario_nome,
+        acao,
+        modulo,
+        descricao,
+        ip
+      )
+      VALUES ($1,$2,$3,$4,$5,$6)
+      RETURNING *
+      `,
+      [
+        usuario_id || null,
+        usuario_nome || null,
+        acao,
+        modulo || null,
+        descricao || null,
+        ip
+      ]
+    );
+
+    res.json({
+      ok: true,
+      message: "Histórico de usuário salvo.",
+      historico: result.rows[0]
+    });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      message: "Erro ao salvar histórico de usuário.",
+      error: error.message
+    });
+  }
+});
+
+app.get("/api/historico/usuarios", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT *
+      FROM historico_usuarios
+      ORDER BY id DESC
+      LIMIT 300
+    `);
+
+    res.json({
+      ok: true,
+      total: result.rows.length,
+      historico: result.rows
+    });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      message: "Erro ao buscar histórico de usuários.",
+      error: error.message
+    });
+  }
+});
+
+
+// ===============================
+// ROTAS POSTGRESQL - HISTÓRICO DE AGENDAMENTOS
+// ===============================
+
+app.post("/api/historico/agendamentos", async (req, res) => {
+  try {
+    const {
+      agendamento_id,
+      usuario_id,
+      usuario_nome,
+      acao,
+      status_anterior,
+      status_novo,
+      observacao
+    } = req.body;
+
+    if (!acao) {
+      return res.status(400).json({
+        ok: false,
+        message: "Ação é obrigatória."
+      });
+    }
+
+    const result = await pool.query(
+      `
+      INSERT INTO historico_agendamentos (
+        agendamento_id,
+        usuario_id,
+        usuario_nome,
+        acao,
+        status_anterior,
+        status_novo,
+        observacao
+      )
+      VALUES ($1,$2,$3,$4,$5,$6,$7)
+      RETURNING *
+      `,
+      [
+        agendamento_id || null,
+        usuario_id || null,
+        usuario_nome || null,
+        acao,
+        status_anterior || null,
+        status_novo || null,
+        observacao || null
+      ]
+    );
+
+    res.json({
+      ok: true,
+      message: "Histórico de agendamento salvo.",
+      historico: result.rows[0]
+    });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      message: "Erro ao salvar histórico de agendamento.",
+      error: error.message
+    });
+  }
+});
+
+app.get("/api/historico/agendamentos", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT *
+      FROM historico_agendamentos
+      ORDER BY id DESC
+      LIMIT 300
+    `);
+
+    res.json({
+      ok: true,
+      total: result.rows.length,
+      historico: result.rows
+    });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      message: "Erro ao buscar histórico de agendamentos.",
+      error: error.message
+    });
+  }
+});
+
+
+// ===============================
+// ROTAS POSTGRESQL - LOGS DO SISTEMA
+// ===============================
+
+app.post("/api/logs", async (req, res) => {
+  try {
+    const {
+      tipo,
+      origem,
+      mensagem,
+      detalhes
+    } = req.body;
+
+    const result = await pool.query(
+      `
+      INSERT INTO logs_sistema (
+        tipo,
+        origem,
+        mensagem,
+        detalhes
+      )
+      VALUES ($1,$2,$3,$4)
+      RETURNING *
+      `,
+      [
+        tipo || "info",
+        origem || null,
+        mensagem || null,
+        detalhes ? JSON.stringify(detalhes) : null
+      ]
+    );
+
+    res.json({
+      ok: true,
+      message: "Log salvo.",
+      log: result.rows[0]
+    });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      message: "Erro ao salvar log.",
+      error: error.message
+    });
+  }
+});
+
+app.get("/api/logs", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT *
+      FROM logs_sistema
+      ORDER BY id DESC
+      LIMIT 300
+    `);
+
+    res.json({
+      ok: true,
+      total: result.rows.length,
+      logs: result.rows
+    });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      message: "Erro ao buscar logs.",
+      error: error.message
+    });
+  }
+});
+
+
+// ===============================
+// DASHBOARD GERAL POSTGRESQL
+// ===============================
+
+app.get("/api/dashboard", async (req, res) => {
+  try {
+    const clientes = await pool.query(`SELECT COUNT(*)::int AS total FROM clientes`);
+    const agendamentos = await pool.query(`SELECT COUNT(*)::int AS total FROM agendamentos`);
+    const faturamentos = await pool.query(`
+      SELECT 
+        COUNT(*)::int AS total_vendas,
+        COALESCE(SUM(valor_total), 0)::numeric AS faturamento_total
+      FROM faturamentos
+    `);
+
+    res.json({
+      ok: true,
+      dashboard: {
+        total_clientes: clientes.rows[0].total,
+        total_agendamentos: agendamentos.rows[0].total,
+        total_vendas: faturamentos.rows[0].total_vendas,
+        faturamento_total: faturamentos.rows[0].faturamento_total
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      message: "Erro ao carregar dashboard.",
+      error: error.message
+    });
+  }
+});
 
 initDatabase()
   .then(() => {
