@@ -175,8 +175,7 @@ app.post("/api/agendamentos", async (req, res) => {
         status || "Agendado"
       ]
     );
-
-    res.json({
+     res.json({
       ok: true,
       message: "Agendamento salvo no PostgreSQL.",
       agendamento: result.rows[0]
