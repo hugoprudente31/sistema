@@ -905,31 +905,30 @@ function recarregarComFiltros() {
   return window._reloadingFiltros;
 }
 
-function iniciarAutoRefreshPostgres() {
-  if (window._autoRefreshInterval) clearInterval(window._autoRefreshInterval);
+function agendarAtualizacaoAposAcao(delayMs) {
+  delayMs = Number(delayMs || 1000);
+  clearTimeout(window._refreshAfterActionTimer);
 
-  window._autoRefreshInterval = setInterval(function() {
+  window._refreshAfterActionTimer = setTimeout(function() {
     if (!state.user) return;
-    if (window._uiBusy || window._pauseAutoRefresh || window._reloadingFiltros) return;
-    if (document.activeElement && ['SELECT', 'INPUT', 'TEXTAREA', 'BUTTON'].indexOf(document.activeElement.tagName) > -1) return;
     if (byId('editModal') && !byId('editModal').classList.contains('hidden')) return;
 
-    window._autoRefreshBusy = true;
+    window._pauseAutoRefresh = true;
+    recarregarComFiltros()
+      .catch(function(err) {
+        console.warn('Atualização após ação falhou:', err.message || err);
+      })
+      .finally(function() {
+        setTimeout(function() { window._pauseAutoRefresh = false; }, 300);
+      });
+  }, delayMs);
+}
 
-    Promise.all([
-      getAgendamentosPostgres(),
-      getDashboardPostgres()
-    ]).then(function(results) {
-      state.agendamentos = Array.isArray(results[0]) ? results[0] : [];
-      state.dashboard = buildDashboardLocal(state.agendamentos, results[1] || {});
-      renderAgenda(state.agendamentos);
-      preencherDashboard();
-    }).catch(function(err) {
-      console.warn('Auto-refresh PostgreSQL falhou:', err.message || err);
-    }).finally(function() {
-      window._autoRefreshBusy = false;
-    });
-  }, 5000);
+function iniciarAutoRefreshPostgres() {
+  // Atualização contínua desativada para não derrubar a caixa "Mais ações".
+  // O painel atualiza automaticamente 1 segundo após uma ação do usuário.
+  if (window._autoRefreshInterval) clearInterval(window._autoRefreshInterval);
+  window._autoRefreshInterval = null;
 }
 
 function debouncedReload() {
@@ -1378,7 +1377,7 @@ function salvarEdicaoLinha() {
       setMsg('msgForm', 'Registro atualizado no PostgreSQL.', 'ok');
       toast('Registro atualizado no PostgreSQL.', 'ok');
       fecharModalEdicao();
-      recarregarComFiltros();
+      agendarAtualizacaoAposAcao(1000);
     })
     .catch(function(err) {
       setMsg('msgEdit', err.message || String(err), 'err');
@@ -1403,7 +1402,7 @@ function marcarComprou(id) {
     .then(function() {
       setMsg('msgForm', 'Compra marcada no PostgreSQL.', 'ok');
       toast('Compra marcada no PostgreSQL.', 'ok');
-      recarregarComFiltros();
+      agendarAtualizacaoAposAcao(1000);
     })
     .catch(function(err) {
       setMsg('msgForm', err.message || String(err), 'err');
@@ -1422,7 +1421,7 @@ function marcarNaoComprou(id) {
     .then(function() {
       setMsg('msgForm', 'Atendimento sem compra marcado no PostgreSQL.', 'ok');
       toast('Atendimento sem compra marcado no PostgreSQL.', 'ok');
-      recarregarComFiltros();
+      agendarAtualizacaoAposAcao(1000);
     })
     .catch(function(err) {
       setMsg('msgForm', err.message || String(err), 'err');
@@ -1461,7 +1460,8 @@ function runAction(fn, id) {
     .then(function() {
       setMsg('msgForm', 'Ação salva no PostgreSQL.', 'ok');
       toast('Ação salva no PostgreSQL.', 'ok');
-      return recarregarComFiltros();
+      agendarAtualizacaoAposAcao(1000);
+      return true;
     })
     .catch(function(err) {
       setMsg('msgForm', err.message || String(err), 'err');
@@ -1469,8 +1469,8 @@ function runAction(fn, id) {
       throw err;
     })
     .finally(function() {
-      window._pauseAutoRefresh = false;
       showLoading(false);
+      setTimeout(function() { window._pauseAutoRefresh = false; }, 1200);
     });
 }
 
@@ -1495,7 +1495,7 @@ function abrirPromptOS(id, row) {
       if (!res || !res.ok) throw new Error((res && res.message) || 'Falha ao salvar OS no PostgreSQL.');
       setMsg('msgForm', 'OS atualizada no PostgreSQL.', 'ok');
       toast('OS atualizada no PostgreSQL.', 'ok');
-      recarregarComFiltros();
+      agendarAtualizacaoAposAcao(1000);
     })
     .catch(function(err) {
       setMsg('msgForm', err.message || String(err), 'err');
@@ -1520,8 +1520,9 @@ function executarAcaoAgenda(id, acao, selectEl) {
   else if (acao === 'editar') result = abrirModalEdicao(id);
 
   Promise.resolve(result).finally(function() {
-    if (selectEl) selectEl.value = '';
-    setTimeout(function() { window._pauseAutoRefresh = false; }, 800);
+    if (selectEl) setTimeout(function(){ selectEl.value = ''; }, 150);
+    if (acao === 'editar') return;
+    setTimeout(function() { window._pauseAutoRefresh = false; }, 1200);
   });
 }
 
@@ -1611,6 +1612,7 @@ function getActionHtml(r) {
 
   if (['admin', 'atendimento central', 'consultor de vendas', 'vendedor', 'outros', 'gerente de loja'].indexOf(role) > -1) {
     buttons += '<button class="secondary" onclick="abrirModalEdicao(\'' + id + '\')">Editar</button>';
+    options += '<option value="editar">Editar/Reagendar</option>';
     options += '<option value="os">Registrar/Atualizar OS</option>';
   }
 
