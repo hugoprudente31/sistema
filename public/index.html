@@ -518,6 +518,10 @@ function apiPatch(url, body) {
         throw new Error((data && (data.message || data.error)) || ('Erro HTTP ' + r.status + ' em ' + url));
       }
       return data;
+    }).catch(function(err) {
+      if (err && err.message && err.message.indexOf('Erro HTTP') === 0) throw err;
+      if (!r.ok) throw new Error('Erro HTTP ' + r.status + ' em ' + url);
+      throw err;
     });
   });
 }
@@ -617,7 +621,12 @@ function buildDashboardLocal(rows, db) {
   };
 }
 
-function showLoading(show) { byId('pageLoading').classList.toggle('show', !!show); }
+function showLoading(show) {
+  window._uiBusy = !!show;
+  var el = byId('pageLoading');
+  if (el) el.classList.toggle('show', !!show);
+}
+
 
 function setMsg(id, text, type) {
   var el = byId(id);
@@ -699,15 +708,7 @@ function fazerLogin() {
       byId('responsavelTela').value = res.user.nome || '';
 
       aplicarPermissoesTela();
-      return carregarInfoBase()
-        .then(function() { return carregarAgendaEDashboard(); })
-        .then(function() {
-          iniciarAutoRefreshPostgres();
-          atualizarStatusSistema({
-            serverVersion: 'Railway + PostgreSQL',
-            dataAtualizacao: new Date().toLocaleString('pt-BR')
-          });
-        });
+      return carregarSistemaTurbo();
     })
     .catch(function(err) {
       setMsg('msgLogin', err.message || String(err), 'err');
@@ -822,13 +823,27 @@ function carregarInfoBase() {
 
 
 function carregarSistemaTurbo() {
-  // Mantido por compatibilidade, mas agora sem depender do GAS pesado.
-  // Dados base, agenda e dashboard vêm do PostgreSQL.
   state.agendamentos = [];
   byId('agendaBody').innerHTML = '<tr><td colspan="17"><div class="loading-box">Carregando sistema com PostgreSQL...</div></td></tr>';
 
-  return carregarInfoBase()
-    .then(function() { return carregarAgendaEDashboard(); })
+  return gas('getInfoInicial', (state.user && state.user.email) || '')
+    .then(function(res) {
+      if (!res || !res.ok) throw new Error((res && res.message) || 'Erro ao carregar dados base.');
+
+      state.owners = Array.isArray(res.owners) ? res.owners : [];
+      state.accessTags = Array.isArray(res.accessTags) ? res.accessTags : [];
+      state.lojas = Array.isArray(res.lojas) ? res.lojas : [];
+      state.origens = Array.isArray(res.origens) ? res.origens : [];
+
+      preencherOwners();
+      preencherAccessTags();
+      preencherLojas();
+      preencherFiltroLojas();
+      preencherOrigens();
+      preencherEditLojas();
+
+      return carregarAgendaEDashboard();
+    })
     .then(function() {
       iniciarAutoRefreshPostgres();
       atualizarStatusSistema({
@@ -866,9 +881,11 @@ function carregarAgendaEDashboard() {
 }
 
 function recarregarComFiltros() {
+  if (window._reloadingFiltros) return window._reloadingFiltros;
+
   byId('agendaBody').innerHTML = '<tr><td colspan="17"><div class="loading-box">Atualizando dados...</div></td></tr>';
 
-  Promise.all([
+  window._reloadingFiltros = Promise.all([
     getAgendamentosPostgres(),
     getDashboardPostgres()
   ]).then(function(results) {
@@ -876,12 +893,16 @@ function recarregarComFiltros() {
     state.dashboard = buildDashboardLocal(state.agendamentos, results[1] || {});
     renderAgenda(state.agendamentos);
     preencherDashboard();
+    if (canFinance()) return carregarFaturamento();
   }).catch(function(err) {
     byId('agendaBody').innerHTML = '<tr><td colspan="17">Erro ao carregar agendamentos.</td></tr>';
     setMsg('msgForm', 'Erro ao aplicar filtros: ' + (err.message || err), 'err');
+    throw err;
+  }).finally(function() {
+    window._reloadingFiltros = null;
   });
 
-  if (canFinance()) carregarFaturamento();
+  return window._reloadingFiltros;
 }
 
 function iniciarAutoRefreshPostgres() {
@@ -889,6 +910,11 @@ function iniciarAutoRefreshPostgres() {
 
   window._autoRefreshInterval = setInterval(function() {
     if (!state.user) return;
+    if (window._uiBusy || window._pauseAutoRefresh || window._reloadingFiltros) return;
+    if (document.activeElement && ['SELECT', 'INPUT', 'TEXTAREA', 'BUTTON'].indexOf(document.activeElement.tagName) > -1) return;
+    if (byId('editModal') && !byId('editModal').classList.contains('hidden')) return;
+
+    window._autoRefreshBusy = true;
 
     Promise.all([
       getAgendamentosPostgres(),
@@ -900,8 +926,10 @@ function iniciarAutoRefreshPostgres() {
       preencherDashboard();
     }).catch(function(err) {
       console.warn('Auto-refresh PostgreSQL falhou:', err.message || err);
+    }).finally(function() {
+      window._autoRefreshBusy = false;
     });
-  }, 1000);
+  }, 5000);
 }
 
 function debouncedReload() {
@@ -1360,11 +1388,11 @@ function salvarEdicaoLinha() {
     });
 }
 
-function confirmarAgendamento(id) { runAction('confirmarAgendamento', id); }
-function marcarCompareceu(id) { runAction('marcarCompareceu', id); }
-function marcarNaoCompareceu(id) { runAction('marcarNaoCompareceu', id); }
-function cancelarAgendamento(id) { if (confirm('Cancelar este agendamento?')) runAction('cancelarAgendamento', id); }
-function excluirAgendamento(id) { if (confirm('Deseja realmente excluir este agendamento?')) runAction('excluirAgendamento', id); }
+function confirmarAgendamento(id) { return runAction('confirmarAgendamento', id); }
+function marcarCompareceu(id) { return runAction('marcarCompareceu', id); }
+function marcarNaoCompareceu(id) { return runAction('marcarNaoCompareceu', id); }
+function cancelarAgendamento(id) { if (confirm('Cancelar este agendamento?')) return runAction('cancelarAgendamento', id); return Promise.resolve(false); }
+function excluirAgendamento(id) { if (confirm('Deseja realmente excluir este agendamento?')) return runAction('excluirAgendamento', id); return Promise.resolve(false); }
 
 function marcarComprou(id) {
   showLoading(true);
@@ -1418,24 +1446,30 @@ function runAction(fn, id) {
   } else if (fn === 'cancelarAgendamento') {
     patch.statusAgenda = 'Cancelado';
   } else if (fn === 'excluirAgendamento') {
+    // Exclusão segura: cancelamento lógico para não perder histórico e liberar o horário.
     patch.statusAgenda = 'Cancelado';
     patch.observacao = 'Registro marcado como cancelado/excluído pela tela.';
   } else {
     setMsg('msgForm', 'Ação não reconhecida: ' + fn, 'err');
-    return;
+    return Promise.resolve(false);
   }
 
   showLoading(true);
-  apiPatch('/api/agendamentos/' + encodeURIComponent(id), patch)
+  window._pauseAutoRefresh = true;
+
+  return apiPatch('/api/agendamentos/' + encodeURIComponent(id), patch)
     .then(function() {
       setMsg('msgForm', 'Ação salva no PostgreSQL.', 'ok');
       toast('Ação salva no PostgreSQL.', 'ok');
-      recarregarComFiltros();
+      return recarregarComFiltros();
     })
     .catch(function(err) {
       setMsg('msgForm', err.message || String(err), 'err');
+      toast(err.message || String(err), 'err');
+      throw err;
     })
     .finally(function() {
+      window._pauseAutoRefresh = false;
       showLoading(false);
     });
 }
@@ -1471,14 +1505,24 @@ function abrirPromptOS(id, row) {
     });
 }
 
-function executarAcaoAgenda(id, acao) {
+function executarAcaoAgenda(id, acao, selectEl) {
   if (!acao) return;
+
+  window._pauseAutoRefresh = true;
+
   var row = (state.agendamentos || []).find(function(r) { return String(r.ID) === String(id); });
-  if (acao === 'confirmar') return confirmarAgendamento(id);
-  if (acao === 'cancelar') return cancelarAgendamento(id);
-  if (acao === 'excluir') return excluirAgendamento(id);
-  if (acao === 'os') return abrirPromptOS(id, row);
-  if (acao === 'editar') return abrirModalEdicao(id);
+  var result;
+
+  if (acao === 'confirmar') result = confirmarAgendamento(id);
+  else if (acao === 'cancelar') result = cancelarAgendamento(id);
+  else if (acao === 'excluir') result = excluirAgendamento(id);
+  else if (acao === 'os') result = abrirPromptOS(id, row);
+  else if (acao === 'editar') result = abrirModalEdicao(id);
+
+  Promise.resolve(result).finally(function() {
+    if (selectEl) selectEl.value = '';
+    setTimeout(function() { window._pauseAutoRefresh = false; }, 800);
+  });
 }
 
 function statusClassAgendamento(r) {
@@ -1570,7 +1614,7 @@ function getActionHtml(r) {
     options += '<option value="os">Registrar/Atualizar OS</option>';
   }
 
-  return '<div class="actions">' + buttons + '<select onchange="executarAcaoAgenda(\'' + id + '\', this.value); this.value=\'\';">' + options + '</select></div>';
+  return '<div class="actions">' + buttons + '<select onfocus="window._pauseAutoRefresh=true" onblur="setTimeout(function(){window._pauseAutoRefresh=false},800)" onchange="executarAcaoAgenda(\'' + id + '\', this.value, this);">' + options + '</select></div>';
 }
 
 function gerarRelatorioCSV() {
