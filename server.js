@@ -65,6 +65,195 @@ const GAS_API_KEY =
   process.env.KOMMO_WEBHOOK_SECRET ||
   "";
 
+// ===============================
+// CONFIGURAÇÃO PÚBLICA — LANDING PAGES
+// ===============================
+
+const PUBLIC_BLOCKING_STATUSES = [
+  "Agendado",
+  "Confirmado",
+  "Compareceu",
+  "OS em Andamento"
+];
+
+function normalizeLojaPublica(loja) {
+  const raw = clean(loja);
+  const key = raw
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const mapa = {
+    "gonzaga": "Óticas TGT Gonzaga",
+    "gonzaga & santos": "Óticas TGT Gonzaga",
+    "oticas tgt gonzaga": "Óticas TGT Gonzaga",
+    "oticas tgt gonzaga santos": "Óticas TGT Gonzaga",
+    "oticas tgt gonzaga · santos": "Óticas TGT Gonzaga",
+    "óticas tgt gonzaga": "Óticas TGT Gonzaga",
+    "óticas tgt gonzaga santos": "Óticas TGT Gonzaga",
+    "óticas tgt gonzaga · santos": "Óticas TGT Gonzaga",
+
+    "enseada": "Óticas TGT Enseada",
+    "oticas tgt enseada": "Óticas TGT Enseada",
+    "oticas tgt enseada guaruja": "Óticas TGT Enseada",
+    "oticas tgt enseada guarujá": "Óticas TGT Enseada",
+    "óticas tgt enseada": "Óticas TGT Enseada",
+    "óticas tgt enseada guaruja": "Óticas TGT Enseada",
+    "óticas tgt enseada guarujá": "Óticas TGT Enseada",
+
+    "pitangueiras": "Óticas TGT Pitangueiras",
+    "oticas tgt pitangueiras": "Óticas TGT Pitangueiras",
+    "oticas tgt pitangueiras guaruja": "Óticas TGT Pitangueiras",
+    "oticas tgt pitangueiras guarujá": "Óticas TGT Pitangueiras",
+    "óticas tgt pitangueiras": "Óticas TGT Pitangueiras",
+    "óticas tgt pitangueiras guaruja": "Óticas TGT Pitangueiras",
+    "óticas tgt pitangueiras guarujá": "Óticas TGT Pitangueiras",
+
+    "santo antonio": "Óticas TGT Santo Antônio",
+    "santo antônio": "Óticas TGT Santo Antônio",
+    "target sto. antonio": "Óticas TGT Santo Antônio",
+    "target · sto. antonio": "Óticas TGT Santo Antônio",
+    "oticas tgt santo antonio": "Óticas TGT Santo Antônio",
+    "oticas tgt santo antônio": "Óticas TGT Santo Antônio",
+    "óticas tgt santo antonio": "Óticas TGT Santo Antônio",
+    "óticas tgt santo antônio": "Óticas TGT Santo Antônio"
+  };
+
+  return mapa[key] || raw;
+}
+
+function normalizeWhatsappPublico(v) {
+  return clean(v).replace(/\D/g, "");
+}
+
+function horarioValidoPorRegra(data, horario) {
+  const dt = toPgDate(data);
+  const hr = clean(horario);
+
+  if (!dt || !/^\d{2}:\d{2}$/.test(hr)) {
+    return { ok: true };
+  }
+
+  const d = new Date(dt + "T12:00:00");
+  const dia = d.getDay();
+  const [hh, mm] = hr.split(":").map(Number);
+  const minutos = hh * 60 + mm;
+
+  if (dia === 0) {
+    return { ok: false, message: "Domingo não está disponível para agendamento." };
+  }
+
+  if (dia >= 1 && dia <= 5 && (minutos < 600 || minutos > 1080)) {
+    return { ok: false, message: "De segunda a sexta, escolha entre 10:00 e 18:00." };
+  }
+
+  if (dia === 6 && (minutos < 600 || minutos > 960)) {
+    return { ok: false, message: "Aos sábados, escolha entre 10:00 e 16:00." };
+  }
+
+  return { ok: true };
+}
+
+function gerarHorariosBase(data) {
+  const dt = toPgDate(data);
+  if (!dt) return [];
+
+  const d = new Date(dt + "T12:00:00");
+  const dia = d.getDay();
+
+  if (dia === 0) return [];
+
+  const inicio = 10 * 60;
+  const fim = dia === 6 ? 16 * 60 : 18 * 60;
+  const horarios = [];
+
+  for (let m = inicio; m <= fim; m += 30) {
+    const hh = String(Math.floor(m / 60)).padStart(2, "0");
+    const mm = String(m % 60).padStart(2, "0");
+    horarios.push(`${hh}:${mm}`);
+  }
+
+  return horarios;
+}
+
+async function buscarOptometristasAtivosPorLoja(client, loja) {
+  const result = await client.query(
+    `SELECT nome
+     FROM optometristas
+     WHERE ativo = true AND LOWER(loja) = LOWER($1)
+     ORDER BY nome ASC`,
+    [loja]
+  );
+
+  return result.rows.map((r) => r.nome).filter(Boolean);
+}
+
+async function buscarPrimeiroOptometristaLivre(client, loja, data, horario, optometristaPreferido) {
+  const optometristas = await buscarOptometristasAtivosPorLoja(client, loja);
+  const candidatos = [];
+
+  if (clean(optometristaPreferido)) candidatos.push(clean(optometristaPreferido));
+
+  optometristas.forEach((o) => {
+    if (!candidatos.some((x) => x.toLowerCase() === String(o).toLowerCase())) {
+      candidatos.push(o);
+    }
+  });
+
+  if (!candidatos.length) candidatos.push("A definir");
+
+  for (const optometrista of candidatos) {
+    const ocupado = await client.query(
+      `SELECT id
+       FROM agendamentos
+       WHERE LOWER(COALESCE(loja,'')) = LOWER($1)
+         AND LOWER(COALESCE(optometrista,'')) = LOWER($2)
+         AND data_agendamento = $3
+         AND horario = $4
+         AND status = ANY($5::text[])
+       LIMIT 1`,
+      [loja, optometrista, data, horario, PUBLIC_BLOCKING_STATUSES]
+    );
+
+    if (!ocupado.rows.length) return optometrista;
+  }
+
+  return "";
+}
+
+function extrairUtm(req) {
+  return {
+    utm_source: clean(req.body?.utm_source || req.query?.utm_source),
+    utm_medium: clean(req.body?.utm_medium || req.query?.utm_medium),
+    utm_campaign: clean(req.body?.utm_campaign || req.query?.utm_campaign),
+    utm_content: clean(req.body?.utm_content || req.query?.utm_content),
+    utm_term: clean(req.body?.utm_term || req.query?.utm_term)
+  };
+}
+
+function montarObservacaoPublica(b, req) {
+  const partes = [];
+
+  if (clean(b.observacao || b.obs)) partes.push(clean(b.observacao || b.obs));
+  if (clean(b.servico)) partes.push("Serviço: " + clean(b.servico));
+  if (clean(b.campanha)) partes.push("Campanha: " + clean(b.campanha));
+  if (clean(b.landing_page || b.landingPage)) partes.push("Landing page: " + clean(b.landing_page || b.landingPage));
+  if (clean(b.canal)) partes.push("Canal: " + clean(b.canal));
+
+  const utm = extrairUtm(req);
+  const utmTxt = Object.entries(utm)
+    .filter(([, v]) => v)
+    .map(([k, v]) => `${k}=${v}`)
+    .join("; ");
+
+  if (utmTxt) partes.push("UTM: " + utmTxt);
+
+  return partes.join(" | ");
+}
+
+
 function clean(v) {
   if (v === null || v === undefined) return "";
   return String(v).trim();
@@ -318,6 +507,7 @@ async function initDatabase() {
   await addColumnIfMissing("usuarios", "origem_sync", "TEXT DEFAULT 'postgres'");
   await addColumnIfMissing("lojas", "gas_id", "TEXT UNIQUE");
   await addColumnIfMissing("lojas", "cidade", "TEXT");
+  await addColumnIfMissing("lojas", "endereco", "TEXT");
   await addColumnIfMissing("lojas", "origem_sync", "TEXT DEFAULT 'postgres'");
   await addColumnIfMissing("optometristas", "gas_id", "TEXT UNIQUE");
   await addColumnIfMissing("optometristas", "origem_sync", "TEXT DEFAULT 'postgres'");
@@ -327,6 +517,23 @@ async function initDatabase() {
   await addColumnIfMissing("feriados", "origem_sync", "TEXT DEFAULT 'postgres'");
 
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_agendamentos_data ON agendamentos(data_agendamento);`);
+
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS uniq_agendamento_ativo_slot
+    ON agendamentos (
+      (LOWER(COALESCE(loja,''))),
+      (LOWER(COALESCE(optometrista,''))),
+      data_agendamento,
+      horario
+    )
+    WHERE status IN ('Agendado','Confirmado','Compareceu','OS em Andamento')
+      AND data_agendamento IS NOT NULL
+      AND horario IS NOT NULL
+      AND horario <> ''
+      AND optometrista IS NOT NULL
+      AND optometrista <> '';
+  `);
+
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_agendamentos_gas_id ON agendamentos(gas_id);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_clientes_whatsapp ON clientes(whatsapp);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_faturamentos_data ON faturamentos(data_venda);`);
@@ -774,6 +981,11 @@ app.get("/health", async (req, res) => {
       routes: {
         gas: true,
         syncGasToPostgres: true,
+        publicLandingPages: true,
+        publicLojas: true,
+        publicOptometristas: true,
+        publicHorariosDisponiveis: true,
+        publicAgendamentos: true,
         agendamentos: true,
         clientes: true,
         faturamentos: true,
@@ -815,6 +1027,318 @@ app.post("/api/sync/gas-to-postgres", async (req, res) => {
       message: "Erro na sincronização GAS → PostgreSQL.",
       error: error.message
     });
+  }
+});
+
+
+// ===============================
+// API PÚBLICA — LANDING PAGES
+// ===============================
+
+app.get("/api/public/lojas", validarLandingApiKey, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT id, nome, cidade, endereco, ativo
+      FROM lojas
+      WHERE ativo = true
+      ORDER BY nome ASC
+    `);
+
+    res.json({
+      ok: true,
+      lojas: result.rows.map((l) => ({
+        id: l.id,
+        nome: l.nome,
+        slug: clean(l.nome).toLowerCase()
+          .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-|-$/g, ""),
+        cidade: l.cidade,
+        endereco: l.endereco
+      }))
+    });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: "Erro ao listar lojas.", error: error.message });
+  }
+});
+
+app.get("/api/public/optometristas", validarLandingApiKey, async (req, res) => {
+  try {
+    const loja = normalizeLojaPublica(req.query.loja || "");
+
+    if (!loja) {
+      return res.status(400).json({ ok: false, message: "Informe a loja." });
+    }
+
+    const result = await pool.query(`
+      SELECT id, nome, loja
+      FROM optometristas
+      WHERE ativo = true AND LOWER(loja) = LOWER($1)
+      ORDER BY nome ASC
+    `, [loja]);
+
+    res.json({ ok: true, loja, optometristas: result.rows });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: "Erro ao listar optometristas.", error: error.message });
+  }
+});
+
+app.get("/api/public/horarios-disponiveis", validarLandingApiKey, async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const loja = normalizeLojaPublica(req.query.loja || "");
+    const data = toPgDate(req.query.data || req.query.data_agendamento || "");
+    const optometristaPreferido = clean(req.query.optometrista || "");
+
+    if (!loja) {
+      return res.status(400).json({ ok: false, message: "Informe a loja." });
+    }
+
+    if (!data) {
+      return res.status(400).json({ ok: false, message: "Informe uma data válida." });
+    }
+
+    const horariosBase = gerarHorariosBase(data);
+
+    if (!horariosBase.length) {
+      return res.json({
+        ok: true,
+        loja,
+        data,
+        horarios: [],
+        message: "Não há horários disponíveis para esta data."
+      });
+    }
+
+    const optometristas = await buscarOptometristasAtivosPorLoja(client, loja);
+    const candidatos = optometristaPreferido
+      ? [optometristaPreferido, ...optometristas.filter((o) => o.toLowerCase() !== optometristaPreferido.toLowerCase())]
+      : optometristas;
+
+    const listaOptos = candidatos.length ? candidatos : ["A definir"];
+    const horarios = [];
+
+    for (const horario of horariosBase) {
+      let optometristaLivre = "";
+
+      for (const optometrista of listaOptos) {
+        const ocupado = await client.query(
+          `SELECT id
+           FROM agendamentos
+           WHERE LOWER(COALESCE(loja,'')) = LOWER($1)
+             AND LOWER(COALESCE(optometrista,'')) = LOWER($2)
+             AND data_agendamento = $3
+             AND horario = $4
+             AND status = ANY($5::text[])
+           LIMIT 1`,
+          [loja, optometrista, data, horario, PUBLIC_BLOCKING_STATUSES]
+        );
+
+        if (!ocupado.rows.length) {
+          optometristaLivre = optometrista;
+          break;
+        }
+      }
+
+      horarios.push({
+        horario,
+        disponivel: !!optometristaLivre,
+        optometrista: optometristaLivre || null
+      });
+    }
+
+    res.json({ ok: true, loja, data, horarios });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: "Erro ao buscar horários disponíveis.", error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+app.post("/api/public/agendamentos", validarLandingApiKey, async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const b = req.body || {};
+
+    const nome = clean(b.nome || b.nomeCompleto);
+    const whatsapp = normalizeWhatsappPublico(b.whatsapp || b.whatsApp || b.telefone || b.tel);
+    const email = clean(b.email);
+    const loja = normalizeLojaPublica(b.loja);
+    const dataAgendamento = toPgDate(b.data_agendamento || b.dataAgendamento || b.data);
+    const horario = clean(b.horario || b.hor || b.periodo || "A definir");
+    const origem = clean(b.origem || "Landing Page");
+    const status = clean(b.status || b.statusAgenda || "Agendado");
+    const observacao = montarObservacaoPublica(b, req);
+    const accessTags = clean(b.access_tags || b.accessTags || "origem:site;origem:trafego-pago;fluxo:pendente-confirmacao");
+    const campanha = clean(b.campanha || "");
+    const landingPage = clean(b.landing_page || b.landingPage || "");
+
+    if (!nome || nome.length < 3) {
+      return res.status(400).json({ ok: false, message: "Nome completo é obrigatório." });
+    }
+
+    if (!whatsapp || whatsapp.length < 10) {
+      return res.status(400).json({ ok: false, message: "WhatsApp válido é obrigatório." });
+    }
+
+    if (!loja) {
+      return res.status(400).json({ ok: false, message: "Loja é obrigatória." });
+    }
+
+    if (!dataAgendamento) {
+      return res.status(400).json({ ok: false, message: "Data do agendamento é obrigatória." });
+    }
+
+    const regraHorario = horarioValidoPorRegra(dataAgendamento, horario);
+    if (!regraHorario.ok) {
+      return res.status(400).json(regraHorario);
+    }
+
+    await client.query("BEGIN");
+
+    const optometrista = /^\d{2}:\d{2}$/.test(horario)
+      ? await buscarPrimeiroOptometristaLivre(client, loja, dataAgendamento, horario, b.optometrista)
+      : clean(b.optometrista || "A definir");
+
+    if (!optometrista) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({
+        ok: false,
+        message: "Esse horário acabou de ser reservado. Escolha outro horário."
+      });
+    }
+
+    if (/^\d{2}:\d{2}$/.test(horario)) {
+      const conflito = await client.query(
+        `SELECT id
+         FROM agendamentos
+         WHERE LOWER(COALESCE(loja,'')) = LOWER($1)
+           AND LOWER(COALESCE(optometrista,'')) = LOWER($2)
+           AND data_agendamento = $3
+           AND horario = $4
+           AND status = ANY($5::text[])
+         LIMIT 1`,
+        [loja, optometrista, dataAgendamento, horario, PUBLIC_BLOCKING_STATUSES]
+      );
+
+      if (conflito.rows.length) {
+        await client.query("ROLLBACK");
+        return res.status(409).json({
+          ok: false,
+          message: "Esse horário acabou de ser reservado. Escolha outro horário."
+        });
+      }
+    }
+
+    const clienteGasId = makeGasId("cliente", (whatsapp || email || nome).toLowerCase());
+
+    const cliente = await client.query(
+      `INSERT INTO clientes (gas_id, nome, whatsapp, email, origem, loja_origem, observacoes, origem_sync, atualizado_em)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'landing_page',CURRENT_TIMESTAMP)
+       ON CONFLICT (gas_id) DO UPDATE SET
+         nome = EXCLUDED.nome,
+         whatsapp = EXCLUDED.whatsapp,
+         email = EXCLUDED.email,
+         origem = EXCLUDED.origem,
+         loja_origem = EXCLUDED.loja_origem,
+         observacoes = EXCLUDED.observacoes,
+         origem_sync = 'landing_page',
+         atualizado_em = CURRENT_TIMESTAMP
+       RETURNING id`,
+      [clienteGasId, nome, whatsapp, email || null, origem, loja, observacao]
+    );
+
+    const gasId = clean(b.gas_id) || makeGasId(
+      "lp",
+      stableHash({
+        nome,
+        whatsapp,
+        loja,
+        dataAgendamento,
+        horario,
+        campanha,
+        landingPage,
+        ts: Date.now()
+      })
+    );
+
+    const agendamento = await client.query(
+      `INSERT INTO agendamentos (
+        gas_id, nome, whatsapp, email, loja, optometrista, origem,
+        data_agendamento, horario, observacao, status, compareceu,
+        responsavel, criado_por_email, proprietario_id, proprietario_nome,
+        access_tags, origem_sync, criado_em, atualizado_em
+      )
+      VALUES (
+        $1,$2,$3,$4,$5,$6,$7,
+        $8,$9,$10,$11,'Pendente',
+        'Landing Page','landingpage@sistema.local','landing-page','Landing Page',
+        $12,'landing_page',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+      )
+      RETURNING *`,
+      [
+        gasId,
+        nome,
+        whatsapp,
+        email || null,
+        loja,
+        optometrista,
+        origem,
+        dataAgendamento,
+        horario,
+        observacao,
+        status,
+        accessTags
+      ]
+    );
+
+    await client.query(
+      `INSERT INTO logs_sistema (tipo, origem, mensagem, detalhes)
+       VALUES ('landing_page','api_public','Agendamento recebido pela landing page',$1)`,
+      [JSON.stringify({
+        agendamento_id: agendamento.rows[0].id,
+        cliente_id: cliente.rows[0].id,
+        loja,
+        data_agendamento: dataAgendamento,
+        horario,
+        optometrista,
+        campanha,
+        landing_page: landingPage,
+        ip: req.ip
+      })]
+    );
+
+    await client.query("COMMIT");
+
+    res.status(201).json({
+      ok: true,
+      message: "Agendamento criado com sucesso.",
+      id: agendamento.rows[0].id,
+      agendamentoId: agendamento.rows[0].id,
+      agendamento: agendamento.rows[0],
+      cliente_id: cliente.rows[0].id
+    });
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => null);
+
+    if (String(error.message || "").includes("uniq_agendamento_ativo_slot")) {
+      return res.status(409).json({
+        ok: false,
+        message: "Esse horário acabou de ser reservado. Escolha outro horário."
+      });
+    }
+
+    console.error("Erro em /api/public/agendamentos:", error);
+
+    res.status(500).json({
+      ok: false,
+      message: "Erro ao criar agendamento pela landing page.",
+      error: error.message
+    });
+  } finally {
+    client.release();
   }
 });
 
@@ -1128,6 +1652,10 @@ app.get("/", (req, res) => {
       "GET /health",
       "POST /api/gas",
       "POST /api/sync/gas-to-postgres",
+      "GET /api/public/lojas",
+      "GET /api/public/optometristas",
+      "GET /api/public/horarios-disponiveis",
+      "POST /api/public/agendamentos",
       "GET /api/agendamentos",
       "POST /api/agendamentos",
       "PATCH /api/agendamentos/:id",
