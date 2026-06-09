@@ -709,12 +709,12 @@ function aplicarPermissoesTela() {
 }
 
 function carregarInfoBase() {
-  var emailReq = String((state.user && state.user.email) || '').trim();
-
+  // Caminho inteligente: dados base vêm do PostgreSQL.
+  // GAS fica só para login e contingência.
   function aplicarBase(res) {
     res = res || {};
 
-    state.owners = Array.isArray(res.owners) ? res.owners : [{
+    state.owners = Array.isArray(res.owners) && res.owners.length ? res.owners : [{
       id: (state.user && state.user.id) || '',
       nome: (state.user && state.user.nome) || '',
       perfil: (state.user && state.user.perfil) || '',
@@ -757,16 +757,41 @@ function carregarInfoBase() {
     preencherEditLojas();
   }
 
-  return gas('getInfoInicial', emailReq)
-    .then(function(res) {
-      if (!res || !res.ok) throw new Error((res && res.message) || 'Erro ao carregar dados base.');
-      aplicarBase(res);
-    })
-    .catch(function(err) {
-      console.warn('[getInfoInicial] Falhou. Aplicando base local para não travar a tela:', err && err.message ? err.message : err);
-      aplicarBase({});
-      toast('Dados base carregados em modo rápido. Agenda e dashboard seguem pelo PostgreSQL.', 'ok');
+  return Promise.all([
+    apiGet('/api/lojas').catch(function() { return { lojas: [] }; }),
+    apiGet('/api/origens').catch(function() { return { origens: [] }; }),
+    apiGet('/api/usuarios').catch(function() { return { usuarios: [] }; }),
+    apiGet('/api/access-tags').catch(function() { return { accessTags: [] }; })
+  ]).then(function(results) {
+    var lojasPg = (results[0].lojas || []).map(function(l) {
+      return { Loja: l.nome || l.Loja || '', Cidade: l.cidade || l.Cidade || '', Ativa: l.ativo === false ? 'Não' : 'Sim' };
+    }).filter(function(l) { return l.Loja; });
+
+    var origensPg = (results[1].origens || []).map(function(o) {
+      return { Origem: o.nome || o.Origem || '', Ativa: o.ativo === false ? 'Não' : 'Sim' };
+    }).filter(function(o) { return o.Origem; });
+
+    var ownersPg = (results[2].usuarios || []).map(function(u) {
+      return {
+        id: u.gas_id || u.id || '',
+        nome: u.nome || '',
+        perfil: u.cargo || '',
+        loja: u.loja || ''
+      };
+    }).filter(function(u) { return u.nome; });
+
+    var tagsPg = results[3].accessTags || [];
+
+    aplicarBase({
+      lojas: lojasPg,
+      origens: origensPg,
+      owners: ownersPg,
+      accessTags: tagsPg
     });
+  }).catch(function(err) {
+    console.warn('[info-base-postgres] fallback local:', err && err.message ? err.message : err);
+    aplicarBase({});
+  });
 }
 
 
@@ -1032,17 +1057,23 @@ function carregarOptometristas() {
     el.innerHTML = '<option value="">Selecione a loja primeiro</option>';
     return;
   }
+
   el.innerHTML = '<option value="">Carregando...</option>';
-  gas('getOptometristasPorLoja', loja).then(function(lista) {
-    var html = '<option value="">Selecione</option>';
-    html += (lista && lista.length) ? lista.map(function(o) {
-      return '<option value="' + escapeHtml(o.Optometrista) + '">' + escapeHtml(o.Optometrista) + '</option>';
-    }).join('') : '<option value="">Nenhum optometrista encontrado</option>';
-    el.innerHTML = html;
-  }).catch(function(err) {
-    el.innerHTML = '<option value="">Erro ao carregar</option>';
-    setMsg('msgForm', err.message || String(err), 'err');
-  });
+
+  apiGet('/api/optometristas?loja=' + encodeURIComponent(loja))
+    .then(function(res) {
+      var lista = Array.isArray(res.optometristas) ? res.optometristas : [];
+      var html = '<option value="">Selecione</option>';
+      html += lista.length ? lista.map(function(o) {
+        var nome = o.nome || o.Optometrista || '';
+        return '<option value="' + escapeHtml(nome) + '">' + escapeHtml(nome) + '</option>';
+      }).join('') : '<option value="">Nenhum optometrista encontrado</option>';
+      el.innerHTML = html;
+    })
+    .catch(function(err) {
+      el.innerHTML = '<option value="">Erro ao carregar</option>';
+      setMsg('msgForm', err.message || String(err), 'err');
+    });
 }
 
 function coletarFiltros() {
