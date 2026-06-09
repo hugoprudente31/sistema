@@ -504,6 +504,24 @@ function apiPost(url, body) {
   });
 }
 
+function apiPatch(url, body) {
+  return fetch(url, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    },
+    body: JSON.stringify(body || {})
+  }).then(function(r) {
+    return r.json().then(function(data) {
+      if (!r.ok || (data && data.ok === false)) {
+        throw new Error((data && (data.message || data.error)) || ('Erro HTTP ' + r.status + ' em ' + url));
+      }
+      return data;
+    });
+  });
+}
+
 function mapAgendamentoDb(r) {
   r = r || {};
   return {
@@ -681,7 +699,15 @@ function fazerLogin() {
       byId('responsavelTela').value = res.user.nome || '';
 
       aplicarPermissoesTela();
-      return carregarSistemaTurbo();
+      return carregarInfoBase()
+        .then(function() { return carregarAgendaEDashboard(); })
+        .then(function() {
+          iniciarAutoRefreshPostgres();
+          atualizarStatusSistema({
+            serverVersion: 'Railway + PostgreSQL',
+            dataAtualizacao: new Date().toLocaleString('pt-BR')
+          });
+        });
     })
     .catch(function(err) {
       setMsg('msgLogin', err.message || String(err), 'err');
@@ -796,27 +822,13 @@ function carregarInfoBase() {
 
 
 function carregarSistemaTurbo() {
+  // Mantido por compatibilidade, mas agora sem depender do GAS pesado.
+  // Dados base, agenda e dashboard vêm do PostgreSQL.
   state.agendamentos = [];
   byId('agendaBody').innerHTML = '<tr><td colspan="17"><div class="loading-box">Carregando sistema com PostgreSQL...</div></td></tr>';
 
-  return gas('getInfoInicial', (state.user && state.user.email) || '')
-    .then(function(res) {
-      if (!res || !res.ok) throw new Error((res && res.message) || 'Erro ao carregar dados base.');
-
-      state.owners = Array.isArray(res.owners) ? res.owners : [];
-      state.accessTags = Array.isArray(res.accessTags) ? res.accessTags : [];
-      state.lojas = Array.isArray(res.lojas) ? res.lojas : [];
-      state.origens = Array.isArray(res.origens) ? res.origens : [];
-
-      preencherOwners();
-      preencherAccessTags();
-      preencherLojas();
-      preencherFiltroLojas();
-      preencherOrigens();
-      preencherEditLojas();
-
-      return carregarAgendaEDashboard();
-    })
+  return carregarInfoBase()
+    .then(function() { return carregarAgendaEDashboard(); })
     .then(function() {
       iniciarAutoRefreshPostgres();
       atualizarStatusSistema({
