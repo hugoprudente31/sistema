@@ -1,7 +1,7 @@
 {
   "name": "sistema-de-agendamento",
   "version": "1.0.0",
-  "description": "Sistema de Agendamento Multiloja — Óticas TGT",
+  "description": "Sistema de Agendamento Multiloja - Óticas TGT com Railway, PostgreSQL e sincronização GAS",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
