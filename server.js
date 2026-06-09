@@ -15,7 +15,38 @@ app.use(express.urlencoded({ extended: true, limit: "30mb" }));
 
 const publicPath = path.join(__dirname, "public");
 if (fs.existsSync(publicPath)) app.use(express.static(publicPath));
+// ===============================
+// SEGURANÇA DAS LANDING PAGES
+// ===============================
 
+const LANDING_API_KEY =
+  process.env.LANDING_API_KEY ||
+  process.env.API_KEY ||
+  "";
+
+function validarLandingApiKey(req, res, next) {
+  const recebida =
+    req.headers["x-api-key"] ||
+    req.headers["x-landing-api-key"] ||
+    req.query.key ||
+    "";
+
+  if (!LANDING_API_KEY) {
+    return res.status(500).json({
+      ok: false,
+      message: "LANDING_API_KEY não configurada no Railway."
+    });
+  }
+
+  if (recebida !== LANDING_API_KEY) {
+    return res.status(401).json({
+      ok: false,
+      message: "Chave da landing page inválida."
+    });
+  }
+
+  next();
+}
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL
 });
