@@ -1,142 +1,116 @@
-CREATE TABLE IF NOT EXISTS usuarios (
+
+-- PostgreSQL — Regras finais TGT: cargos, auditoria, OS, financeiro real e bloqueio de teste
+BEGIN;
+
+ALTER TABLE agendamentos
+  ADD COLUMN IF NOT EXISTS agendado_por_nome TEXT,
+  ADD COLUMN IF NOT EXISTS agendado_por_email TEXT,
+  ADD COLUMN IF NOT EXISTS vendedor_atendeu_nome TEXT,
+  ADD COLUMN IF NOT EXISTS vendedor_atendeu_email TEXT,
+  ADD COLUMN IF NOT EXISTS ultima_alteracao_por_nome TEXT,
+  ADD COLUMN IF NOT EXISTS ultima_alteracao_por_email TEXT,
+  ADD COLUMN IF NOT EXISTS ultima_alteracao_em TIMESTAMP;
+
+CREATE TABLE IF NOT EXISTS historico_alteracoes_agendamentos (
   id SERIAL PRIMARY KEY,
-  id_usuario VARCHAR(80),
-  email VARCHAR(160) UNIQUE NOT NULL,
-  nome VARCHAR(160),
-  perfil VARCHAR(80),
-  loja VARCHAR(160),
-  ativo BOOLEAN DEFAULT TRUE,
-  access_tags TEXT,
-  can_view_finance BOOLEAN DEFAULT FALSE,
-  created_at TIMESTAMP DEFAULT NOW(),
-  updated_at TIMESTAMP DEFAULT NOW()
+  agendamento_id INTEGER,
+  loja TEXT,
+  cliente_nome TEXT,
+  acao TEXT,
+  payload JSONB,
+  feito_por_nome TEXT,
+  feito_por_email TEXT,
+  criado_em TIMESTAMP DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS lojas (
+CREATE TABLE IF NOT EXISTS historico_os (
   id SERIAL PRIMARY KEY,
-  nome VARCHAR(160) UNIQUE NOT NULL,
-  cidade VARCHAR(120),
-  ativa BOOLEAN DEFAULT TRUE,
-  created_at TIMESTAMP DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS optometristas (
-  id SERIAL PRIMARY KEY,
-  nome VARCHAR(160) NOT NULL,
-  loja VARCHAR(160),
-  ativo BOOLEAN DEFAULT TRUE,
-  created_at TIMESTAMP DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS origens (
-  id SERIAL PRIMARY KEY,
-  nome VARCHAR(120) UNIQUE NOT NULL,
-  ativa BOOLEAN DEFAULT TRUE,
-  created_at TIMESTAMP DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS agendamentos (
-  id SERIAL PRIMARY KEY,
-  id_original VARCHAR(100),
-  data_cadastro TIMESTAMP,
-  origem VARCHAR(120),
-  nome_completo VARCHAR(180),
-  whatsapp VARCHAR(40),
-  email VARCHAR(180),
-  loja VARCHAR(160),
-  optometrista VARCHAR(160),
-  responsavel VARCHAR(160),
-  data_agendamento DATE,
-  horario TIME,
-  observacao TEXT,
-  status_agenda VARCHAR(80),
-  compareceu VARCHAR(40),
-  atendimento_realizado VARCHAR(40),
-  venda_gerada VARCHAR(40),
-  valor_venda NUMERIC(12,2) DEFAULT 0,
-  desconto NUMERIC(12,2) DEFAULT 0,
-  motivo_perda TEXT,
-  consultor_responsavel VARCHAR(160),
-  criado_por_email VARCHAR(180),
-  ultima_atualizacao TIMESTAMP,
-  proprietario_id VARCHAR(100),
-  proprietario_nome VARCHAR(160),
-  numero_os VARCHAR(100),
-  data_abertura_os DATE,
-  data_entrada_os DATE,
-  data_finalizacao_os DATE,
-  data_entrega_os DATE,
-  status_os VARCHAR(100),
-  access_tags TEXT,
-  lead_time_dias INTEGER,
-  vendedor_nome VARCHAR(160),
-  kommo_lead_id VARCHAR(100),
-  created_at TIMESTAMP DEFAULT NOW(),
-  updated_at TIMESTAMP DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS ordens_servico (
-  id SERIAL PRIMARY KEY,
-  id_os_interno VARCHAR(100),
-  numero_os VARCHAR(100),
-  id_agendamento VARCHAR(100),
-  cliente VARCHAR(180),
-  loja VARCHAR(160),
-  proprietario_id VARCHAR(100),
-  proprietario_nome VARCHAR(160),
-  vendedor_id VARCHAR(100),
-  vendedor_nome VARCHAR(160),
-  data_abertura_os DATE,
-  data_entrada_os DATE,
-  data_finalizacao_os DATE,
-  data_entrega_os DATE,
-  status_os VARCHAR(100),
-  observacao_os TEXT,
-  valor_os NUMERIC(12,2) DEFAULT 0,
-  desconto NUMERIC(12,2) DEFAULT 0,
-  lead_time_dias INTEGER,
-  criado_por VARCHAR(180),
-  atualizado_por VARCHAR(180),
-  created_at TIMESTAMP DEFAULT NOW(),
-  updated_at TIMESTAMP DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS presencas (
-  id SERIAL PRIMARY KEY,
-  id_presenca VARCHAR(100),
-  id_agendamento VARCHAR(100),
-  cliente VARCHAR(180),
-  data_agendamento DATE,
-  status_presenca VARCHAR(80),
-  marcado_por_id VARCHAR(100),
-  marcado_por_nome VARCHAR(160),
-  perfil_marcador VARCHAR(80),
-  data_marcacao TIMESTAMP,
-  observacao TEXT,
-  created_at TIMESTAMP DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS auditoria_eventos (
-  id SERIAL PRIMARY KEY,
-  id_evento VARCHAR(100),
-  entidade VARCHAR(100),
-  id_entidade VARCHAR(100),
-  acao VARCHAR(100),
-  campo_alterado VARCHAR(120),
+  agendamento_id INTEGER,
+  numero_os TEXT,
+  cliente_nome TEXT,
+  loja TEXT,
+  acao TEXT NOT NULL,
+  campo TEXT,
   valor_anterior TEXT,
   valor_novo TEXT,
-  executado_por_id VARCHAR(100),
-  executado_por_nome VARCHAR(160),
-  perfil VARCHAR(80),
-  data_evento TIMESTAMP DEFAULT NOW()
+  usuario_nome TEXT,
+  usuario_email TEXT,
+  usuario_cargo TEXT,
+  criado_em TIMESTAMP DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS sincronizacoes (
-  id SERIAL PRIMARY KEY,
-  tipo VARCHAR(100),
-  mensagem TEXT,
-  usuario VARCHAR(180),
-  status VARCHAR(50) DEFAULT 'pendente',
-  created_at TIMESTAMP DEFAULT NOW(),
-  updated_at TIMESTAMP DEFAULT NOW()
-);
+UPDATE agendamentos
+SET
+  agendado_por_nome = COALESCE(NULLIF(agendado_por_nome,''), NULLIF(responsavel,''), NULLIF(proprietario_nome,''), 'Registro antigo'),
+  agendado_por_email = COALESCE(NULLIF(agendado_por_email,''), NULLIF(criado_por_email,''), ''),
+  vendedor_atendeu_nome = COALESCE(NULLIF(vendedor_atendeu_nome,''), NULLIF(vendedor_nome,''), NULLIF(consultor_responsavel,''), ''),
+  ultima_alteracao_por_nome = COALESCE(NULLIF(ultima_alteracao_por_nome,''), NULLIF(agendado_por_nome,''), NULLIF(responsavel,''), 'Registro antigo'),
+  ultima_alteracao_por_email = COALESCE(NULLIF(ultima_alteracao_por_email,''), NULLIF(agendado_por_email,''), NULLIF(criado_por_email,''), ''),
+  ultima_alteracao_em = COALESCE(ultima_alteracao_em, atualizado_em, criado_em, NOW());
+
+CREATE OR REPLACE FUNCTION validar_agendamento_tgt()
+RETURNS trigger AS $$
+DECLARE
+  j JSONB;
+  nome_cliente TEXT;
+  responsavel_registro TEXT;
+BEGIN
+  j := to_jsonb(NEW);
+  nome_cliente := COALESCE(j->>'nome', j->>'nome_completo', j->>'nomecompleto', j->>'cliente_nome', '');
+  IF nome_cliente ILIKE '%teste%' THEN
+    RAISE EXCEPTION 'Nome de cliente inválido. Não é permitido cadastrar registros com nome TESTE.';
+  END IF;
+  responsavel_registro := COALESCE(
+    NULLIF(NEW.agendado_por_nome, ''),
+    NULLIF(j->>'responsavel', ''),
+    NULLIF(j->>'proprietario_nome', ''),
+    NULLIF(j->>'criado_por_nome', ''),
+    NULLIF(NEW.ultima_alteracao_por_nome, ''),
+    'Sistema/Landing'
+  );
+  NEW.agendado_por_nome := COALESCE(NULLIF(NEW.agendado_por_nome, ''), responsavel_registro);
+  NEW.ultima_alteracao_por_nome := responsavel_registro;
+  NEW.ultima_alteracao_em := NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_validar_agendamento_tgt ON agendamentos;
+CREATE TRIGGER trg_validar_agendamento_tgt
+BEFORE INSERT OR UPDATE ON agendamentos
+FOR EACH ROW EXECUTE FUNCTION validar_agendamento_tgt();
+
+CREATE OR REPLACE FUNCTION preencher_auditoria_email_tgt()
+RETURNS trigger AS $$
+DECLARE
+  email_agendador TEXT;
+  email_alteracao TEXT;
+  email_vendedor TEXT;
+BEGIN
+  SELECT email INTO email_agendador FROM usuarios WHERE lower(trim(nome)) = lower(trim(NEW.agendado_por_nome)) LIMIT 1;
+  SELECT email INTO email_alteracao FROM usuarios WHERE lower(trim(nome)) = lower(trim(NEW.ultima_alteracao_por_nome)) LIMIT 1;
+  SELECT email INTO email_vendedor FROM usuarios WHERE lower(trim(nome)) = lower(trim(NEW.vendedor_atendeu_nome)) LIMIT 1;
+  NEW.agendado_por_email := COALESCE(NULLIF(NEW.agendado_por_email, ''), email_agendador, NEW.agendado_por_email);
+  NEW.ultima_alteracao_por_email := COALESCE(NULLIF(NEW.ultima_alteracao_por_email, ''), email_alteracao, NEW.ultima_alteracao_por_email, NEW.agendado_por_email);
+  NEW.vendedor_atendeu_email := COALESCE(NULLIF(NEW.vendedor_atendeu_email, ''), email_vendedor, NEW.vendedor_atendeu_email);
+  NEW.ultima_alteracao_em := COALESCE(NEW.ultima_alteracao_em, NOW());
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_preencher_auditoria_email_tgt ON agendamentos;
+CREATE TRIGGER trg_preencher_auditoria_email_tgt
+BEFORE INSERT OR UPDATE ON agendamentos
+FOR EACH ROW EXECUTE FUNCTION preencher_auditoria_email_tgt();
+
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_agendamento_ativo_slot
+ON agendamentos ((LOWER(COALESCE(loja,''))), (LOWER(COALESCE(optometrista,''))), data_agendamento, horario)
+WHERE status IN ('Agendado','Confirmado','Compareceu','OS em Andamento')
+  AND data_agendamento IS NOT NULL AND horario IS NOT NULL AND horario <> ''
+  AND optometrista IS NOT NULL AND optometrista <> '';
+
+CREATE INDEX IF NOT EXISTS idx_agendamentos_loja_data ON agendamentos(loja, data_agendamento);
+CREATE INDEX IF NOT EXISTS idx_historico_os_agendamento ON historico_os(agendamento_id);
+CREATE INDEX IF NOT EXISTS idx_historico_alteracoes_agendamento ON historico_alteracoes_agendamentos(agendamento_id);
+
+COMMIT;
