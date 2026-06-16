@@ -497,6 +497,14 @@ async function initDatabase() {
 
   await addColumnIfMissing("agendamentos", "gas_id", "TEXT UNIQUE");
   await addColumnIfMissing("agendamentos", "origem_sync", "TEXT DEFAULT 'postgres'");
+  await addColumnIfMissing("agendamentos", "agendado_por_nome", "TEXT");
+  await addColumnIfMissing("agendamentos", "agendado_por_email", "TEXT");
+  await addColumnIfMissing("agendamentos", "vendedor_atendeu_nome", "TEXT");
+  await addColumnIfMissing("agendamentos", "vendedor_atendeu_email", "TEXT");
+  await addColumnIfMissing("agendamentos", "ultima_alteracao_por_nome", "TEXT");
+  await addColumnIfMissing("agendamentos", "ultima_alteracao_por_email", "TEXT");
+  await addColumnIfMissing("agendamentos", "ultima_alteracao_em", "TIMESTAMP");
+
   await addColumnIfMissing("clientes", "gas_id", "TEXT UNIQUE");
   await addColumnIfMissing("clientes", "origem_sync", "TEXT DEFAULT 'postgres'");
   await addColumnIfMissing("faturamentos", "gas_id", "TEXT UNIQUE");
@@ -537,6 +545,66 @@ async function initDatabase() {
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_agendamentos_gas_id ON agendamentos(gas_id);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_clientes_whatsapp ON clientes(whatsapp);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_faturamentos_data ON faturamentos(data_venda);`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS historico_alteracoes_agendamentos (
+      id SERIAL PRIMARY KEY,
+      agendamento_id INTEGER,
+      loja TEXT,
+      cliente_nome TEXT,
+      acao TEXT,
+      payload JSONB,
+      feito_por_nome TEXT,
+      feito_por_email TEXT,
+      criado_em TIMESTAMP DEFAULT NOW()
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS historico_os (
+      id SERIAL PRIMARY KEY,
+      agendamento_id INTEGER,
+      numero_os TEXT,
+      cliente_nome TEXT,
+      loja TEXT,
+      acao TEXT NOT NULL,
+      campo TEXT,
+      valor_anterior TEXT,
+      valor_novo TEXT,
+      usuario_nome TEXT,
+      usuario_email TEXT,
+      usuario_cargo TEXT,
+      criado_em TIMESTAMP DEFAULT NOW()
+    );
+  `);
+
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION validar_agendamento_tgt()
+    RETURNS trigger AS $$
+    DECLARE
+      j JSONB;
+      nome_cliente TEXT;
+      responsavel_registro TEXT;
+    BEGIN
+      j := to_jsonb(NEW);
+      nome_cliente := COALESCE(j->>'nome', j->>'nome_completo', j->>'nomecompleto', j->>'cliente_nome', '');
+      IF nome_cliente ILIKE '%teste%' THEN
+        RAISE EXCEPTION 'Nome de cliente inválido. Não é permitido cadastrar registros com nome TESTE.';
+      END IF;
+      responsavel_registro := COALESCE(NULLIF(NEW.agendado_por_nome, ''), NULLIF(j->>'responsavel', ''), NULLIF(j->>'proprietario_nome', ''), NULLIF(j->>'criado_por_nome', ''), NULLIF(NEW.ultima_alteracao_por_nome, ''), 'Sistema/Landing');
+      NEW.agendado_por_nome := COALESCE(NULLIF(NEW.agendado_por_nome, ''), responsavel_registro);
+      NEW.ultima_alteracao_por_nome := responsavel_registro;
+      NEW.ultima_alteracao_em := NOW();
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS trg_validar_agendamento_tgt ON agendamentos;
+    CREATE TRIGGER trg_validar_agendamento_tgt
+    BEFORE INSERT OR UPDATE ON agendamentos
+    FOR EACH ROW EXECUTE FUNCTION validar_agendamento_tgt();
+  `);
+
 }
 
 function buildGasPayload(body) {
@@ -1345,17 +1413,27 @@ app.post("/api/public/agendamentos", validarLandingApiKey, async (req, res) => {
 app.post("/api/agendamentos", async (req, res) => {
   try {
     const b = req.body || {};
+    const nomeCliente = clean(b.nome || b.nomeCompleto || b.NomeCompleto);
+    if (!nomeCliente) return res.status(400).json({ ok: false, message: "Nome do cliente é obrigatório." });
+    if (nomeCliente.toLowerCase().includes("teste")) return res.status(400).json({ ok: false, message: "Não é permitido cadastrar cliente com nome TESTE." });
+
+    const actorNome = clean(b.agendado_por_nome || b.agendadoPorNome || b.responsavel || b.Responsavel || b.proprietario_nome || b.proprietarioNome || b.userNome || b.nomeUsuario || "Sistema/Landing");
+    const actorEmail = clean(b.agendado_por_email || b.agendadoPorEmail || b.criado_por_email || b.userEmail || b.emailUsuario || "");
+
     const result = await pool.query(
       `INSERT INTO agendamentos (
         gas_id, nome, whatsapp, email, loja, optometrista, origem,
         data_agendamento, horario, observacao, status, compareceu,
-        responsavel, criado_por_email, proprietario_id, proprietario_nome, access_tags, origem_sync
+        responsavel, criado_por_email, proprietario_id, proprietario_nome,
+        agendado_por_nome, agendado_por_email, vendedor_atendeu_nome, vendedor_atendeu_email,
+        ultima_alteracao_por_nome, ultima_alteracao_por_email, ultima_alteracao_em,
+        access_tags, origem_sync
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'postgres')
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,CURRENT_TIMESTAMP,$23,'postgres')
       RETURNING *`,
       [
         b.gas_id || null,
-        b.nome || b.nomeCompleto,
+        nomeCliente,
         b.whatsapp || b.whatsApp || null,
         b.email || null,
         b.loja || null,
@@ -1366,10 +1444,16 @@ app.post("/api/agendamentos", async (req, res) => {
         b.observacao || null,
         b.status || b.statusAgenda || "Agendado",
         b.compareceu || "Pendente",
-        b.responsavel || b.responsavelTela || null,
-        b.criado_por_email || b.userEmail || null,
+        actorNome,
+        actorEmail || null,
         b.proprietario_id || b.proprietarioId || null,
-        b.proprietario_nome || b.proprietarioNome || null,
+        b.proprietario_nome || b.proprietarioNome || actorNome,
+        actorNome,
+        actorEmail || null,
+        b.vendedor_atendeu_nome || b.vendedorAtendeuNome || b.vendedor_nome || b.vendedorNome || b.consultor_responsavel || null,
+        b.vendedor_atendeu_email || null,
+        actorNome,
+        actorEmail || null,
         b.access_tags || b.accessTags || null
       ]
     );
@@ -1392,6 +1476,12 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const b = req.body || {};
+    if (String(b.nome || b.nomeCompleto || "").toLowerCase().includes("teste")) {
+      return res.status(400).json({ ok: false, message: "Não é permitido cadastrar cliente com nome TESTE." });
+    }
+    const actorNome = clean(b.ultima_alteracao_por_nome || b.agendado_por_nome || b.agendadoPorNome || b.Responsavel || b.responsavel || b.userNome || b.nomeUsuario || "Sistema/Landing");
+    const actorEmail = clean(b.ultima_alteracao_por_email || b.agendado_por_email || b.agendadoPorEmail || b.userEmail || b.emailUsuario || "");
+
     const result = await pool.query(
       `UPDATE agendamentos SET
         origem = COALESCE($1, origem),
@@ -1410,8 +1500,15 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         vendedor_nome = COALESCE($14, vendedor_nome),
         valor_venda = COALESCE($15, valor_venda),
         desconto = COALESCE($16, desconto),
+        vendedor_atendeu_nome = COALESCE($17, vendedor_atendeu_nome),
+        vendedor_atendeu_email = COALESCE($18, vendedor_atendeu_email),
+        agendado_por_nome = COALESCE(NULLIF(agendado_por_nome,''), $19, agendado_por_nome),
+        agendado_por_email = COALESCE(NULLIF(agendado_por_email,''), $20, agendado_por_email),
+        ultima_alteracao_por_nome = $21,
+        ultima_alteracao_por_email = $22,
+        ultima_alteracao_em = CURRENT_TIMESTAMP,
         atualizado_em = CURRENT_TIMESTAMP
-      WHERE id = $17
+      WHERE id = $23
       RETURNING *`,
       [
         b.origem || null,
@@ -1430,6 +1527,12 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         b.vendedor_nome || b.vendedorNome || null,
         b.valor_venda || b.valorVenda || null,
         b.desconto || null,
+        b.vendedor_atendeu_nome || b.vendedorAtendeuNome || b.vendedor_nome || b.vendedorNome || b.consultor_responsavel || null,
+        b.vendedor_atendeu_email || null,
+        actorNome,
+        actorEmail || null,
+        actorNome,
+        actorEmail || null,
         id
       ]
     );
@@ -1620,20 +1723,24 @@ app.get("/api/access-tags", async (req, res) => {
 
 app.get("/api/dashboard", async (req, res) => {
   try {
-    const clientes = await pool.query(`SELECT COUNT(*)::int AS total FROM clientes`);
-    const agendamentos = await pool.query(`SELECT COUNT(*)::int AS total FROM agendamentos`);
-    const faturamentos = await pool.query(`
-      SELECT COUNT(*)::int AS total_vendas, COALESCE(SUM(valor_total), 0)::numeric AS faturamento_total
-      FROM faturamentos
+    const clientes = await pool.query(`SELECT COUNT(*)::int AS total FROM clientes WHERE nome NOT ILIKE '%teste%'`);
+    const resumo = await pool.query(`
+      SELECT
+        COUNT(*)::int AS total_agendamentos,
+        COUNT(*) FILTER (WHERE COALESCE(valor_venda,0) > 0)::int AS os_com_valor,
+        COALESCE(SUM(valor_venda),0)::numeric AS faturamento_total,
+        COALESCE(SUM(desconto),0)::numeric AS desconto_total
+      FROM agendamentos
+      WHERE nome NOT ILIKE '%teste%' AND COALESCE(loja,'') NOT ILIKE '%teste%'
     `);
-
     res.json({
       ok: true,
       dashboard: {
         total_clientes: clientes.rows[0].total,
-        total_agendamentos: agendamentos.rows[0].total,
-        total_vendas: faturamentos.rows[0].total_vendas,
-        faturamento_total: faturamentos.rows[0].faturamento_total
+        total_agendamentos: resumo.rows[0].total_agendamentos,
+        total_vendas: resumo.rows[0].os_com_valor,
+        faturamento_total: resumo.rows[0].faturamento_total,
+        desconto_total: resumo.rows[0].desconto_total
       }
     });
   } catch (error) {
