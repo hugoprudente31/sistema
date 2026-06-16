@@ -1752,5 +1752,257 @@ function executarDiagnostico() {
 </script>
 <!-- TGT_REGRAS_FINAIS_CARGOS_OS_FINANCEIRO_FIM -->
 
+  ==================== COMPRADOR_AGENDAMENTO ====================
+
+<!-- TGT_COMPRADOR_AGENDAMENTO_INICIO -->
+<script>
+(function() {
+  console.log('[TGT] Correção Comprador: liberar Novo Agendamento.');
+
+  function tgtRole() {
+    try {
+      if (typeof roleName === 'function') {
+        return String(roleName() || '').trim().toLowerCase();
+      }
+    } catch(e) {}
+
+    var u = window.state && window.state.user ? window.state.user : {};
+    return String(u.perfil || u.cargo || '').trim().toLowerCase();
+  }
+
+  function tgtIsComprador() {
+    return tgtRole() === 'comprador';
+  }
+
+  function tgtUser() {
+    return window.state && window.state.user ? window.state.user : {};
+  }
+
+  function tgtNormalize(v) {
+    return String(v || '')
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+  }
+
+  function tgtAplicarPermissoesComprador() {
+    if (!tgtIsComprador()) return;
+
+    if (window.state && window.state.user) {
+      window.state.user.permissions = window.state.user.permissions || {};
+
+      window.state.user.permissions.canCreateAgendamento = true;
+      window.state.user.permissions.canEditAgendamento = true;
+      window.state.user.permissions.canCancelOwn = true;
+      window.state.user.permissions.canDeleteOwn = true;
+      window.state.user.permissions.canManageOS = true;
+      window.state.user.permissions.canViewFinance = false;
+      window.state.user.permissions.canExportFinance = false;
+    }
+
+    window.canCreateAgendamento = true;
+    window.canEditAgendamento = true;
+    window.canManageOS = true;
+  }
+
+  function tgtEncontrarBlocoPorTitulo(titulo) {
+    var elementos = Array.from(document.querySelectorAll('section, div, form, article'));
+
+    return elementos.find(function(el) {
+      var txt = String(el.textContent || '').trim().toLowerCase();
+      return txt.indexOf(titulo.toLowerCase()) > -1;
+    });
+  }
+
+  function tgtMostrarNovoAgendamentoComprador() {
+    if (!tgtIsComprador()) return;
+
+    tgtAplicarPermissoesComprador();
+
+    var blocoNovo = tgtEncontrarBlocoPorTitulo('Novo Agendamento');
+
+    if (blocoNovo) {
+      blocoNovo.style.display = '';
+      blocoNovo.style.visibility = 'visible';
+      blocoNovo.hidden = false;
+      blocoNovo.removeAttribute('hidden');
+      blocoNovo.classList.remove('hidden');
+      blocoNovo.classList.remove('d-none');
+    }
+
+    // Libera campos e botão de salvar agendamento
+    Array.from(document.querySelectorAll('input, select, textarea, button')).forEach(function(el) {
+      var txt = String(el.textContent || '').trim().toLowerCase();
+      var id = String(el.id || '').toLowerCase();
+      var name = String(el.name || '').toLowerCase();
+
+      var dentroNovo = blocoNovo && blocoNovo.contains(el);
+
+      if (dentroNovo) {
+        el.disabled = false;
+
+        if (
+          id.indexOf('loja') > -1 ||
+          name.indexOf('loja') > -1
+        ) {
+          var lojaUser = tgtUser().loja || tgtUser().Loja || '';
+
+          if (lojaUser && lojaUser !== 'Todas') {
+            try {
+              el.value = lojaUser;
+              el.disabled = true;
+            } catch(e) {}
+          }
+        }
+      }
+
+      if (
+        txt.indexOf('salvar agendamento') > -1 ||
+        txt.indexOf('novo agendamento') > -1
+      ) {
+        el.style.display = '';
+        el.style.visibility = 'visible';
+        el.hidden = false;
+        el.removeAttribute('hidden');
+        el.disabled = false;
+      }
+    });
+
+    // Garante aviso correto
+    var painelComprador = Array.from(document.querySelectorAll('div, span, p, small')).find(function(el) {
+      return String(el.textContent || '').indexOf('Painel do Comprador') > -1;
+    });
+
+    if (!painelComprador) {
+      var header = document.querySelector('body');
+      if (header && !document.getElementById('tgtAvisoCompradorAgendamento')) {
+        var aviso = document.createElement('div');
+        aviso.id = 'tgtAvisoCompradorAgendamento';
+        aviso.style.margin = '10px 24px';
+        aviso.style.padding = '10px 14px';
+        aviso.style.border = '1px solid #ffd4c2';
+        aviso.style.borderRadius = '12px';
+        aviso.style.background = '#fff8f4';
+        aviso.style.color = '#fc5102';
+        aviso.style.fontWeight = '700';
+        aviso.textContent = 'Painel do Comprador: pode criar agendamentos, editar/reagendar, acompanhar OS e atualizar pedidos da própria loja.';
+        header.prepend(aviso);
+      }
+    }
+  }
+
+  // Se existir função original de permissões, preserva e complementa
+  if (typeof window.aplicarPermissoesTela === 'function' && !window.__tgtPermissoesTelaCompradorOriginal) {
+    window.__tgtPermissoesTelaCompradorOriginal = window.aplicarPermissoesTela;
+
+    window.aplicarPermissoesTela = function() {
+      try {
+        window.__tgtPermissoesTelaCompradorOriginal.apply(this, arguments);
+      } catch(e) {}
+
+      tgtMostrarNovoAgendamentoComprador();
+    };
+  }
+
+  // Se existir função original de carregamento, complementa depois
+  if (typeof window.carregarInicial === 'function' && !window.__tgtCarregarInicialCompradorOriginal) {
+    window.__tgtCarregarInicialCompradorOriginal = window.carregarInicial;
+
+    window.carregarInicial = function() {
+      var r = window.__tgtCarregarInicialCompradorOriginal.apply(this, arguments);
+
+      setTimeout(tgtMostrarNovoAgendamentoComprador, 300);
+      setTimeout(tgtMostrarNovoAgendamentoComprador, 1000);
+
+      return r;
+    };
+  }
+
+  setInterval(tgtMostrarNovoAgendamentoComprador, 1000);
+
+  document.addEventListener('DOMContentLoaded', function() {
+    setTimeout(tgtMostrarNovoAgendamentoComprador, 300);
+    setTimeout(tgtMostrarNovoAgendamentoComprador, 1000);
+    setTimeout(tgtMostrarNovoAgendamentoComprador, 2000);
+  });
+
+  console.log('[TGT] Comprador liberado para Novo Agendamento.');
+})();
+</script>
+<!-- TGT_COMPRADOR_AGENDAMENTO_FIM -->
+
+
+==================== FORCAR_NOVO_AGENDAMENTO_COMPRADOR ====================
+
+<!-- TGT_FORCAR_NOVO_AGENDAMENTO_COMPRADOR_INICIO -->
+<script>
+(function(){
+  function role(){
+    try { if (typeof roleName === 'function') return String(roleName() || '').trim().toLowerCase(); } catch(e){}
+    var u = window.state && window.state.user ? window.state.user : {};
+    return String(u.perfil || u.cargo || '').trim().toLowerCase();
+  }
+
+  function isComprador(){
+    return role() === 'comprador';
+  }
+
+  function liberar(){
+    if (!isComprador()) return;
+
+    if (window.state && window.state.user) {
+      window.state.user.permissions = window.state.user.permissions || {};
+      window.state.user.permissions.canCreateAgendamento = true;
+      window.state.user.permissions.canEditAgendamento = true;
+      window.state.user.permissions.canManageOS = true;
+    }
+
+    var todos = Array.from(document.querySelectorAll('section, div, form, article'));
+    todos.forEach(function(el){
+      var txt = String(el.textContent || '').toLowerCase();
+
+      if (
+        txt.indexOf('novo agendamento') > -1 ||
+        txt.indexOf('salvar agendamento') > -1 ||
+        txt.indexOf('regras de horário') > -1 ||
+        txt.indexOf('regras de horario') > -1
+      ) {
+        el.style.display = '';
+        el.style.visibility = 'visible';
+        el.hidden = false;
+        el.removeAttribute('hidden');
+        el.classList.remove('hidden');
+        el.classList.remove('d-none');
+
+        Array.from(el.querySelectorAll('input, select, textarea, button')).forEach(function(campo){
+          campo.disabled = false;
+        });
+      }
+    });
+
+    Array.from(document.querySelectorAll('button')).forEach(function(btn){
+      var txt = String(btn.textContent || '').toLowerCase();
+
+      if (txt.indexOf('salvar agendamento') > -1) {
+        btn.style.display = '';
+        btn.style.visibility = 'visible';
+        btn.disabled = false;
+        btn.hidden = false;
+        btn.removeAttribute('hidden');
+      }
+    });
+  }
+
+  setInterval(liberar, 700);
+  document.addEventListener('DOMContentLoaded', function(){
+    setTimeout(liberar, 300);
+    setTimeout(liberar, 1000);
+    setTimeout(liberar, 2000);
+  });
+})();
+</script>
+<!-- TGT_FORCAR_NOVO_AGENDAMENTO_COMPRADOR_FIM -->
+
 </body>
 </html>
