@@ -1471,35 +1471,66 @@ function runAction(fn, id) {
     });
 }
 
-function abrirPromptOS(id, row) {
+function abrirModalOS(id, row) {
   row = row || {};
-  var numeroOS = prompt('Número da OS:', row.NumeroOS || '');
-  if (numeroOS === null) return;
-  var dataAbertura = prompt('Data de abertura da OS (YYYY-MM-DD):', row.DataAberturaOS || new Date().toISOString().slice(0,10)) || '';
-  var dataEntrada = prompt('Data de entrada da OS (YYYY-MM-DD):', row.DataEntradaOS || '') || '';
-  var dataEntrega = prompt('Data prevista de entrega (YYYY-MM-DD):', row.DataEntregaOS || '') || '';
-  var dataFinal = prompt('Data de finalização da OS (YYYY-MM-DD):', row.DataFinalizacaoOS || '') || '';
-  var statusOS = prompt('Status da OS:', row.StatusOS || '') || '';
-  var payload = { id: id, numeroOS: numeroOS, dataAberturaOS: dataAbertura, dataEntradaOS: dataEntrada, dataFinalizacaoOS: dataFinal, dataEntregaOS: dataEntrega, statusOS: statusOS };
-  if (canManageOS()) {
-    payload.valorVenda = prompt('Valor da OS:', row.ValorVenda || '') || '';
-    payload.desconto = prompt('Desconto:', row.Desconto || '') || '';
-    payload.vendedorNome = prompt('Vendedor:', row.VendedorNome || row.ProprietarioNome || '') || '';
+  var backdrop = document.createElement('div');
+  backdrop.id = 'osModalBackdrop';
+  backdrop.className = 'modal-backdrop';
+  backdrop.innerHTML = '<div class="modal-card" style="max-width:560px">' +
+    '<div class="topbar"><h3 style="margin:0">Registrar / Atualizar OS</h3><button class="secondary icon-btn" onclick="document.getElementById(\'osModalBackdrop\').remove()">Fechar</button></div>' +
+    '<div class="row"><div><label>Número da OS *</label><input id="osNumero" type="text" value="' + escapeHtml(row.NumeroOS||'') + '"></div>' +
+    '<div><label>Status da OS</label><select id="osStatus"><option value="">Selecione</option><option>Aberta</option><option>Em produção</option><option>Recebida</option><option>Pronta</option><option>Entregue</option><option>Concluído</option><option>Cancelada</option></select></div></div>' +
+    '<div class="row"><div><label>Data de abertura</label><input id="osAbertura" type="date" value="' + escapeHtml(row.DataAberturaOS||new Date().toISOString().slice(0,10)) + '"></div>' +
+    '<div><label>Data de entrada (lab.)</label><input id="osEntrada" type="date" value="' + escapeHtml(row.DataEntradaOS||'') + '"></div></div>' +
+    '<div class="row"><div><label>Previsão de entrega</label><input id="osEntrega" type="date" value="' + escapeHtml(row.DataEntregaOS||'') + '"></div>' +
+    '<div><label>Data de finalização</label><input id="osFinal" type="date" value="' + escapeHtml(row.DataFinalizacaoOS||'') + '"></div></div>' +
+    '<div class="row"><div><label>Valor da OS (R$)</label><input id="osValor" type="number" min="0" step="0.01" value="' + escapeHtml(String(row.ValorVenda||'')) + '"></div>' +
+    '<div><label>Desconto (R$)</label><input id="osDesconto" type="number" min="0" step="0.01" value="' + escapeHtml(String(row.Desconto||'')) + '"></div></div>' +
+    '<div><label>Vendedor responsável</label><input id="osVendedor" type="text" value="' + escapeHtml(row.VendedorNome||row.AgendadoPorNome||row.ProprietarioNome||'') + '"></div>' +
+    '<div style="margin-top:14px;display:flex;gap:10px"><button onclick="salvarOS_Modal(\'' + escapeJs(id) + '\')">Salvar OS</button><button class="secondary" onclick="document.getElementById(\'osModalBackdrop\').remove()">Cancelar</button></div>' +
+    '<div id="msgOSModal" class="msg" style="margin-top:8px"></div>' +
+    '</div>';
+  document.body.appendChild(backdrop);
+  var selStatus = document.getElementById('osStatus');
+  if (selStatus && row.StatusOS) selStatus.value = row.StatusOS;
+}
+
+function salvarOS_Modal(id) {
+  var numeroOS = (document.getElementById('osNumero')||{}).value || '';
+  if (!numeroOS.trim()) {
+    document.getElementById('msgOSModal').textContent = 'Número da OS é obrigatório.';
+    document.getElementById('msgOSModal').className = 'msg err';
+    return;
   }
+  var payload = {
+    numeroOS: numeroOS.trim(),
+    statusOS: (document.getElementById('osStatus')||{}).value || '',
+    dataAberturaOS: (document.getElementById('osAbertura')||{}).value || '',
+    dataEntradaOS: (document.getElementById('osEntrada')||{}).value || '',
+    dataEntregaOS: (document.getElementById('osEntrega')||{}).value || '',
+    dataFinalizacaoOS: (document.getElementById('osFinal')||{}).value || '',
+    valorVenda: (document.getElementById('osValor')||{}).value || '',
+    desconto: (document.getElementById('osDesconto')||{}).value || '',
+    vendedorNome: (document.getElementById('osVendedor')||{}).value || ''
+  };
   showLoading(true);
   apiPatch('/api/agendamentos/' + encodeURIComponent(id), payload)
     .then(function(res) {
-      if (!res || !res.ok) throw new Error((res && res.message) || 'Falha ao salvar OS no PostgreSQL.');
-      setMsg('msgForm', 'OS atualizada no PostgreSQL.', 'ok');
-      toast('OS atualizada no PostgreSQL.', 'ok');
+      if (!res || !res.ok) throw new Error((res && res.message) || 'Falha ao salvar OS.');
+      document.getElementById('osModalBackdrop').remove();
+      setMsg('msgForm', 'OS salva com sucesso.', 'ok');
+      toast('OS salva com sucesso.', 'ok');
       agendarAtualizacaoAposAcao(1500);
     })
     .catch(function(err) {
-      setMsg('msgForm', err.message || String(err), 'err');
+      var msgEl = document.getElementById('msgOSModal');
+      if (msgEl) { msgEl.textContent = err.message || String(err); msgEl.className = 'msg err'; }
     })
-    .finally(function() {
-      showLoading(false);
-    });
+    .finally(function() { showLoading(false); });
+}
+
+function abrirPromptOS(id, row) {
+  abrirModalOS(id, row);
 }
 
 function executarAcaoAgenda(id, acao, selectEl) {
@@ -1740,7 +1771,7 @@ function executarDiagnostico() {
 
   function install(){
     if(typeof window.apiPost==='function'&&!window.__tgtPostRegrasFinais){ window.__tgtPostRegrasFinais=window.apiPost; window.apiPost=function(path,payload){ try{ if(String(path||'').indexOf('/api/agendamentos')>-1) payload=validarPayload(payload||{}); }catch(e){ alert(e.message||String(e)); return Promise.reject(e); } return window.__tgtPostRegrasFinais(path,payload); }; }
-    if(typeof window.apiPatch==='function'&&!window.__tgtPatchRegrasFinais){ window.__tgtPatchRegrasFinais=window.apiPatch; window.apiPatch=function(path,payload){ try{ payload=validarPayload(payload||{}); var r=role(); var clone=Object.assign({},payload); var os=['NumeroOS','numeroOS','numero_os','StatusOS','statusOS','status_os','DataAberturaOS','dataAberturaOS','data_abertura_os','DataEntradaOS','dataEntradaOS','data_entrada_os','DataFinalizacaoOS','dataFinalizacaoOS','data_finalizacao_os','DataEntregaOS','dataEntregaOS','data_entrega_os','ObservacaoOS','observacaoOS','observacao_os']; var vals=['ValorVenda','valorVenda','valor_venda','Desconto','desconto','VendaGerada','vendaGerada','venda_gerada','MotivoPerda','motivoPerda','motivo_perda']; if(r==='consultor de vendas'){ os.concat(vals).forEach(function(k){ if(Object.prototype.hasOwnProperty.call(clone,k)) delete clone[k]; }); } if(r==='optometrista'){ var permitido={}; ['Compareceu','compareceu','StatusAgenda','statusAgenda','status_agenda','AtendimentoRealizado','atendimentoRealizado','atendimento_realizado','Observacao','observacao','ultima_alteracao_por_nome','ultima_alteracao_por_email','ultima_alteracao_em'].forEach(function(k){ if(Object.prototype.hasOwnProperty.call(clone,k)) permitido[k]=clone[k]; }); clone=permitido; } payload=clone; }catch(e){ alert(e.message||String(e)); return Promise.reject(e); } return window.__tgtPatchRegrasFinais(path,payload); }; }
+    if(typeof window.apiPatch==='function'&&!window.__tgtPatchRegrasFinais){ window.__tgtPatchRegrasFinais=window.apiPatch; window.apiPatch=function(path,payload){ try{ payload=validarPayload(payload||{}); var r=role(); var clone=Object.assign({},payload); var vals=['ValorVenda','valorVenda','valor_venda','Desconto','desconto','VendaGerada','vendaGerada','venda_gerada','MotivoPerda','motivoPerda','motivo_perda']; if(r==='optometrista'){ var permitido={}; ['Compareceu','compareceu','StatusAgenda','statusAgenda','status_agenda','AtendimentoRealizado','atendimentoRealizado','atendimento_realizado','Observacao','observacao','ultima_alteracao_por_nome','ultima_alteracao_por_email','ultima_alteracao_em'].forEach(function(k){ if(Object.prototype.hasOwnProperty.call(clone,k)) permitido[k]=clone[k]; }); clone=permitido; } payload=clone; }catch(e){ alert(e.message||String(e)); return Promise.reject(e); } return window.__tgtPatchRegrasFinais(path,payload); }; }
     if(typeof window.apiGet==='function'&&typeof window.mapAgendamentoDb==='function'){ window.getAgendamentosPostgres=function(){ return apiGet('/api/agendamentos?limit=10000&all=true').then(function(res){ var rows=Array.isArray(res.agendamentos)?res.agendamentos:[]; return window.aplicarRestricaoLojaUsuario(rows.map(mapAgendamentoDb)); }); }; window.getDashboardPostgres=function(){ if(!window.tgtPodeVerFinanceiro()) return Promise.resolve({}); return apiGet('/api/agendamentos?limit=10000&all=true').then(function(res){ var rows=Array.isArray(res.agendamentos)?res.agendamentos:[]; var mapped=window.aplicarRestricaoLojaUsuario(rows.map(mapAgendamentoDb)).filter(function(r){return valor(r)>0;}); var d={total_agendamentos:mapped.length,total_compareceram:0,total_nao_compareceram:0,total_concluidos:0,os_ativas:0,os_atrasadas:0,faturamento_total:0,desconto_total:0,loja_filtrada:user().loja||'Todas',fonte:'frontend_filtrado_por_loja_sem_teste'}; mapped.forEach(function(r){ var st=String(r.StatusAgenda||r.status||'').toLowerCase(), comp=String(r.Compareceu||r.compareceu||'').toLowerCase(); if(comp==='sim'||st.indexOf('compareceu')>-1||st.indexOf('conclu')>-1)d.total_compareceram++; if(comp==='não'||comp==='nao'||st.indexOf('não compareceu')>-1||st.indexOf('nao compareceu')>-1)d.total_nao_compareceram++; if(st.indexOf('conclu')>-1)d.total_concluidos++; d.faturamento_total+=valor(r); d.desconto_total+=desc(r); }); return d; }); }; }
   }
 
