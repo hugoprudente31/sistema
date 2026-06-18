@@ -1098,16 +1098,9 @@ function getAgendamentos(user, filtros) {
     rows = rows.filter(function(r) { return r.Loja === normalizeText_(filtros.loja); });
   }
 
-  // Segurança no backend: consultor, vendedor e outros veem apenas registros próprios.
-  // O HTML também marca "Meus Serviços", mas a regra precisa ficar no servidor.
-  if (['consultor de vendas', 'vendedor', 'outros'].indexOf(ctx.role) > -1) {
-    rows = rows.filter(function(r) {
-      return normalizeText_(r.ProprietarioId) === ctx.loginId ||
-        normalizeEmail_(r.CriadoPorEmail) === ctx.loginEmail ||
-        normalizeText_(r.ProprietarioNome).toLowerCase() === ctx.loginNome.toLowerCase() ||
-        normalizeText_(r.Responsavel).toLowerCase() === ctx.loginNome.toLowerCase();
-    });
-  }
+  // Consultor, vendedor e outros veem todos os agendamentos da própria loja.
+  // O filtro "Meus Serviços" (filtros.meus) permite cada um visualizar só os seus.
+  // A restrição de edição permanece: só podem editar registros onde são proprietários.
 
   if (normalizeText_(filtros.optometrista)) {
     const opto = normalizeText_(filtros.optometrista).toLowerCase();
