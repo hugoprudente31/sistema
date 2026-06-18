@@ -1685,16 +1685,81 @@ app.post("/api/logs", async (req, res) => {
 
 app.get("/api/usuarios", async (req, res) => {
   try {
+    const todos = req.query.todos === 'true';
     const result = await pool.query(`
-      SELECT id, gas_id, nome, email, cargo, loja, access_tags, can_view_finance, ativo
+      SELECT id, gas_id, nome, email, cargo, loja, access_tags, can_view_finance, ativo,
+             criado_em, atualizado_em
       FROM usuarios
-      WHERE ativo = true
+      ${todos ? '' : 'WHERE ativo = true'}
       ORDER BY loja ASC, nome ASC
       LIMIT 1000
     `);
     res.json({ ok: true, usuarios: result.rows });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+app.post("/api/usuarios", async (req, res) => {
+  try {
+    const b = req.body || {};
+    const nome = clean(b.nome);
+    const email = clean(b.email).toLowerCase();
+    const cargo = clean(b.cargo);
+    if (!nome || !email || !cargo) {
+      return res.status(400).json({ ok: false, message: "Nome, e-mail e perfil são obrigatórios." });
+    }
+    const gasId = makeGasId("usuario", email);
+    const result = await pool.query(
+      `INSERT INTO usuarios (gas_id, nome, email, cargo, loja, can_view_finance, ativo, origem_sync, atualizado_em)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'postgres',CURRENT_TIMESTAMP)
+       ON CONFLICT (email) DO UPDATE SET
+         nome = EXCLUDED.nome,
+         cargo = EXCLUDED.cargo,
+         loja = EXCLUDED.loja,
+         can_view_finance = EXCLUDED.can_view_finance,
+         ativo = EXCLUDED.ativo,
+         origem_sync = 'postgres',
+         atualizado_em = CURRENT_TIMESTAMP
+       RETURNING *`,
+      [gasId, nome, email, cargo, b.loja || null, !!b.can_view_finance, b.ativo !== false]
+    );
+    res.json({ ok: true, message: "Usuário salvo com sucesso.", usuario: result.rows[0] });
+  } catch (error) {
+    if (error.code === '23505') {
+      return res.status(409).json({ ok: false, message: "E-mail já cadastrado no sistema." });
+    }
+    res.status(500).json({ ok: false, message: "Erro ao salvar usuário.", error: error.message });
+  }
+});
+
+app.patch("/api/usuarios/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const b = req.body || {};
+    const result = await pool.query(
+      `UPDATE usuarios SET
+        nome = COALESCE($1, nome),
+        cargo = COALESCE($2, cargo),
+        loja = COALESCE($3, loja),
+        can_view_finance = COALESCE($4, can_view_finance),
+        ativo = COALESCE($5, ativo),
+        atualizado_em = CURRENT_TIMESTAMP
+       WHERE id = $6
+       RETURNING *`,
+      [
+        b.nome ? clean(b.nome) : null,
+        b.cargo ? clean(b.cargo) : null,
+        b.loja !== undefined ? (b.loja || null) : null,
+        b.can_view_finance !== undefined ? !!b.can_view_finance : null,
+        b.ativo !== undefined ? !!b.ativo : null,
+        id
+      ]
+    );
+    if (!result.rows.length) return res.status(404).json({ ok: false, message: "Usuário não encontrado." });
+    res.json({ ok: true, message: "Usuário atualizado.", usuario: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: "Erro ao atualizar usuário.", error: error.message });
   }
 });
 
