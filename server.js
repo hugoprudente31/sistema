@@ -1502,6 +1502,10 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         desconto = COALESCE($16, desconto),
         vendedor_atendeu_nome = COALESCE($17, vendedor_atendeu_nome),
         vendedor_atendeu_email = COALESCE($18, vendedor_atendeu_email),
+        data_abertura_os = COALESCE($24, data_abertura_os),
+        data_entrada_os = COALESCE($25, data_entrada_os),
+        data_finalizacao_os = COALESCE($26, data_finalizacao_os),
+        data_entrega_os = COALESCE($27, data_entrega_os),
         agendado_por_nome = COALESCE(NULLIF(agendado_por_nome,''), $19, agendado_por_nome),
         agendado_por_email = COALESCE(NULLIF(agendado_por_email,''), $20, agendado_por_email),
         ultima_alteracao_por_nome = $21,
@@ -1533,7 +1537,11 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         actorEmail || null,
         actorNome,
         actorEmail || null,
-        id
+        id,
+        b.data_abertura_os || b.dataAberturaOS || null,
+        b.data_entrada_os || b.dataEntradaOS || null,
+        b.data_finalizacao_os || b.dataFinalizacaoOS || null,
+        b.data_entrega_os || b.dataEntregaOS || null
       ]
     );
 
