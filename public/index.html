@@ -344,6 +344,7 @@
           <button class="btn-relatorio" onclick="gerarRelatorioCSV()">Relatório Operacional</button>
           <button class="btn-relatorio hidden" id="btnLeadTime" onclick="carregarLeadTime()">Lead Time</button>
           <button class="btn-relatorio hidden" id="btnHistorico" onclick="carregarHistorico()">Histórico</button>
+          <button class="btn-relatorio hidden" id="btnUsuarios" onclick="carregarUsuarios()">Usuários</button>
           <button class="btn-relatorio secondary hidden" id="btnSyncSistema" onclick="sincronizarSistema()">Sincronizar sistema</button>
         </div>
       </div>
@@ -429,6 +430,22 @@
     <div class="card hidden" id="cardHistorico">
       <h3>Histórico Operacional</h3>
       <div class="scroll-x"><table><thead><tr><th>Data</th><th>Loja</th><th>Cliente</th><th>Tipo</th><th>Ação</th><th>Campo</th><th>Antes</th><th>Depois</th><th>Usuário</th><th>Perfil</th></tr></thead><tbody id="historicoBody"></tbody></table></div>
+    </div>
+
+    <div class="card hidden" id="cardUsuarios">
+      <div class="topbar" style="margin-bottom:14px;">
+        <h3 style="margin:0;">Gerenciar Usuários</h3>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+          <button class="btn-relatorio" onclick="abrirModalNovoUsuario()">+ Novo Usuário</button>
+          <button class="btn-relatorio secondary" onclick="carregarUsuarios()">Atualizar lista</button>
+        </div>
+      </div>
+      <div class="scroll-x">
+        <table>
+          <thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Loja</th><th>Ver financeiro</th><th>Ativo</th><th>Ações</th></tr></thead>
+          <tbody id="usuariosBody"></tbody>
+        </table>
+      </div>
     </div>
 
     <div class="card hidden" id="cardDiagnostico"><h3>Diagnóstico Admin</h3><button onclick="executarDiagnostico()">Testar backend</button><div style="height:12px"></div><pre id="diagnosticoOut">Aguardando...</pre></div>
@@ -726,6 +743,8 @@ function logout() { location.reload(); }
 function aplicarPermissoesTela() {
   var p = state.user.permissions || {};
   if (p.isAdmin) byId('cardDiagnostico').classList.remove('hidden');
+  if (p.isAdmin) byId('btnUsuarios').classList.remove('hidden');
+  if (p.isAdmin) byId('cardUsuarios').classList.remove('hidden');
   if (p.canCreateAgendamento) byId('cardAgendamento').classList.remove('hidden');
   if (p.canViewFinance) {
     byId('cardFinanceiro').classList.remove('hidden');
@@ -1721,6 +1740,139 @@ function sincronizarSistema() {
       setMsg('msgForm', err.message || String(err), 'err');
     })
     .finally(function() { showLoading(false); });
+}
+
+function carregarUsuarios() {
+  byId('cardUsuarios').classList.remove('hidden');
+  byId('usuariosBody').innerHTML = '<tr><td colspan="7"><div class="loading-box">Carregando usuários...</div></td></tr>';
+  apiGet('/api/usuarios?todos=true')
+    .then(function(res) {
+      var rows = Array.isArray(res.usuarios) ? res.usuarios : [];
+      if (!rows.length) {
+        byId('usuariosBody').innerHTML = '<tr><td colspan="7">Nenhum usuário cadastrado ainda.</td></tr>';
+        return;
+      }
+      byId('usuariosBody').innerHTML = rows.map(function(u) {
+        var ativo = u.ativo ? '<span class="status green">Ativo</span>' : '<span class="status red">Inativo</span>';
+        var fin = u.can_view_finance ? '<span class="status green">Sim</span>' : '<span class="status gray">Não</span>';
+        return '<tr>' +
+          '<td><strong>' + escapeHtml(u.nome||'') + '</strong></td>' +
+          '<td>' + escapeHtml(u.email||'') + '</td>' +
+          '<td><span class="pill">' + escapeHtml(u.cargo||'') + '</span></td>' +
+          '<td>' + escapeHtml(u.loja||'Todas') + '</td>' +
+          '<td>' + fin + '</td>' +
+          '<td>' + ativo + '</td>' +
+          '<td style="display:flex;gap:6px">' +
+          '<button class="secondary icon-btn" onclick="abrirModalEditarUsuario(' + u.id + ')">Editar</button>' +
+          (u.ativo
+            ? '<button class="danger icon-btn" onclick="toggleUsuario(' + u.id + ', false)">Desativar</button>'
+            : '<button class="success icon-btn" onclick="toggleUsuario(' + u.id + ', true)">Ativar</button>') +
+          '</td></tr>';
+      }).join('');
+    })
+    .catch(function(err) {
+      byId('usuariosBody').innerHTML = '<tr><td colspan="7" class="err">Erro: ' + escapeHtml(err.message||String(err)) + '</td></tr>';
+    });
+}
+
+function abrirModalNovoUsuario() {
+  _abrirModalUsuario(null);
+}
+
+function abrirModalEditarUsuario(id) {
+  apiGet('/api/usuarios?todos=true').then(function(res) {
+    var u = (res.usuarios||[]).find(function(x){ return x.id === id; });
+    if (!u) { toast('Usuário não encontrado.', 'err'); return; }
+    _abrirModalUsuario(u);
+  });
+}
+
+function _abrirModalUsuario(u) {
+  var isEdit = !!u;
+  var lojasOpts = '<option value="">Todas as lojas</option>' +
+    (state.lojas||[]).map(function(l){ return '<option value="' + escapeHtml(l.Loja) + '">' + escapeHtml(l.Loja) + '</option>'; }).join('');
+  var perfis = ['admin','atendimento central','gerente de loja','optometrista','consultor de vendas','vendedor','outros'];
+  var perfisOpts = perfis.map(function(p){ return '<option value="' + p + '">' + p + '</option>'; }).join('');
+
+  var backdrop = document.createElement('div');
+  backdrop.id = 'usuarioModalBackdrop';
+  backdrop.className = 'modal-backdrop';
+  backdrop.innerHTML = '<div class="modal-card" style="max-width:560px">' +
+    '<div class="topbar"><h3 style="margin:0">' + (isEdit ? 'Editar Usuário' : 'Novo Usuário') + '</h3>' +
+    '<button class="secondary icon-btn" onclick="document.getElementById(\'usuarioModalBackdrop\').remove()">Fechar</button></div>' +
+    '<div class="row"><div><label>Nome completo *</label><input id="uNome" type="text" value="' + escapeHtml((u&&u.nome)||'') + '"></div>' +
+    '<div><label>E-mail *</label><input id="uEmail" type="email" value="' + escapeHtml((u&&u.email)||'') + '" ' + (isEdit?'readonly style="background:var(--color-background-secondary)"':'') + '></div></div>' +
+    '<div class="row"><div><label>Perfil *</label><select id="uCargo">' + perfisOpts + '</select></div>' +
+    '<div><label>Loja</label><select id="uLoja">' + lojasOpts + '</select></div></div>' +
+    '<div class="row"><div style="display:flex;align-items:center;gap:8px;padding-top:28px"><input type="checkbox" id="uFinance"' + ((u&&u.can_view_finance)?' checked':'') + '><label for="uFinance" style="margin:0">Ver financeiro</label></div>' +
+    '<div style="display:flex;align-items:center;gap:8px;padding-top:28px"><input type="checkbox" id="uAtivo"' + ((!u||u.ativo)?' checked':'') + '><label for="uAtivo" style="margin:0">Ativo</label></div></div>' +
+    '<div style="margin-top:14px;display:flex;gap:10px">' +
+    '<button onclick="salvarUsuario(' + (isEdit?u.id:'null') + ')">' + (isEdit?'Salvar alterações':'Criar usuário') + '</button>' +
+    '<button class="secondary" onclick="document.getElementById(\'usuarioModalBackdrop\').remove()">Cancelar</button></div>' +
+    '<div id="msgUsuarioModal" class="msg" style="margin-top:8px"></div></div>';
+  document.body.appendChild(backdrop);
+
+  if (u) {
+    var sel = document.getElementById('uCargo');
+    if (sel) sel.value = u.cargo || '';
+    var selL = document.getElementById('uLoja');
+    if (selL) selL.value = u.loja || '';
+  }
+}
+
+function salvarUsuario(id) {
+  var nome = (document.getElementById('uNome')||{}).value || '';
+  var email = (document.getElementById('uEmail')||{}).value || '';
+  var cargo = (document.getElementById('uCargo')||{}).value || '';
+  var loja = (document.getElementById('uLoja')||{}).value || '';
+  var canFinance = !!(document.getElementById('uFinance')||{}).checked;
+  var ativo = !!(document.getElementById('uAtivo')||{}).checked;
+  var msgEl = document.getElementById('msgUsuarioModal');
+
+  if (!nome.trim() || !email.trim() || !cargo) {
+    if (msgEl) { msgEl.textContent = 'Nome, e-mail e perfil são obrigatórios.'; msgEl.className = 'msg err'; }
+    return;
+  }
+
+  showLoading(true);
+  var url = id ? '/api/usuarios/' + id : '/api/usuarios';
+  var method = id ? 'PATCH' : 'POST';
+
+  fetch(url, {
+    method: method,
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ nome: nome.trim(), email: email.trim().toLowerCase(), cargo: cargo, loja: loja || null, can_view_finance: canFinance, ativo: ativo })
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(res) {
+    if (!res || !res.ok) throw new Error(res.message || res.error || 'Falha ao salvar usuário.');
+    document.getElementById('usuarioModalBackdrop').remove();
+    toast((id ? 'Usuário atualizado' : 'Usuário criado') + ' com sucesso.', 'ok');
+    carregarUsuarios();
+  })
+  .catch(function(err) {
+    if (msgEl) { msgEl.textContent = err.message || String(err); msgEl.className = 'msg err'; }
+  })
+  .finally(function(){ showLoading(false); });
+}
+
+function toggleUsuario(id, ativo) {
+  var acao = ativo ? 'Ativar' : 'Desativar';
+  if (!confirm(acao + ' este usuário?')) return;
+  showLoading(true);
+  fetch('/api/usuarios/' + id, {
+    method: 'PATCH',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ ativo: ativo })
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(res) {
+    if (!res || !res.ok) throw new Error(res.message || 'Falha ao atualizar usuário.');
+    toast('Usuário ' + (ativo?'ativado':'desativado') + '.', 'ok');
+    carregarUsuarios();
+  })
+  .catch(function(err){ toast(err.message||String(err), 'err'); })
+  .finally(function(){ showLoading(false); });
 }
 
 function executarDiagnostico() {
