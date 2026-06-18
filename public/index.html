@@ -376,7 +376,7 @@
         <table>
           <thead>
             <tr>
-              <th>ID</th><th>Data Registro</th><th>Cliente</th><th>Proprietário</th><th>Dia Agendado</th><th>Status Ag.</th><th>Presença</th><th>Nº OS</th><th>Status OS</th><th>Entrada / Entrega / Finalização</th><th>Loja</th><th>Optometrista</th><th>Lead Time</th><th>Valor</th><th>Desconto</th><th>Tag</th><th>Ações</th>
+              <th>ID</th><th>Data Registro</th><th>Cliente</th><th>Agendado por</th><th>Última alt.</th><th>Dia Agendado</th><th>Status Ag.</th><th>Presença</th><th>Nº OS</th><th>Status OS</th><th>Entrada / Entrega / Finalização</th><th>Loja</th><th>Optometrista</th><th>Lead Time</th><th>Valor</th><th>Desconto</th><th>Tag</th><th>Ações</th>
             </tr>
           </thead>
           <tbody id="agendaBody"></tbody>
@@ -564,7 +564,11 @@ function mapAgendamentoDb(r) {
     AccessTags: r.access_tags || '',
     LeadTimeDias: r.lead_time_dias || '',
     VendedorNome: r.vendedor_nome || '',
-    KommoLeadId: r.kommo_lead_id || ''
+    KommoLeadId: r.kommo_lead_id || '',
+    AgendadoPorNome: r.agendado_por_nome || r.proprietario_nome || r.responsavel || '',
+    AgendadoPorEmail: r.agendado_por_email || r.criado_por_email || '',
+    UltimaAlteracaoPorNome: r.ultima_alteracao_por_nome || '',
+    UltimaAlteracaoEm: r.ultima_alteracao_em || r.atualizado_em || ''
   };
 }
 
@@ -731,8 +735,7 @@ function aplicarPermissoesTela() {
   if (['admin', 'atendimento central', 'gerente de loja'].indexOf(roleName()) > -1) byId('btnLeadTime').classList.remove('hidden');
   if (p.isAdmin || roleName() === 'gerente de loja') byId('btnHistorico').classList.remove('hidden');
   if (p.isAdmin) byId('btnSyncSistema').classList.remove('hidden');
-  if (['consultor de vendas', 'vendedor', 'outros', 'optometrista'].indexOf(roleName()) > -1) byId('filtroMeus').checked = true;
-  if (roleName() === 'gerente de loja') byId('filtroMeus').checked = false;
+  if (roleName() === 'optometrista') byId('filtroMeus').checked = true;
 }
 
 function carregarInfoBase() {
@@ -1157,7 +1160,7 @@ function limparFiltros() {
     byId(id).value = '';
   });
   byId('filtroMinhasOSAtivas').checked = false;
-  byId('filtroMeus').checked = ['consultor de vendas', 'vendedor', 'outros', 'optometrista'].indexOf(roleName()) > -1;
+  byId('filtroMeus').checked = roleName() === 'optometrista';
   if (state.user && state.user.loja && state.user.loja !== 'Todas') byId('filtroLoja').value = state.user.loja;
   else byId('filtroLoja').value = '';
   applyDefaultDateWindow90Dias(true);
@@ -1562,16 +1565,20 @@ function renderAgenda(rowsParam) {
   var rows = Array.isArray(rowsParam) ? rowsParam : (state.agendamentos || []);
   var body = byId('agendaBody');
   if (!rows.length) {
-    body.innerHTML = '<tr><td colspan="17">Nenhum serviço encontrado.</td></tr>';
+    body.innerHTML = '<tr><td colspan="18">Nenhum serviço encontrado.</td></tr>';
     return;
   }
 
   body.innerHTML = rows.map(function(r) {
+    var agendadoPor = r.AgendadoPorNome || r.ProprietarioNome || '';
+    var ultimaAlt = r.UltimaAlteracaoPorNome || '';
+    var ultimaAltData = r.UltimaAlteracaoEm ? ('<br><span style="font-size:11px;color:var(--color-text-secondary)">' + escapeHtml(formatDateBR(r.UltimaAlteracaoEm)) + '</span>') : '';
     return '<tr class="' + rowClassAtendimento(r) + '">' +
       '<td>' + escapeHtml(r.ID) + '</td>' +
       '<td>' + escapeHtml(formatDateBR(r.DataCadastroBR || r.DataCadastro || '')) + '</td>' +
       '<td>' + escapeHtml(r.NomeCompleto) + '</td>' +
-      '<td>' + escapeHtml(r.ProprietarioNome || '') + '</td>' +
+      '<td>' + escapeHtml(agendadoPor) + '</td>' +
+      '<td>' + escapeHtml(ultimaAlt) + ultimaAltData + '</td>' +
       '<td>' + escapeHtml(formatDateBR(r.DataAgendamentoBR || r.DataAgendamento || '')) + '<br>' + escapeHtml(r.Horario || '') + '</td>' +
       '<td><span class="status ' + statusClassAgendamento(r) + '">' + escapeHtml(r.StatusAgenda) + '</span>' + (r.AtendimentoSemaforoLabel ? '<div style="margin-top:6px;"><span class="status ' + statusClassAtendimentoSemaforo(r) + '">' + escapeHtml(r.AtendimentoSemaforoLabel) + '</span></div>' : '') + '</td>' +
       '<td>' + escapeHtml(r.Compareceu || 'Pendente') + '</td>' +
@@ -1596,6 +1603,7 @@ function getActionHtml(r) {
   var ownStore = normalizeKey(r.Loja || '') === normalizeKey(state.user && state.user.loja || '');
   var central = ['admin', 'atendimento central'].indexOf(role) > -1;
   var gerente = role === 'gerente de loja' && ownStore;
+  var isOwner = typeof window.isOwnerDoRegistro === 'function' ? window.isOwnerDoRegistro(r) : true;
   var buttons = '';
   var options = '<option value="">Mais ações</option>';
 
@@ -1610,7 +1618,11 @@ function getActionHtml(r) {
     buttons += '<button class="secondary" onclick="marcarNaoCompareceu(\'' + id + '\')">Check-in Não</button>';
   }
 
-  if (['admin', 'atendimento central', 'consultor de vendas', 'vendedor', 'outros', 'gerente de loja'].indexOf(role) > -1) {
+  if (central || gerente) {
+    buttons += '<button class="secondary" onclick="abrirModalEdicao(\'' + id + '\')">Editar</button>';
+    options += '<option value="editar">Editar/Reagendar</option>';
+    options += '<option value="os">Registrar/Atualizar OS</option>';
+  } else if (['consultor de vendas', 'vendedor', 'outros'].indexOf(role) > -1 && isOwner) {
     buttons += '<button class="secondary" onclick="abrirModalEdicao(\'' + id + '\')">Editar</button>';
     options += '<option value="editar">Editar/Reagendar</option>';
     options += '<option value="os">Registrar/Atualizar OS</option>';
@@ -1727,6 +1739,7 @@ function executarDiagnostico() {
   window.mesmaLojaUsuario=function(lojaRegistro){ if(isGeral()) return true; var lu=lojaUser(); if(!lu||lu==='todas') return true; return lu===norm(lojaRegistro); };
   window.dentroUltimos30DiasOptometrista=function(row){ return role()==='optometrista' ? date30(row) : true; };
   window.aplicarRestricaoLojaUsuario=function(rows){ rows=Array.isArray(rows)?rows:[]; return rows.filter(function(r){ if(ehTeste(r)) return false; if(isLoja()&&!sameStore(r)) return false; if(role()==='optometrista'&&!date30(r)) return false; return true; }); };
+  window.isOwnerDoRegistro=function(r){ var u=user(); var n=String(u.nome||'').trim().toLowerCase(); var e=String(u.email||'').trim().toLowerCase(); r=r||{}; return String(r.AgendadoPorNome||r.agendado_por_nome||'').toLowerCase()===n||String(r.AgendadoPorEmail||r.agendado_por_email||r.CriadoPorEmail||'').toLowerCase()===e||String(r.ProprietarioNome||r.proprietario_nome||'').toLowerCase()===n||String(r.Responsavel||r.responsavel||'').toLowerCase()===n; };
 
   window.tgtPodeEditarOS=function(){ return ['admin','atendimento central','gerente de loja','comprador'].indexOf(role())>-1; };
   window.tgtPodeEditarValoresVenda=function(){ return ['admin','gerente de loja','comprador'].indexOf(role())>-1; };
