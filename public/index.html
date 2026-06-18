@@ -827,7 +827,7 @@ function carregarInfoBase() {
 
 function carregarSistemaTurbo() {
   state.agendamentos = [];
-  byId('agendaBody').innerHTML = '<tr><td colspan="17"><div class="loading-box">Carregando sistema com PostgreSQL...</div></td></tr>';
+  byId('agendaBody').innerHTML = '<tr><td colspan="18"><div class="loading-box">Carregando sistema com PostgreSQL...</div></td></tr>';
 
   return gas('getInfoInicial', (state.user && state.user.email) || '')
     .then(function(res) {
@@ -867,7 +867,7 @@ function atualizarStatusSistema(res) {
 
 function carregarAgendaEDashboard() {
   state.agendamentos = [];
-  byId('agendaBody').innerHTML = '<tr><td colspan="17"><div class="loading-box">Carregando agendamentos do PostgreSQL...</div></td></tr>';
+  byId('agendaBody').innerHTML = '<tr><td colspan="18"><div class="loading-box">Carregando agendamentos do PostgreSQL...</div></td></tr>';
 
   return Promise.all([
     getAgendamentosPostgres(),
@@ -878,7 +878,7 @@ function carregarAgendaEDashboard() {
     renderAgenda(state.agendamentos);
     preencherDashboard();
   }).catch(function(err) {
-    byId('agendaBody').innerHTML = '<tr><td colspan="17">Erro ao carregar agendamentos.</td></tr>';
+    byId('agendaBody').innerHTML = '<tr><td colspan="18">Erro ao carregar agendamentos.</td></tr>';
     setMsg('msgForm', 'Erro ao carregar agenda: ' + (err.message || err), 'err');
   });
 }
@@ -886,7 +886,7 @@ function carregarAgendaEDashboard() {
 function recarregarComFiltros() {
   if (window._reloadingFiltros) return window._reloadingFiltros;
 
-  byId('agendaBody').innerHTML = '<tr><td colspan="17"><div class="loading-box">Atualizando dados...</div></td></tr>';
+  byId('agendaBody').innerHTML = '<tr><td colspan="18"><div class="loading-box">Atualizando dados...</div></td></tr>';
 
   window._reloadingFiltros = Promise.all([
     getAgendamentosPostgres(),
@@ -898,7 +898,7 @@ function recarregarComFiltros() {
     preencherDashboard();
     if (canFinance()) return carregarFaturamento();
   }).catch(function(err) {
-    byId('agendaBody').innerHTML = '<tr><td colspan="17">Erro ao carregar agendamentos.</td></tr>';
+    byId('agendaBody').innerHTML = '<tr><td colspan="18">Erro ao carregar agendamentos.</td></tr>';
     setMsg('msgForm', 'Erro ao aplicar filtros: ' + (err.message || err), 'err');
     throw err;
   }).finally(function() {
@@ -909,20 +909,16 @@ function recarregarComFiltros() {
 }
 
 function agendarAtualizacaoAposAcao(delayMs) {
-  delayMs = Number(delayMs || 1000);
+  delayMs = Number(delayMs || 1500);
   clearTimeout(window._refreshAfterActionTimer);
 
   window._refreshAfterActionTimer = setTimeout(function() {
     if (!state.user) return;
     if (byId('editModal') && !byId('editModal').classList.contains('hidden')) return;
 
-    window._pauseAutoRefresh = true;
     recarregarComFiltros()
       .catch(function(err) {
         console.warn('Atualização após ação falhou:', err.message || err);
-      })
-      .finally(function() {
-        setTimeout(function() { window._pauseAutoRefresh = false; }, 300);
       });
   }, delayMs);
 }
@@ -1380,7 +1376,7 @@ function salvarEdicaoLinha() {
       setMsg('msgForm', 'Registro atualizado no PostgreSQL.', 'ok');
       toast('Registro atualizado no PostgreSQL.', 'ok');
       fecharModalEdicao();
-      agendarAtualizacaoAposAcao(1000);
+      agendarAtualizacaoAposAcao(1500);
     })
     .catch(function(err) {
       setMsg('msgEdit', err.message || String(err), 'err');
@@ -1405,7 +1401,7 @@ function marcarComprou(id) {
     .then(function() {
       setMsg('msgForm', 'Compra marcada no PostgreSQL.', 'ok');
       toast('Compra marcada no PostgreSQL.', 'ok');
-      agendarAtualizacaoAposAcao(1000);
+      agendarAtualizacaoAposAcao(1500);
     })
     .catch(function(err) {
       setMsg('msgForm', err.message || String(err), 'err');
@@ -1424,7 +1420,7 @@ function marcarNaoComprou(id) {
     .then(function() {
       setMsg('msgForm', 'Atendimento sem compra marcado no PostgreSQL.', 'ok');
       toast('Atendimento sem compra marcado no PostgreSQL.', 'ok');
-      agendarAtualizacaoAposAcao(1000);
+      agendarAtualizacaoAposAcao(1500);
     })
     .catch(function(err) {
       setMsg('msgForm', err.message || String(err), 'err');
@@ -1457,13 +1453,12 @@ function runAction(fn, id) {
   }
 
   showLoading(true);
-  window._pauseAutoRefresh = true;
 
   return apiPatch('/api/agendamentos/' + encodeURIComponent(id), patch)
     .then(function() {
       setMsg('msgForm', 'Ação salva no PostgreSQL.', 'ok');
       toast('Ação salva no PostgreSQL.', 'ok');
-      agendarAtualizacaoAposAcao(1000);
+      agendarAtualizacaoAposAcao(1500);
       return true;
     })
     .catch(function(err) {
@@ -1473,7 +1468,6 @@ function runAction(fn, id) {
     })
     .finally(function() {
       showLoading(false);
-      setTimeout(function() { window._pauseAutoRefresh = false; }, 1200);
     });
 }
 
@@ -1498,7 +1492,7 @@ function abrirPromptOS(id, row) {
       if (!res || !res.ok) throw new Error((res && res.message) || 'Falha ao salvar OS no PostgreSQL.');
       setMsg('msgForm', 'OS atualizada no PostgreSQL.', 'ok');
       toast('OS atualizada no PostgreSQL.', 'ok');
-      agendarAtualizacaoAposAcao(1000);
+      agendarAtualizacaoAposAcao(1500);
     })
     .catch(function(err) {
       setMsg('msgForm', err.message || String(err), 'err');
@@ -1511,8 +1505,6 @@ function abrirPromptOS(id, row) {
 function executarAcaoAgenda(id, acao, selectEl) {
   if (!acao) return;
 
-  window._pauseAutoRefresh = true;
-
   var row = (state.agendamentos || []).find(function(r) { return String(r.ID) === String(id); });
   var result;
 
@@ -1524,8 +1516,6 @@ function executarAcaoAgenda(id, acao, selectEl) {
 
   Promise.resolve(result).finally(function() {
     if (selectEl) setTimeout(function(){ selectEl.value = ''; }, 150);
-    if (acao === 'editar') return;
-    setTimeout(function() { window._pauseAutoRefresh = false; }, 1200);
   });
 }
 
@@ -1628,7 +1618,7 @@ function getActionHtml(r) {
     options += '<option value="os">Registrar/Atualizar OS</option>';
   }
 
-  return '<div class="actions">' + buttons + '<select onfocus="window._pauseAutoRefresh=true" onblur="setTimeout(function(){window._pauseAutoRefresh=false},800)" onchange="executarAcaoAgenda(\'' + id + '\', this.value, this);">' + options + '</select></div>';
+  return '<div class="actions">' + buttons + '<select onchange="executarAcaoAgenda(\'' + id + '\', this.value, this);">' + options + '</select></div>';
 }
 
 function gerarRelatorioCSV() {
