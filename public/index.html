@@ -1853,7 +1853,7 @@ function sincronizarSistema() {
 function carregarUsuarios() {
   byId('cardUsuarios').classList.remove('hidden');
   byId('usuariosBody').innerHTML = '<tr><td colspan="7"><div class="loading-box">Carregando usuários...</div></td></tr>';
-  apiGet('/api/usuarios?todos=true')
+  apiGet('/api/usuarios')
     .then(function(res) {
       var rows = Array.isArray(res.usuarios) ? res.usuarios : [];
       if (!rows.length) {
@@ -1861,20 +1861,19 @@ function carregarUsuarios() {
         return;
       }
       byId('usuariosBody').innerHTML = rows.map(function(u) {
-        var ativo = u.ativo ? '<span class="status green">Ativo</span>' : '<span class="status red">Inativo</span>';
         var fin = u.can_view_finance ? '<span class="status green">Sim</span>' : '<span class="status gray">Não</span>';
+        var nomeEsc = escapeHtml(u.nome||'').replace(/'/g, "\\'");
         return '<tr>' +
           '<td><strong>' + escapeHtml(u.nome||'') + '</strong></td>' +
           '<td>' + escapeHtml(u.email||'') + '</td>' +
           '<td><span class="pill">' + escapeHtml(u.cargo||'') + '</span></td>' +
           '<td>' + escapeHtml(u.loja||'Todas') + '</td>' +
           '<td>' + fin + '</td>' +
-          '<td>' + ativo + '</td>' +
+          '<td><span class="status green">Ativo</span></td>' +
           '<td style="display:flex;gap:6px">' +
           '<button class="secondary icon-btn" onclick="abrirModalEditarUsuario(' + u.id + ')">Editar</button>' +
-          (u.ativo
-            ? '<button class="danger icon-btn" onclick="toggleUsuario(' + u.id + ', false)">Desativar</button>'
-            : '<button class="success icon-btn" onclick="toggleUsuario(' + u.id + ', true)">Ativar</button>') +
+          '<button class="danger icon-btn" onclick="toggleUsuario(' + u.id + ', false)">Desativar</button>' +
+          '<button class="danger icon-btn" style="background:#7f1d1d" onclick="deletarUsuario(' + u.id + ',\'' + nomeEsc + '\')">Excluir</button>' +
           '</td></tr>';
       }).join('');
     })
@@ -1992,6 +1991,20 @@ function toggleUsuario(id, ativo) {
   })
   .catch(function(err){ toast(err.message||String(err), 'err'); })
   .finally(function(){ showLoading(false); });
+}
+
+function deletarUsuario(id, nome) {
+  if (!confirm('Excluir permanentemente o usuário "' + nome + '"?\n\nEsta ação não pode ser desfeita.')) return;
+  showLoading(true);
+  fetch('/api/usuarios/' + id, { method: 'DELETE' })
+    .then(function(r){ return r.json(); })
+    .then(function(res) {
+      if (!res || !res.ok) throw new Error(res.message || 'Falha ao excluir usuário.');
+      toast('Usuário excluído.', 'ok');
+      carregarUsuarios();
+    })
+    .catch(function(err){ toast(err.message||String(err), 'err'); })
+    .finally(function(){ showLoading(false); });
 }
 
 function executarDiagnostico() {

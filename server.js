@@ -2287,6 +2287,21 @@ app.patch("/api/usuarios/:id", requireAdmin, async (req, res) => {
   }
 });
 
+app.delete("/api/usuarios/:id", requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const check = await pool.query('SELECT id, email FROM usuarios WHERE id = $1', [id]);
+    if (!check.rows.length) return res.status(404).json({ ok: false, message: "Usuário não encontrado." });
+    if (check.rows[0].email === (req.session && req.session.email)) {
+      return res.status(400).json({ ok: false, message: "Você não pode excluir sua própria conta." });
+    }
+    await pool.query('DELETE FROM usuarios WHERE id = $1', [id]);
+    res.json({ ok: true, message: "Usuário excluído com sucesso." });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: "Erro ao excluir usuário.", error: error.message });
+  }
+});
+
 app.get("/api/access-tags", async (req, res) => {
   try {
     const baseTags = [
