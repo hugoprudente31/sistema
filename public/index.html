@@ -1884,311 +1884,337 @@ function executarDiagnostico() {
 }
 </script>
 
-<!-- TGT_REGRAS_FINAIS_CARGOS_OS_FINANCEIRO_INICIO -->
-<script>
-(function(){
-  console.log('[TGT] Regras finais: cargos, loja, OS, auditoria e financeiro carregadas.');
 
-  function role(){ try{ if(typeof roleName==='function') return String(roleName()||'').trim().toLowerCase(); }catch(e){} var u=window.state&&window.state.user?window.state.user:{}; return String(u.perfil||u.cargo||'').trim().toLowerCase(); }
-  function user(){ return window.state&&window.state.user?window.state.user:{}; }
-  function norm(v){ return String(v||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
-  function nomeUser(){ var u=user(); return String(u.nome||u.Nome||u.name||'').trim(); }
-  function emailUser(){ var u=user(); return String(u.email||u.Email||'').trim(); }
-  function lojaUser(){ var u=user(); return norm(u.loja||u.Loja||''); }
-  function lojaRow(r){ r=r||{}; return norm(r.Loja||r.loja||r.nome_loja||r.loja_nome||''); }
-  function isGeral(){ return ['admin','atendimento central'].indexOf(role())>-1; }
-  function isLoja(){ return ['gerente de loja','consultor de vendas','comprador','optometrista'].indexOf(role())>-1; }
-  function sameStore(r){ if(isGeral()) return true; var lu=lojaUser(); if(!lu||lu==='todas') return true; return lu===lojaRow(r); }
-  function date30(row){ row=row||{}; var raw=row.DataAgendamento||row.dataAgendamento||row.data_agendamento||row.DataCadastro||row.dataCadastro||row.criado_em||row.created_at||''; if(!raw) return false; var d=new Date(String(raw).slice(0,10)+'T12:00:00'); if(isNaN(d.getTime())) return false; var hoje=new Date(); hoje.setHours(23,59,59,999); var lim=new Date(); lim.setDate(lim.getDate()-30); lim.setHours(0,0,0,0); return d>=lim&&d<=hoje; }
-  function clienteNome(r){ r=r||{}; return String(r.NomeCompleto||r.nomeCompleto||r.nome||r.cliente||r.cliente_nome||'').trim(); }
-  function vendedorNome(r){ r=r||{}; return String(r.VendedorAtendeuNome||r.vendedor_atendeu_nome||r.VendedorNome||r.vendedor_nome||r.ConsultorResponsavel||r.consultor_responsavel||'').trim(); }
-  function propNome(r){ r=r||{}; return String(r.AgendadoPorNome||r.agendado_por_nome||r.ProprietarioNome||r.proprietario_nome||r.Responsavel||r.responsavel||'').trim(); }
-  function ehTeste(r){ var t=[clienteNome(r),vendedorNome(r),propNome(r),(r&&r.Loja)||(r&&r.loja)||''].join(' ').toLowerCase(); return t.indexOf('teste')>-1; }
-  function valor(r){ r=r||{}; return Number(String(r.ValorVenda||r.valor_venda||r.valorVenda||0).replace(',','.'))||0; }
-  function desc(r){ r=r||{}; return Number(String(r.Desconto||r.desconto||0).replace(',','.'))||0; }
-  function money(v){ return (Number(v)||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}); }
-
-  window.usuarioRestritoPorLoja=function(){ return isLoja(); };
-  window.mesmaLojaUsuario=function(lojaRegistro){ if(isGeral()) return true; var lu=lojaUser(); if(!lu||lu==='todas') return true; return lu===norm(lojaRegistro); };
-  window.dentroUltimos30DiasOptometrista=function(row){ return role()==='optometrista' ? date30(row) : true; };
-  window.aplicarRestricaoLojaUsuario=function(rows){ rows=Array.isArray(rows)?rows:[]; return rows.filter(function(r){ if(ehTeste(r)) return false; if(isLoja()&&!sameStore(r)) return false; if(role()==='optometrista'&&!date30(r)) return false; return true; }); };
-  window.isOwnerDoRegistro=function(r){ var u=user(); var n=String(u.nome||'').trim().toLowerCase(); var e=String(u.email||'').trim().toLowerCase(); r=r||{}; return String(r.AgendadoPorNome||r.agendado_por_nome||'').toLowerCase()===n||String(r.AgendadoPorEmail||r.agendado_por_email||r.CriadoPorEmail||'').toLowerCase()===e||String(r.ProprietarioNome||r.proprietario_nome||'').toLowerCase()===n||String(r.Responsavel||r.responsavel||'').toLowerCase()===n; };
-
-  window.tgtPodeEditarOS=function(){ return ['admin','atendimento central','gerente de loja','comprador'].indexOf(role())>-1; };
-  window.tgtPodeEditarValoresVenda=function(){ return ['admin','gerente de loja','comprador'].indexOf(role())>-1; };
-  window.tgtPodeConfirmarPresenca=function(){ return ['admin','atendimento central','gerente de loja','consultor de vendas','optometrista','comprador'].indexOf(role())>-1; };
-  window.tgtPodeVerFinanceiro=function(){ var r=role(), u=user(), p=u.permissions||{}; if(r==='admin'||r==='gerente de loja') return true; if(r==='atendimento central') return p.canViewFinance===true || String(u.CanViewFinance||u.canViewFinance||'').toLowerCase()==='sim'; return false; };
-
-  function validarPayload(payload){ payload=payload||{}; var n=String(payload.nome||payload.nomeCompleto||payload.NomeCompleto||payload.cliente||'').trim(); if(n.toLowerCase().indexOf('teste')>-1) throw new Error('Não é permitido cadastrar cliente com nome TESTE.'); var nu=nomeUser(), eu=emailUser(); if(!nu) throw new Error('Nome do usuário logado é obrigatório para registrar ou atualizar.'); payload.agendado_por_nome=payload.agendado_por_nome||payload.agendadoPorNome||payload.Responsavel||payload.responsavel||nu; payload.agendado_por_email=payload.agendado_por_email||payload.agendadoPorEmail||eu; payload.responsavel=payload.responsavel||payload.Responsavel||nu; payload.Responsavel=payload.Responsavel||payload.responsavel||nu; payload.proprietario_nome=payload.proprietario_nome||payload.ProprietarioNome||nu; payload.ProprietarioNome=payload.ProprietarioNome||payload.proprietario_nome||nu; payload.criado_por_nome=payload.criado_por_nome||nu; payload.criado_por_email=payload.criado_por_email||eu; payload.ultima_alteracao_por_nome=nu; payload.ultima_alteracao_por_email=eu; payload.ultima_alteracao_em=new Date().toISOString(); return payload; }
-
-  function install(){
-    if(typeof window.apiPost==='function'&&!window.__tgtPostRegrasFinais){ window.__tgtPostRegrasFinais=window.apiPost; window.apiPost=function(path,payload){ try{ if(String(path||'').indexOf('/api/agendamentos')>-1) payload=validarPayload(payload||{}); }catch(e){ alert(e.message||String(e)); return Promise.reject(e); } return window.__tgtPostRegrasFinais(path,payload); }; }
-    if(typeof window.apiPatch==='function'&&!window.__tgtPatchRegrasFinais){ window.__tgtPatchRegrasFinais=window.apiPatch; window.apiPatch=function(path,payload){ try{ payload=validarPayload(payload||{}); var r=role(); var clone=Object.assign({},payload); var vals=['ValorVenda','valorVenda','valor_venda','Desconto','desconto','VendaGerada','vendaGerada','venda_gerada','MotivoPerda','motivoPerda','motivo_perda']; if(r==='optometrista'){ var permitido={}; ['Compareceu','compareceu','StatusAgenda','statusAgenda','status_agenda','AtendimentoRealizado','atendimentoRealizado','atendimento_realizado','Observacao','observacao','ultima_alteracao_por_nome','ultima_alteracao_por_email','ultima_alteracao_em'].forEach(function(k){ if(Object.prototype.hasOwnProperty.call(clone,k)) permitido[k]=clone[k]; }); clone=permitido; } payload=clone; }catch(e){ alert(e.message||String(e)); return Promise.reject(e); } return window.__tgtPatchRegrasFinais(path,payload); }; }
-    if(typeof window.apiGet==='function'&&typeof window.mapAgendamentoDb==='function'){ window.getAgendamentosPostgres=function(){ return apiGet('/api/agendamentos?limit=10000&all=true').then(function(res){ var rows=Array.isArray(res.agendamentos)?res.agendamentos:[]; return window.aplicarRestricaoLojaUsuario(rows.map(mapAgendamentoDb)); }); }; window.getDashboardPostgres=function(){ if(!window.tgtPodeVerFinanceiro()) return Promise.resolve({}); return apiGet('/api/agendamentos?limit=10000&all=true').then(function(res){ var rows=Array.isArray(res.agendamentos)?res.agendamentos:[]; var mapped=window.aplicarRestricaoLojaUsuario(rows.map(mapAgendamentoDb)).filter(function(r){return valor(r)>0;}); var d={total_agendamentos:mapped.length,total_compareceram:0,total_nao_compareceram:0,total_concluidos:0,os_ativas:0,os_atrasadas:0,faturamento_total:0,desconto_total:0,loja_filtrada:user().loja||'Todas',fonte:'frontend_filtrado_por_loja_sem_teste'}; mapped.forEach(function(r){ var st=String(r.StatusAgenda||r.status||'').toLowerCase(), comp=String(r.Compareceu||r.compareceu||'').toLowerCase(); if(comp==='sim'||st.indexOf('compareceu')>-1||st.indexOf('conclu')>-1)d.total_compareceram++; if(comp==='não'||comp==='nao'||st.indexOf('não compareceu')>-1||st.indexOf('nao compareceu')>-1)d.total_nao_compareceram++; if(st.indexOf('conclu')>-1)d.total_concluidos++; d.faturamento_total+=valor(r); d.desconto_total+=desc(r); }); return d; }); }; }
-  }
-
-  function campos(){ var n=nomeUser(); ['responsavel','Responsavel','agendadoPorNome','novoAgendadoPorNome','editAgendadoPorNome'].forEach(function(id){ var el=document.getElementById(id); if(el){ if(!el.value) el.value=n; el.required=true; el.readOnly=true; }}); ['nome','nomeCompleto','NomeCompleto'].forEach(function(id){ var el=document.getElementById(id); if(el&&!el.__tgtTeste){ el.__tgtTeste=true; el.required=true; el.addEventListener('input',function(){ el.setCustomValidity(String(el.value||'').toLowerCase().indexOf('teste')>-1?'Não é permitido cadastrar nome TESTE.':''); }); }}); var fMeus=document.getElementById('fMeus'); if(fMeus&&['gerente de loja','consultor de vendas','comprador','optometrista'].indexOf(role())>-1) fMeus.checked=false; var fLoja=document.getElementById('fLoja'); var u=user(); if(fLoja&&isLoja()&&u.loja&&u.loja!=='Todas'){ fLoja.value=u.loja; fLoja.disabled=true; } }
-
-  function carregarFinanceiroReal(){ if(!window.tgtPodeVerFinanceiro()){ alert('Seu perfil não tem acesso ao módulo financeiro.'); return Promise.resolve(); } return apiGet('/api/agendamentos?limit=10000&all=true').then(function(res){ var rows=Array.isArray(res.agendamentos)?res.agendamentos:[]; var mapped=window.aplicarRestricaoLojaUsuario(rows.map(mapAgendamentoDb)).filter(function(r){return valor(r)>0;}); var total=mapped.reduce(function(a,r){return a+valor(r);},0), desconto=mapped.reduce(function(a,r){return a+desc(r);},0); console.log('[TGT] Financeiro real:',{total:total,desconto:desconto,registros:mapped.length},mapped); return {total:total,desconto:desconto,registros:mapped}; }); }
-  window.carregarFinanceiroRealTGT=carregarFinanceiroReal;
-  document.addEventListener('click',function(e){ var btn=e.target&&e.target.closest?e.target.closest('button,a'):null; if(!btn)return; var txt=String(btn.textContent||'').trim().toLowerCase(); if(txt.indexOf('carregar financeiro')>-1){ e.preventDefault(); e.stopPropagation(); if(e.stopImmediatePropagation)e.stopImmediatePropagation(); carregarFinanceiroReal(); return false; }},true);
-
-  setInterval(install,700); setInterval(campos,1000); document.addEventListener('DOMContentLoaded',function(){setTimeout(install,300);setTimeout(campos,500);setTimeout(install,1500);setTimeout(campos,2000);});
-})();
-</script>
-<!-- TGT_REGRAS_FINAIS_CARGOS_OS_FINANCEIRO_FIM -->
-
-  ==================== COMPRADOR_AGENDAMENTO ====================
-
-<!-- TGT_COMPRADOR_AGENDAMENTO_INICIO -->
+<!-- TGT_SISTEMA_REGRAS_DEFINITIVAS_INICIO -->
 <script>
 (function() {
-  console.log('[TGT] Correção Comprador: liberar Novo Agendamento.');
+  'use strict';
+  console.log('[TGT] Regras definitivas v2.0 carregadas.');
 
-  function tgtRole() {
-    try {
-      if (typeof roleName === 'function') {
-        return String(roleName() || '').trim().toLowerCase();
-      }
-    } catch(e) {}
-
+  // ── HELPERS BÁSICOS ──────────────────────────────────────────
+  function role() {
+    try { if (typeof roleName === 'function') return String(roleName() || '').trim().toLowerCase(); } catch(e) {}
     var u = window.state && window.state.user ? window.state.user : {};
     return String(u.perfil || u.cargo || '').trim().toLowerCase();
   }
 
-  function tgtIsComprador() {
-    return tgtRole() === 'comprador';
+  function user() { return window.state && window.state.user ? window.state.user : {}; }
+
+  function norm(v) {
+    return String(v || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   }
 
-  function tgtUser() {
-    return window.state && window.state.user ? window.state.user : {};
+  function lojaUser() { var u = user(); return norm(u.loja || u.Loja || ''); }
+  function lojaRow(r) { r = r || {}; return norm(r.Loja || r.loja || r.nome_loja || ''); }
+  function nomeUser() { var u = user(); return String(u.nome || u.Nome || '').trim().toLowerCase(); }
+  function emailUser() { var u = user(); return String(u.email || u.Email || '').trim().toLowerCase(); }
+
+  // ── REGRAS DE PERFIL ─────────────────────────────────────────
+  function isAdmin()    { return role() === 'admin'; }
+  function isCentral()  { return role() === 'atendimento central'; }
+  function isGerente()  { return role() === 'gerente de loja'; }
+  function isConsultor(){ return role() === 'consultor de vendas'; }
+  function isComprador(){ return role() === 'comprador'; }
+  function isOpto()     { return role() === 'optometrista'; }
+  function isGeralVision(){ return isAdmin() || isCentral(); }
+  function isLojaProfile(){ return isGerente() || isConsultor() || isComprador() || isOpto(); }
+
+  // ── REGRAS DE LOJA ───────────────────────────────────────────
+  function sameStore(r) {
+    if (isGeralVision()) return true;
+    var lu = lojaUser();
+    if (!lu || lu === 'todas') return true;
+    return lu === lojaRow(r);
   }
 
-  function tgtNormalize(v) {
-    return String(v || '')
-      .trim()
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '');
+  // ── REGRA 30 DIAS OPTOMETRISTA ───────────────────────────────
+  function date30(row) {
+    row = row || {};
+    var raw = row.DataAgendamento || row.dataAgendamento || row.data_agendamento || row.DataCadastro || row.criado_em || '';
+    if (!raw) return false;
+    var d = new Date(String(raw).slice(0,10) + 'T12:00:00');
+    if (isNaN(d.getTime())) return false;
+    var hoje = new Date(); hoje.setHours(23,59,59,999);
+    var lim = new Date(); lim.setDate(lim.getDate() - 30); lim.setHours(0,0,0,0);
+    return d >= lim && d <= hoje;
   }
 
-  function tgtAplicarPermissoesComprador() {
-    if (!tgtIsComprador()) return;
-
-    if (window.state && window.state.user) {
-      window.state.user.permissions = window.state.user.permissions || {};
-
-      window.state.user.permissions.canCreateAgendamento = true;
-      window.state.user.permissions.canEditAgendamento = true;
-      window.state.user.permissions.canCancelOwn = true;
-      window.state.user.permissions.canDeleteOwn = true;
-      window.state.user.permissions.canManageOS = true;
-      window.state.user.permissions.canViewFinance = false;
-      window.state.user.permissions.canExportFinance = false;
-    }
-
-    window.canCreateAgendamento = true;
-    window.canEditAgendamento = true;
-    window.canManageOS = true;
-  }
-
-  function tgtEncontrarBlocoPorTitulo(titulo) {
-    var elementos = Array.from(document.querySelectorAll('section, div, form, article'));
-
-    return elementos.find(function(el) {
-      var txt = String(el.textContent || '').trim().toLowerCase();
-      return txt.indexOf(titulo.toLowerCase()) > -1;
+  // ── FILTRO PRINCIPAL DE REGISTROS ────────────────────────────
+  // Regra: usuário de loja vê TODOS da própria loja, independente de quem marcou
+  window.aplicarRestricaoLojaUsuario = function(rows) {
+    rows = Array.isArray(rows) ? rows : [];
+    return rows.filter(function(r) {
+      // Bloquear registros de teste
+      var nomes = [r.NomeCompleto||r.nome||'', r.Loja||r.loja||''].join(' ').toLowerCase();
+      if (nomes.indexOf('teste') > -1) return false;
+      // Filtro por loja para perfis de loja
+      if (isLojaProfile() && !sameStore(r)) return false;
+      // Optometrista só vê 30 dias
+      if (isOpto() && !date30(r)) return false;
+      return true;
     });
+  };
+
+  // ── DONO DO REGISTRO (para controle de edição) ───────────────
+  window.isOwnerDoRegistro = function(r) {
+    var n = nomeUser();
+    var e = emailUser();
+    r = r || {};
+    return String(r.AgendadoPorNome||r.agendado_por_nome||'').toLowerCase() === n ||
+      String(r.AgendadoPorEmail||r.agendado_por_email||'').toLowerCase() === e ||
+      String(r.ProprietarioNome||r.proprietario_nome||'').toLowerCase() === n ||
+      String(r.Responsavel||r.responsavel||'').toLowerCase() === n ||
+      String(r.CriadoPorEmail||r.criado_por_email||'').toLowerCase() === e;
+  };
+
+  // ── PERMISSÕES POR PERFIL ────────────────────────────────────
+  window.tgtPodeEditarOS = function() {
+    return ['admin','atendimento central','gerente de loja','comprador'].indexOf(role()) > -1;
+  };
+
+  window.tgtPodeEditarValoresVenda = function() {
+    return ['admin','gerente de loja','comprador'].indexOf(role()) > -1;
+  };
+
+  window.tgtPodeConfirmarPresenca = function() {
+    return ['admin','atendimento central','gerente de loja','consultor de vendas','optometrista','comprador'].indexOf(role()) > -1;
+  };
+
+  window.tgtPodeVerFinanceiro = function() {
+    var r = role(), u = user(), p = u.permissions || {};
+    if (r === 'admin' || r === 'gerente de loja') return true;
+    if (r === 'atendimento central') return p.canViewFinance === true || String(u.CanViewFinance || u.canViewFinance || '').toLowerCase() === 'sim';
+    return false;
+  };
+
+  window.tgtPodeCriarAgendamento = function() {
+    return ['admin','atendimento central','gerente de loja','consultor de vendas','comprador'].indexOf(role()) > -1;
+  };
+
+  window.tgtPodeVerOS = function() {
+    return ['admin','atendimento central','gerente de loja','comprador'].indexOf(role()) > -1;
+  };
+
+  // ── VALIDAÇÃO DE PAYLOAD ─────────────────────────────────────
+  function validarPayload(payload) {
+    payload = payload || {};
+    var n = String(payload.nome || payload.nomeCompleto || payload.NomeCompleto || payload.cliente || '').trim();
+    if (n.toLowerCase().indexOf('teste') > -1) throw new Error('Não é permitido cadastrar cliente com nome TESTE.');
+    var nu = nomeUser(), eu = emailUser();
+    if (!nu) throw new Error('Nome do usuário logado é obrigatório para registrar ou atualizar.');
+    payload.agendado_por_nome = payload.agendado_por_nome || payload.agendadoPorNome || payload.Responsavel || payload.responsavel || nu;
+    payload.agendado_por_email = payload.agendado_por_email || payload.agendadoPorEmail || eu;
+    payload.responsavel = payload.responsavel || payload.Responsavel || nu;
+    payload.Responsavel = payload.Responsavel || payload.responsavel || nu;
+    payload.proprietario_nome = payload.proprietario_nome || payload.ProprietarioNome || nu;
+    payload.ProprietarioNome = payload.ProprietarioNome || payload.proprietario_nome || nu;
+    payload.criado_por_nome = payload.criado_por_nome || nu;
+    payload.criado_por_email = payload.criado_por_email || eu;
+    payload.ultima_alteracao_por_nome = nu;
+    payload.ultima_alteracao_por_email = eu;
+    payload.ultima_alteracao_em = new Date().toISOString();
+    return payload;
   }
 
-  function tgtMostrarNovoAgendamentoComprador() {
-    if (!tgtIsComprador()) return;
-
-    tgtAplicarPermissoesComprador();
-
-    var blocoNovo = tgtEncontrarBlocoPorTitulo('Novo Agendamento');
-
-    if (blocoNovo) {
-      blocoNovo.style.display = '';
-      blocoNovo.style.visibility = 'visible';
-      blocoNovo.hidden = false;
-      blocoNovo.removeAttribute('hidden');
-      blocoNovo.classList.remove('hidden');
-      blocoNovo.classList.remove('d-none');
+  // ── INTERCEPTORES DE API ─────────────────────────────────────
+  function install() {
+    // Interceptor POST
+    if (typeof window.apiPost === 'function' && !window.__tgtPostDefinitivo) {
+      window.__tgtPostDefinitivo = window.apiPost;
+      window.apiPost = function(path, payload) {
+        try {
+          if (String(path || '').indexOf('/api/agendamentos') > -1) payload = validarPayload(payload || {});
+        } catch(e) { alert(e.message || String(e)); return Promise.reject(e); }
+        return window.__tgtPostDefinitivo(path, payload);
+      };
     }
 
-    // Libera campos e botão de salvar agendamento
-    Array.from(document.querySelectorAll('input, select, textarea, button')).forEach(function(el) {
-      var txt = String(el.textContent || '').trim().toLowerCase();
-      var id = String(el.id || '').toLowerCase();
-      var name = String(el.name || '').toLowerCase();
+    // Interceptor PATCH
+    if (typeof window.apiPatch === 'function' && !window.__tgtPatchDefinitivo) {
+      window.__tgtPatchDefinitivo = window.apiPatch;
+      window.apiPatch = function(path, payload) {
+        try {
+          payload = validarPayload(payload || {});
+          var r = role();
+          var clone = Object.assign({}, payload);
 
-      var dentroNovo = blocoNovo && blocoNovo.contains(el);
-
-      if (dentroNovo) {
-        el.disabled = false;
-
-        if (
-          id.indexOf('loja') > -1 ||
-          name.indexOf('loja') > -1
-        ) {
-          var lojaUser = tgtUser().loja || tgtUser().Loja || '';
-
-          if (lojaUser && lojaUser !== 'Todas') {
-            try {
-              el.value = lojaUser;
-              el.disabled = true;
-            } catch(e) {}
+          // Consultor não pode preencher OS, valor, desconto
+          if (r === 'consultor de vendas') {
+            var bloqueados = ['NumeroOS','numeroOS','numero_os','StatusOS','statusOS','status_os',
+              'DataAberturaOS','dataAberturaOS','data_abertura_os','DataEntradaOS','dataEntradaOS','data_entrada_os',
+              'DataFinalizacaoOS','dataFinalizacaoOS','data_finalizacao_os','DataEntregaOS','dataEntregaOS','data_entrega_os',
+              'ValorVenda','valorVenda','valor_venda','Desconto','desconto','VendedorNome','vendedorNome','vendedor_nome'];
+            bloqueados.forEach(function(k) { if (Object.prototype.hasOwnProperty.call(clone, k)) delete clone[k]; });
           }
-        }
-      }
 
-      if (
-        txt.indexOf('salvar agendamento') > -1 ||
-        txt.indexOf('novo agendamento') > -1
-      ) {
-        el.style.display = '';
-        el.style.visibility = 'visible';
-        el.hidden = false;
-        el.removeAttribute('hidden');
-        el.disabled = false;
-      }
-    });
+          // Optometrista só pode marcar presença e status
+          if (r === 'optometrista') {
+            var permitido = {};
+            ['Compareceu','compareceu','StatusAgenda','statusAgenda','status_agenda',
+              'AtendimentoRealizado','atendimentoRealizado','atendimento_realizado',
+              'Observacao','observacao','ultima_alteracao_por_nome','ultima_alteracao_por_email','ultima_alteracao_em'
+            ].forEach(function(k) {
+              if (Object.prototype.hasOwnProperty.call(clone, k)) permitido[k] = clone[k];
+            });
+            clone = permitido;
+          }
+          payload = clone;
+        } catch(e) { alert(e.message || String(e)); return Promise.reject(e); }
+        return window.__tgtPatchDefinitivo(path, payload);
+      };
+    }
 
-    // Garante aviso correto
-    var painelComprador = Array.from(document.querySelectorAll('div, span, p, small')).find(function(el) {
-      return String(el.textContent || '').indexOf('Painel do Comprador') > -1;
-    });
+    // Override getAgendamentosPostgres para aplicar filtro por loja
+    if (typeof window.apiGet === 'function' && typeof window.mapAgendamentoDb === 'function') {
+      window.getAgendamentosPostgres = function() {
+        return apiGet('/api/agendamentos?limit=10000&all=true').then(function(res) {
+          var rows = Array.isArray(res.agendamentos) ? res.agendamentos : [];
+          return window.aplicarRestricaoLojaUsuario(rows.map(mapAgendamentoDb));
+        });
+      };
 
-    if (!painelComprador) {
-      var header = document.querySelector('body');
-      if (header && !document.getElementById('tgtAvisoCompradorAgendamento')) {
-        var aviso = document.createElement('div');
-        aviso.id = 'tgtAvisoCompradorAgendamento';
-        aviso.style.margin = '10px 24px';
-        aviso.style.padding = '10px 14px';
-        aviso.style.border = '1px solid #ffd4c2';
-        aviso.style.borderRadius = '12px';
-        aviso.style.background = '#fff8f4';
-        aviso.style.color = '#fc5102';
-        aviso.style.fontWeight = '700';
-        aviso.textContent = 'Painel do Comprador: pode criar agendamentos, editar/reagendar, acompanhar OS e atualizar pedidos da própria loja.';
-        header.prepend(aviso);
-      }
+      window.getDashboardPostgres = function() {
+        if (!window.tgtPodeVerFinanceiro()) return Promise.resolve({});
+        return apiGet('/api/agendamentos?limit=10000&all=true').then(function(res) {
+          var rows = Array.isArray(res.agendamentos) ? res.agendamentos : [];
+          var mapped = window.aplicarRestricaoLojaUsuario(rows.map(mapAgendamentoDb)).filter(function(r) { return valor(r) > 0; });
+          return {
+            faturamento_total: mapped.reduce(function(a,r){ return a + valor(r); }, 0),
+            desconto_total: mapped.reduce(function(a,r){ return a + desc(r); }, 0),
+            total_agendamentos: mapped.length
+          };
+        });
+      };
     }
   }
 
-  // Se existir função original de permissões, preserva e complementa
-  if (typeof window.aplicarPermissoesTela === 'function' && !window.__tgtPermissoesTelaCompradorOriginal) {
-    window.__tgtPermissoesTelaCompradorOriginal = window.aplicarPermissoesTela;
+  function valor(r) { r = r || {}; return Number(String(r.ValorVenda||r.valor_venda||0).replace(',','.')) || 0; }
+  function desc(r) { r = r || {}; return Number(String(r.Desconto||r.desconto||0).replace(',','.')) || 0; }
 
-    window.aplicarPermissoesTela = function() {
-      try {
-        window.__tgtPermissoesTelaCompradorOriginal.apply(this, arguments);
-      } catch(e) {}
+  // ── PERMISSÕES NA TELA ───────────────────────────────────────
+  function aplicarPermissoesTela() {
+    var u = user();
+    if (!u || !u.perfil) return;
 
-      tgtMostrarNovoAgendamentoComprador();
-    };
-  }
-
-  // Se existir função original de carregamento, complementa depois
-  if (typeof window.carregarInicial === 'function' && !window.__tgtCarregarInicialCompradorOriginal) {
-    window.__tgtCarregarInicialCompradorOriginal = window.carregarInicial;
-
-    window.carregarInicial = function() {
-      var r = window.__tgtCarregarInicialCompradorOriginal.apply(this, arguments);
-
-      setTimeout(tgtMostrarNovoAgendamentoComprador, 300);
-      setTimeout(tgtMostrarNovoAgendamentoComprador, 1000);
-
-      return r;
-    };
-  }
-
-  setInterval(tgtMostrarNovoAgendamentoComprador, 1000);
-
-  document.addEventListener('DOMContentLoaded', function() {
-    setTimeout(tgtMostrarNovoAgendamentoComprador, 300);
-    setTimeout(tgtMostrarNovoAgendamentoComprador, 1000);
-    setTimeout(tgtMostrarNovoAgendamentoComprador, 2000);
-  });
-
-  console.log('[TGT] Comprador liberado para Novo Agendamento.');
-})();
-</script>
-<!-- TGT_COMPRADOR_AGENDAMENTO_FIM -->
-
-
-==================== FORCAR_NOVO_AGENDAMENTO_COMPRADOR ====================
-
-<!-- TGT_FORCAR_NOVO_AGENDAMENTO_COMPRADOR_INICIO -->
-<script>
-(function(){
-  function role(){
-    try { if (typeof roleName === 'function') return String(roleName() || '').trim().toLowerCase(); } catch(e){}
-    var u = window.state && window.state.user ? window.state.user : {};
-    return String(u.perfil || u.cargo || '').trim().toLowerCase();
-  }
-
-  function isComprador(){
-    return role() === 'comprador';
-  }
-
-  function liberar(){
-    if (!isComprador()) return;
-
-    if (window.state && window.state.user) {
-      window.state.user.permissions = window.state.user.permissions || {};
-      window.state.user.permissions.canCreateAgendamento = true;
-      window.state.user.permissions.canEditAgendamento = true;
-      window.state.user.permissions.canManageOS = true;
+    // Painel de novo agendamento
+    var cardAg = document.getElementById('cardAgendamento');
+    if (cardAg) {
+      if (window.tgtPodeCriarAgendamento()) {
+        cardAg.classList.remove('hidden');
+      } else {
+        cardAg.classList.add('hidden');
+      }
     }
 
-    var todos = Array.from(document.querySelectorAll('section, div, form, article'));
-    todos.forEach(function(el){
-      var txt = String(el.textContent || '').toLowerCase();
+    // Financeiro
+    var cardFin = document.getElementById('cardFinanceiro');
+    var cardFinKpi = document.getElementById('cardFaturamentoKpi');
+    if (window.tgtPodeVerFinanceiro()) {
+      if (cardFin) cardFin.classList.remove('hidden');
+      if (cardFinKpi) cardFinKpi.classList.remove('hidden');
+    }
 
-      if (
-        txt.indexOf('novo agendamento') > -1 ||
-        txt.indexOf('salvar agendamento') > -1 ||
-        txt.indexOf('regras de horário') > -1 ||
-        txt.indexOf('regras de horario') > -1
-      ) {
-        el.style.display = '';
-        el.style.visibility = 'visible';
-        el.hidden = false;
-        el.removeAttribute('hidden');
-        el.classList.remove('hidden');
-        el.classList.remove('d-none');
+    // Loja travada para perfis de loja
+    var filtroLoja = document.getElementById('filtroLoja');
+    if (filtroLoja && isLojaProfile() && u.loja && u.loja !== 'Todas') {
+      filtroLoja.value = u.loja;
+      filtroLoja.disabled = true;
+    }
 
-        Array.from(el.querySelectorAll('input, select, textarea, button')).forEach(function(campo){
-          campo.disabled = false;
+    // filtroMeus: nunca forçado por padrão — usuário escolhe manualmente
+    var fMeus = document.getElementById('filtroMeus');
+    if (fMeus && !isOpto()) fMeus.checked = false;
+
+    // Loja no formulário de novo agendamento
+    var lojaSelect = document.getElementById('loja');
+    if (lojaSelect && isLojaProfile() && u.loja && u.loja !== 'Todas') {
+      lojaSelect.value = u.loja;
+      lojaSelect.disabled = true;
+    }
+
+    // Comprador e Gerente: mostrar card de OS
+    var btnOS = document.getElementById('btnOS');
+    if (btnOS) {
+      if (window.tgtPodeEditarOS()) btnOS.classList.remove('hidden');
+    }
+  }
+
+  // ── CAMPOS DE AUDITORIA NO FORMULÁRIO ───────────────────────
+  function preencherCamposAuditoria() {
+    var n = nomeUser();
+    ['responsavel','Responsavel','agendadoPorNome','novoAgendadoPorNome'].forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) { if (!el.value) el.value = n; el.required = true; el.readOnly = true; }
+    });
+
+    // Bloquear nome "teste"
+    ['nome','nomeCompleto','NomeCompleto'].forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el && !el.__tgtTeste) {
+        el.__tgtTeste = true;
+        el.required = true;
+        el.addEventListener('input', function() {
+          el.setCustomValidity(String(el.value||'').toLowerCase().indexOf('teste') > -1 ? 'Não é permitido cadastrar nome TESTE.' : '');
         });
       }
     });
-
-    Array.from(document.querySelectorAll('button')).forEach(function(btn){
-      var txt = String(btn.textContent || '').toLowerCase();
-
-      if (txt.indexOf('salvar agendamento') > -1) {
-        btn.style.display = '';
-        btn.style.visibility = 'visible';
-        btn.disabled = false;
-        btn.hidden = false;
-        btn.removeAttribute('hidden');
-      }
-    });
   }
 
-  setInterval(liberar, 700);
-  document.addEventListener('DOMContentLoaded', function(){
-    setTimeout(liberar, 300);
-    setTimeout(liberar, 1000);
-    setTimeout(liberar, 2000);
+  // ── FINANCEIRO REAL POR LOJA ─────────────────────────────────
+  function carregarFinanceiroReal() {
+    if (!window.tgtPodeVerFinanceiro()) {
+      alert('Seu perfil não tem acesso ao módulo financeiro.');
+      return Promise.resolve();
+    }
+    return apiGet('/api/agendamentos?limit=10000&all=true').then(function(res) {
+      var rows = Array.isArray(res.agendamentos) ? res.agendamentos : [];
+      var mapped = window.aplicarRestricaoLojaUsuario(rows.map(mapAgendamentoDb)).filter(function(r){ return valor(r) > 0; });
+      var total = mapped.reduce(function(a,r){ return a+valor(r); }, 0);
+      var descTotal = mapped.reduce(function(a,r){ return a+desc(r); }, 0);
+      console.log('[TGT] Financeiro real:', { total: total, desconto: descTotal, registros: mapped.length });
+      return { total: total, desconto: descTotal, registros: mapped };
+    });
+  }
+  window.carregarFinanceiroRealTGT = carregarFinanceiroReal;
+
+  // Interceptar clique em "Carregar financeiro"
+  document.addEventListener('click', function(e) {
+    var btn = e.target && e.target.closest ? e.target.closest('button,a') : null;
+    if (!btn) return;
+    var txt = String(btn.textContent || '').trim().toLowerCase();
+    if (txt.indexOf('carregar financeiro') > -1) {
+      e.preventDefault(); e.stopPropagation();
+      if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+      carregarFinanceiroReal();
+      return false;
+    }
+  }, true);
+
+  // ── INICIALIZAÇÃO ────────────────────────────────────────────
+  setInterval(install, 700);
+  setInterval(preencherCamposAuditoria, 1000);
+
+  document.addEventListener('DOMContentLoaded', function() {
+    setTimeout(install, 300);
+    setTimeout(aplicarPermissoesTela, 500);
+    setTimeout(preencherCamposAuditoria, 600);
+    setTimeout(install, 1500);
+    setTimeout(aplicarPermissoesTela, 2000);
   });
+
+  // Integração com aplicarPermissoesTela original
+  if (typeof window.aplicarPermissoesTela === 'function' && !window.__tgtPermissoesOriginal) {
+    window.__tgtPermissoesOriginal = window.aplicarPermissoesTela;
+    window.aplicarPermissoesTela = function() {
+      try { window.__tgtPermissoesOriginal.apply(this, arguments); } catch(e) {}
+      aplicarPermissoesTela();
+    };
+  }
+
+  console.log('[TGT] Regras definitivas v2.0 prontas.');
 })();
 </script>
-<!-- TGT_FORCAR_NOVO_AGENDAMENTO_COMPRADOR_FIM -->
+<!-- TGT_SISTEMA_REGRAS_DEFINITIVAS_FIM -->
 
 </body>
 </html>
