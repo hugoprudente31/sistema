@@ -334,7 +334,7 @@
       <div class="row"><div><label>Loja *</label><select id="loja" onchange="carregarOptometristas()"></select></div><div><label>Optometrista *</label><select id="optometrista"></select></div></div>
       <div class="row"><div><label>Data do agendamento *</label><input id="dataAgendamento" type="date"></div><div><label>Horário *</label><input id="horario" type="time"></div></div>
       <div class="row"><div><label>Status *</label><select id="statusAgenda"><option value="">Selecione</option><option>Agendado</option><option>Confirmado</option></select></div><div><label>Tag de acesso</label><select id="accessTag"></select><div class="legend-mini" style="margin-top:6px;">Tags padronizadas de origem, perfil, prioridade, fluxo, comercial, loja e operação.</div></div></div>
-      <div class="row"><div><label>Consultor Responsável <span style="color:#e24b4a">*</span></label><select id="responsavelTela"><option value="">Selecione o consultor</option></select></div><div><label>Observação *</label><textarea id="observacao" placeholder="Informações importantes"></textarea></div></div>
+      <div class="row"><div><label>Consultor / Vendedor <span style="color:#e24b4a">*</span></label><input id="consultorVendedor" type="text" placeholder="Digite seu nome completo"></div><div><label>Observação *</label><textarea id="observacao" placeholder="Informações importantes"></textarea></div></div>
       <div class="row"><div><button onclick="salvarAgendamento()">Salvar agendamento</button></div><div><button class="secondary" onclick="limparFormulario()">Limpar</button></div></div>
       <div id="msgForm" class="msg"></div>
     </div>
@@ -779,7 +779,7 @@ function fazerLogin() {
       byId('emailUsuario').textContent = 'E-mail: ' + (res.user.email || '');
       byId('lojaUsuario').textContent = 'Loja: ' + ((res.user.loja && res.user.loja !== '') ? res.user.loja : 'Todas');
       byId('versaoServidor').textContent = 'Versão do servidor: ' + (res.serverVersion || '');
-      // responsavelTela agora é <select> — populado em preencherConsultores()
+      // consultorVendedor: campo de texto livre preenchido pelo próprio consultor
 
       aplicarPermissoesTela();
       byId('passwordLogin').value = '';
@@ -1211,39 +1211,6 @@ function carregarOptometristas() {
       setMsg('msgForm', err.message || String(err), 'err');
     });
 
-  preencherConsultores(loja);
-}
-
-function preencherConsultores(loja) {
-  var el = byId('responsavelTela');
-  if (!el || el.tagName !== 'SELECT') return;
-
-  var cargosConsultor = ['consultor de vendas', 'vendedor', 'gerente de loja', 'admin'];
-  var lojaLower = (loja || '').toLowerCase();
-
-  var lista = (state.owners || []).filter(function(o) {
-    var cargo = (o.perfil || '').toLowerCase();
-    if (!cargosConsultor.some(function(c) { return cargo.indexOf(c) !== -1; })) return false;
-    if (!loja) return true;
-    var oLoja = (o.loja || '').toLowerCase();
-    // atendimento central / sem loja: exibir em todas
-    if (!oLoja || oLoja === 'todas') return true;
-    return oLoja === lojaLower || oLoja.indexOf(lojaLower) !== -1 || lojaLower.indexOf(oLoja) !== -1;
-  });
-
-  var html = '<option value="">Selecione o consultor</option>';
-  html += lista.map(function(o) {
-    return '<option value="' + escapeHtml(o.nome) + '">' + escapeHtml(o.nome) + '</option>';
-  }).join('');
-  if (!lista.length) html += '<option value="" disabled>Nenhum consultor encontrado</option>';
-  el.innerHTML = html;
-
-  // Pré-selecionar o usuário logado se ele for consultor desta loja
-  var loggedNome = state.user && state.user.nome;
-  if (loggedNome && lista.some(function(o) { return o.nome === loggedNome; })) {
-    el.value = loggedNome;
-  }
-}
 
 function coletarFiltros() {
   var role = roleName();
@@ -1324,9 +1291,6 @@ function salvarAgendamento() {
     return;
   }
 
-  var consultorSel = byId('responsavelTela');
-  var consultorNome = consultorSel ? (consultorSel.tagName === 'SELECT' ? consultorSel.value.trim() : consultorSel.value.trim()) : '';
-
   var payload = {
     origem: byId('origem').value.trim(),
     nomeCompleto: byId('nomeCompleto').value.trim(),
@@ -1339,7 +1303,7 @@ function salvarAgendamento() {
     observacao: byId('observacao').value.trim(),
     statusAgenda: byId('statusAgenda').value.trim(),
     accessTags: byId('accessTag').value.trim(),
-    consultorNome: consultorNome
+    consultorNome: (byId('consultorVendedor') ? byId('consultorVendedor').value.trim() : '')
   };
 
   if (!payload.nomeCompleto || !payload.whatsApp || !payload.email || !payload.loja || !payload.dataAgendamento || !payload.horario) {
@@ -1347,7 +1311,7 @@ function salvarAgendamento() {
     return;
   }
   if (!payload.consultorNome) {
-    setMsg('msgForm', 'Selecione o Consultor Responsável.', 'err');
+    setMsg('msgForm', 'Informe o nome do Consultor / Vendedor responsável.', 'err');
     return;
   }
 
@@ -1396,8 +1360,8 @@ function salvarAgendamento() {
 
 function limparFormulario(clearMsg) {
   if (clearMsg === undefined) clearMsg = true;
-  ['nomeCompleto', 'whatsApp', 'emailCliente', 'dataAgendamento', 'horario', 'observacao'].forEach(function(id) {
-    byId(id).value = '';
+  ['nomeCompleto', 'whatsApp', 'emailCliente', 'dataAgendamento', 'horario', 'observacao', 'consultorVendedor'].forEach(function(id) {
+    if (byId(id)) byId(id).value = '';
   });
   byId('origem').value = '';
   byId('statusAgenda').value = '';
@@ -1405,8 +1369,6 @@ function limparFormulario(clearMsg) {
   if (!byId('loja').disabled) {
     byId('loja').value = '';
     byId('optometrista').innerHTML = '<option value="">Selecione a loja primeiro</option>';
-    var rtEl = byId('responsavelTela');
-    if (rtEl && rtEl.tagName === 'SELECT') rtEl.innerHTML = '<option value="">Selecione o consultor</option>';
   }
   if (clearMsg) setMsg('msgForm', '', '');
 }
@@ -2283,7 +2245,6 @@ function executarDiagnostico() {
     if (lojaSelect && isLojaProfile() && u.loja && u.loja !== 'Todas') {
       lojaSelect.value = u.loja;
       lojaSelect.disabled = true;
-      preencherConsultores(u.loja);
     }
 
     // Comprador e Gerente: mostrar card de OS
