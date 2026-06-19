@@ -177,6 +177,14 @@ function canViewFinanceSession(session) {
   return Boolean(session?.canViewFinance) || hasRole(session, ["admin", "gerente de loja"]);
 }
 
+function normalizeStoreKey(value) {
+  return clean(value).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim();
+}
+
+function storeSql(column, parameter = "$1") {
+  return `TRANSLATE(LOWER(TRIM(COALESCE(${column},''))), 'áàâãäéèêëíìîïóòôõöúùûüç', 'aaaaaeeeeiiiiooooouuuuc') = TRANSLATE(LOWER(TRIM(${parameter})), 'áàâãäéèêëíìîïóòôõöúùûüç', 'aaaaaeeeeiiiiooooouuuuc')`;
+}
+
 function buildPermissions(user) {
   const role = clean(user?.cargo || user?.perfil).toLowerCase();
   const admin = role === "admin";
@@ -220,7 +228,7 @@ function requireAdmin(req, res, next) {
 
 function ensureStoreAccess(session, store) {
   if (canViewAllStores(session)) return true;
-  return Boolean(session?.loja && store && clean(session.loja).toLowerCase() === clean(store).toLowerCase());
+  return Boolean(session?.loja && store && normalizeStoreKey(session.loja) === normalizeStoreKey(store));
 }
 
 // ===============================
@@ -1759,7 +1767,7 @@ app.get("/api/agendamentos", async (req, res) => {
     const result = canViewAllStores(req.session)
       ? await pool.query(`SELECT * FROM agendamentos ORDER BY id DESC LIMIT 1000`)
       : req.session.loja
-        ? await pool.query(`SELECT * FROM agendamentos WHERE LOWER(COALESCE(loja,'')) = LOWER($1) ORDER BY id DESC LIMIT 1000`, [req.session.loja])
+        ? await pool.query(`SELECT * FROM agendamentos WHERE ${storeSql("loja")} ORDER BY id DESC LIMIT 1000`, [req.session.loja])
         : { rows: [] };
     res.json({ ok: true, total: result.rows.length, agendamentos: result.rows });
   } catch (error) {
@@ -2013,10 +2021,20 @@ app.get("/api/faturamentos", async (req, res) => {
     if (!canViewFinanceSession(req.session)) {
       return res.status(403).json({ ok: false, message: "Perfil sem acesso ao financeiro." });
     }
+    const query = `SELECT id, id AS agendamento_id, nome AS cliente_nome, numero_os, status_os, loja,
+        COALESCE(NULLIF(vendedor_nome, ''), NULLIF(consultor_responsavel, ''), NULLIF(vendedor_atendeu_nome, ''), proprietario_nome, responsavel, '') AS vendedor,
+        COALESCE(valor_venda, 0)::numeric AS valor_total, COALESCE(desconto, 0)::numeric AS desconto,
+        CASE WHEN COALESCE(valor_venda, 0) > 0 THEN 'Venda registrada' ELSE 'Sem venda' END AS status_pagamento,
+        COALESCE(data_finalizacao_os, data_entrega_os, data_entrada_os, data_agendamento, criado_em::date) AS data_venda
+      FROM agendamentos
+      WHERE nome NOT ILIKE '%teste%' AND COALESCE(loja, '') NOT ILIKE '%teste%'
+        AND (COALESCE(valor_venda, 0) > 0 OR COALESCE(desconto, 0) > 0)
+        ${canViewAllStores(req.session) ? "" : `AND ${storeSql("loja")}`}
+      ORDER BY COALESCE(data_finalizacao_os, data_entrega_os, data_entrada_os, data_agendamento, criado_em::date) DESC, id DESC LIMIT 1000`;
     const result = canViewAllStores(req.session)
-      ? await pool.query(`SELECT * FROM faturamentos ORDER BY id DESC LIMIT 1000`)
+      ? await pool.query(query)
       : req.session.loja
-        ? await pool.query(`SELECT * FROM faturamentos WHERE LOWER(COALESCE(loja,'')) = LOWER($1) ORDER BY id DESC LIMIT 1000`, [req.session.loja])
+        ? await pool.query(query, [req.session.loja])
         : { rows: [] };
     res.json({ ok: true, total: result.rows.length, faturamentos: result.rows });
   } catch (error) {
@@ -2177,7 +2195,7 @@ app.get("/api/dashboard", async (req, res) => {
     const clientes = await pool.query(
       `SELECT COUNT(*)::int AS total FROM clientes
        WHERE nome NOT ILIKE '%teste%'
-       ${scoped ? "AND LOWER(COALESCE(loja_origem,'')) = LOWER($1)" : ""}`,
+       ${scoped ? `AND ${storeSql("loja_origem")}` : ""}`,
       params
     );
     const resumo = await pool.query(`
@@ -2188,7 +2206,7 @@ app.get("/api/dashboard", async (req, res) => {
         COALESCE(SUM(desconto),0)::numeric AS desconto_total
       FROM agendamentos
       WHERE nome NOT ILIKE '%teste%' AND COALESCE(loja,'') NOT ILIKE '%teste%'
-      ${scoped ? "AND LOWER(COALESCE(loja,'')) = LOWER($1)" : ""}
+      ${scoped ? `AND ${storeSql("loja")}` : ""}
     `, params);
     const showFinance = canViewFinanceSession(req.session);
     res.json({
