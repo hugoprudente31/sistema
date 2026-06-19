@@ -379,7 +379,7 @@
         <table>
           <thead>
             <tr>
-              <th>ID</th><th>Data Registro</th><th>Cliente</th><th>Agendado por</th><th>Última alt.</th><th>Dia Agendado</th><th>Status Ag.</th><th>Presença</th><th>Nº OS</th><th>Status OS</th><th>Entrada / Entrega / Finalização</th><th>Loja</th><th>Optometrista</th><th>Lead Time</th><th>Valor</th><th>Desconto</th><th>Tag</th><th>Ações</th>
+              <th>ID</th><th>Data Registro</th><th>Cliente</th><th>Agendado por</th><th>Última alt.</th><th>Dia Agendado</th><th>Status Ag.</th><th>Presença</th><th>Nº OS</th><th>Status OS</th><th>Datas da OS</th><th>Loja</th><th>Optometrista</th><th>Lead Time</th><th>Valor</th><th>Desconto</th><th>Tag</th><th>Ações</th>
             </tr>
           </thead>
           <tbody id="agendaBody"></tbody>
@@ -547,6 +547,21 @@ function apiPatch(url, body) {
 
 function mapAgendamentoDb(r) {
   r = r || {};
+  var compareceu = normalizeKey(r.compareceu || '');
+  var status = normalizeKey(r.status || '');
+  var venda = normalizeKey(r.venda_gerada || '');
+  var valorVenda = Number(String(r.valor_venda || 0).replace(',', '.')) || 0;
+  var semaforo = '';
+  var semaforoLabel = '';
+  if (compareceu === 'nao' || compareceu === 'nao compareceu' || status === 'nao compareceu') {
+    semaforo = 'vermelho'; semaforoLabel = 'Não compareceu';
+  } else if (compareceu === 'sim' || compareceu === 'compareceu' || status === 'compareceu' || status === 'concluido') {
+    if (venda === 'sim' || valorVenda > 0) {
+      semaforo = 'verde'; semaforoLabel = 'Compareceu e comprou';
+    } else {
+      semaforo = 'amarelo'; semaforoLabel = 'Compareceu sem compra';
+    }
+  }
   return {
     ID: r.id,
     DataCadastro: r.criado_em,
@@ -566,7 +581,7 @@ function mapAgendamentoDb(r) {
     Compareceu: r.compareceu || 'Pendente',
     AtendimentoRealizado: r.atendimento_realizado || '',
     VendaGerada: r.venda_gerada || '',
-    ValorVenda: r.valor_venda || 0,
+    ValorVenda: valorVenda,
     Desconto: r.desconto || 0,
     MotivoPerda: r.motivo_perda || '',
     ConsultorResponsavel: r.consultor_responsavel || '',
@@ -587,7 +602,9 @@ function mapAgendamentoDb(r) {
     AgendadoPorNome: r.agendado_por_nome || r.proprietario_nome || r.responsavel || '',
     AgendadoPorEmail: r.agendado_por_email || r.criado_por_email || '',
     UltimaAlteracaoPorNome: r.ultima_alteracao_por_nome || '',
-    UltimaAlteracaoEm: r.ultima_alteracao_em || r.atualizado_em || ''
+    UltimaAlteracaoEm: r.ultima_alteracao_em || r.atualizado_em || '',
+    AtendimentoSemaforo: semaforo,
+    AtendimentoSemaforoLabel: semaforoLabel
   };
 }
 
@@ -772,7 +789,7 @@ function aplicarPermissoesTela() {
   if (['admin', 'atendimento central', 'gerente de loja'].indexOf(roleName()) > -1) byId('btnLeadTime').classList.remove('hidden');
   if (p.isAdmin || roleName() === 'gerente de loja') byId('btnHistorico').classList.remove('hidden');
   if (p.isAdmin) byId('btnSyncSistema').classList.remove('hidden');
-  if (roleName() === 'optometrista') byId('filtroMeus').checked = true;
+  byId('filtroMeus').checked = false;
 }
 
 function carregarInfoBase() {
@@ -996,15 +1013,16 @@ function carregarFaturamento() {
   return apiGet('/api/faturamentos').then(function(res) {
     var rows = Array.isArray(res.faturamentos) ? res.faturamentos : [];
     var total = rows.reduce(function(a, b) { return a + Number(b.valor_total || 0); }, 0);
+    var descontoTotal = rows.reduce(function(a, b) { return a + Number(b.desconto || 0); }, 0);
     var pagos = rows.filter(function(r) { return Number(r.valor_total || 0) > 0; });
 
     byId('finTotal').textContent = money(total);
-    byId('finDesconto').textContent = money(0);
+    byId('finDesconto').textContent = money(descontoTotal);
     byId('finQtd').textContent = String(pagos.length);
     byId('finTicket').textContent = money(pagos.length ? total / pagos.length : 0);
 
     byId('financeBody').innerHTML = rows.map(function(r) {
-      return '<tr><td>' + escapeHtml(r.id) + '</td><td>' + escapeHtml(r.cliente_id || '') + '</td><td>' + escapeHtml(r.agendamento_id || '') + '</td><td>' + escapeHtml(r.status_pagamento || '') + '</td><td>' + money(r.valor_total || 0) + '</td><td>' + money(0) + '</td><td>' + escapeHtml(r.vendedor || '') + '</td><td>' + escapeHtml(r.vendedor || '') + '</td><td>' + escapeHtml(r.loja || '') + '</td><td>' + escapeHtml(formatDateBR(r.data_venda || '')) + '</td></tr>';
+      return '<tr><td>' + escapeHtml(r.id) + '</td><td>' + escapeHtml(r.cliente_nome || '') + '</td><td>' + escapeHtml(r.numero_os || r.agendamento_id || '') + '</td><td>' + escapeHtml(r.status_pagamento || r.status_os || '') + '</td><td>' + money(r.valor_total || 0) + '</td><td>' + money(r.desconto || 0) + '</td><td>' + escapeHtml(r.vendedor || '') + '</td><td>' + escapeHtml(r.vendedor || '') + '</td><td>' + escapeHtml(r.loja || '') + '</td><td>' + escapeHtml(formatDateBR(r.data_venda || '')) + '</td></tr>';
     }).join('') || '<tr><td colspan="10">Nenhum dado financeiro.</td></tr>';
   }).catch(function(err) {
     setMsg('msgForm', err.message || String(err), 'err');
@@ -1193,7 +1211,7 @@ function limparFiltros() {
     byId(id).value = '';
   });
   byId('filtroMinhasOSAtivas').checked = false;
-  byId('filtroMeus').checked = roleName() === 'optometrista';
+  byId('filtroMeus').checked = false;
   if (state.user && state.user.loja && state.user.loja !== 'Todas') byId('filtroLoja').value = state.user.loja;
   else byId('filtroLoja').value = '';
   applyDefaultDateWindow90Dias(true);
@@ -1651,12 +1669,12 @@ function renderAgenda(rowsParam) {
       '<td>' + escapeHtml(r.Compareceu || 'Pendente') + '</td>' +
       '<td>' + escapeHtml(r.NumeroOS || '') + '</td>' +
       '<td><span class="status ' + statusClassOS(r) + '">' + escapeHtml(r.StatusOS || '') + '</span></td>' +
-      '<td>Entrada: ' + escapeHtml(formatDateBR(r.DataEntradaOSBR || r.DataEntradaOS || '')) + '<br>Entrega: ' + escapeHtml(formatDateBR(r.DataEntregaOSBR || r.DataEntregaOS || '')) + '<br>Finalização: ' + escapeHtml(formatDateBR(r.DataFinalizacaoOSBR || r.DataFinalizacaoOS || '')) + '</td>' +
+      '<td>Abertura: ' + escapeHtml(formatDateBR(r.DataAberturaOSBR || r.DataAberturaOS || '')) + '<br>Entrada: ' + escapeHtml(formatDateBR(r.DataEntradaOSBR || r.DataEntradaOS || '')) + '<br>Entrega: ' + escapeHtml(formatDateBR(r.DataEntregaOSBR || r.DataEntregaOS || '')) + '<br>Finalização: ' + escapeHtml(formatDateBR(r.DataFinalizacaoOSBR || r.DataFinalizacaoOS || '')) + '</td>' +
       '<td>' + escapeHtml(r.Loja) + '</td>' +
       '<td>' + escapeHtml(r.Optometrista) + '</td>' +
       '<td>' + escapeHtml(r.LeadTimeDias || '') + '</td>' +
-      '<td>' + (canFinance() ? money(r.ValorVenda || 0) : '—') + '</td>' +
-      '<td>' + (canFinance() ? money(r.Desconto || 0) : '—') + '</td>' +
+      '<td>' + money(r.ValorVenda || 0) + '</td>' +
+      '<td>' + money(r.Desconto || 0) + '</td>' +
       '<td>' + escapeHtml(r.AccessTags || '') + '</td>' +
       '<td>' + getActionHtml(r) + '</td>' +
       '</tr>';
@@ -1978,18 +1996,6 @@ function executarDiagnostico() {
     return lu === lojaRow(r);
   }
 
-  // ── REGRA 30 DIAS OPTOMETRISTA ───────────────────────────────
-  function date30(row) {
-    row = row || {};
-    var raw = row.DataAgendamento || row.dataAgendamento || row.data_agendamento || row.DataCadastro || row.criado_em || '';
-    if (!raw) return false;
-    var d = new Date(String(raw).slice(0,10) + 'T12:00:00');
-    if (isNaN(d.getTime())) return false;
-    var hoje = new Date(); hoje.setHours(23,59,59,999);
-    var lim = new Date(); lim.setDate(lim.getDate() - 30); lim.setHours(0,0,0,0);
-    return d >= lim && d <= hoje;
-  }
-
   // ── FILTRO PRINCIPAL DE REGISTROS ────────────────────────────
   // Regra: usuário de loja vê TODOS da própria loja, independente de quem marcou
   window.aplicarRestricaoLojaUsuario = function(rows) {
@@ -2000,8 +2006,6 @@ function executarDiagnostico() {
       if (nomes.indexOf('teste') > -1) return false;
       // Filtro por loja para perfis de loja
       if (isLojaProfile() && !sameStore(r)) return false;
-      // Optometrista só vê 30 dias
-      if (isOpto() && !date30(r)) return false;
       return true;
     });
   };
@@ -2186,7 +2190,7 @@ function executarDiagnostico() {
 
     // filtroMeus: nunca forçado por padrão — usuário escolhe manualmente
     var fMeus = document.getElementById('filtroMeus');
-    if (fMeus && !isOpto()) fMeus.checked = false;
+    if (fMeus) fMeus.checked = false;
 
     // Loja no formulário de novo agendamento
     var lojaSelect = document.getElementById('loja');
@@ -2239,19 +2243,6 @@ function executarDiagnostico() {
     });
   }
   window.carregarFinanceiroRealTGT = carregarFinanceiroReal;
-
-  // Interceptar clique em "Carregar financeiro"
-  document.addEventListener('click', function(e) {
-    var btn = e.target && e.target.closest ? e.target.closest('button,a') : null;
-    if (!btn) return;
-    var txt = String(btn.textContent || '').trim().toLowerCase();
-    if (txt.indexOf('carregar financeiro') > -1) {
-      e.preventDefault(); e.stopPropagation();
-      if (e.stopImmediatePropagation) e.stopImmediatePropagation();
-      carregarFinanceiroReal();
-      return false;
-    }
-  }, true);
 
   // ── INICIALIZAÇÃO ────────────────────────────────────────────
   setInterval(install, 700);
