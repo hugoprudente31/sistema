@@ -1021,9 +1021,26 @@ function carregarFaturamento() {
     byId('finQtd').textContent = String(pagos.length);
     byId('finTicket').textContent = money(pagos.length ? total / pagos.length : 0);
 
-    byId('financeBody').innerHTML = rows.map(function(r) {
-      return '<tr><td>' + escapeHtml(r.id) + '</td><td>' + escapeHtml(r.cliente_nome || '') + '</td><td>' + escapeHtml(r.numero_os || r.agendamento_id || '') + '</td><td>' + escapeHtml(r.status_pagamento || r.status_os || '') + '</td><td>' + money(r.valor_total || 0) + '</td><td>' + money(r.desconto || 0) + '</td><td>' + escapeHtml(r.vendedor || '') + '</td><td>' + escapeHtml(r.vendedor || '') + '</td><td>' + escapeHtml(r.loja || '') + '</td><td>' + escapeHtml(formatDateBR(r.data_venda || '')) + '</td></tr>';
-    }).join('') || '<tr><td colspan="10">Nenhum dado financeiro.</td></tr>';
+    var canViewAll = !!(state.user && state.user.permissions && state.user.permissions.canViewAll);
+    var ordered = rows.slice().sort(function(a, b) {
+      var storeOrder = normalizeKey(a.loja || '').localeCompare(normalizeKey(b.loja || ''));
+      if (storeOrder) return storeOrder;
+      return String(b.data_venda || '').localeCompare(String(a.data_venda || ''));
+    });
+    var currentStore = null;
+    var html = '';
+    ordered.forEach(function(r) {
+      var store = r.loja || 'Sem loja';
+      if (canViewAll && store !== currentStore) {
+        currentStore = store;
+        var storeRows = ordered.filter(function(item) { return (item.loja || 'Sem loja') === store; });
+        var storeTotal = storeRows.reduce(function(sum, item) { return sum + Number(item.valor_total || 0); }, 0);
+        var storeDiscount = storeRows.reduce(function(sum, item) { return sum + Number(item.desconto || 0); }, 0);
+        html += '<tr style="background:#eef4ff;font-weight:700"><td colspan="10">' + escapeHtml(store) + ' — ' + storeRows.length + ' venda(s) — Total: ' + money(storeTotal) + ' — Descontos: ' + money(storeDiscount) + '</td></tr>';
+      }
+      html += '<tr><td>' + escapeHtml(r.id) + '</td><td>' + escapeHtml(r.cliente_nome || '') + '</td><td>' + escapeHtml(r.numero_os || r.agendamento_id || '') + '</td><td>' + escapeHtml(r.status_pagamento || r.status_os || '') + '</td><td>' + money(r.valor_total || 0) + '</td><td>' + money(r.desconto || 0) + '</td><td>' + escapeHtml(r.vendedor || '') + '</td><td>' + escapeHtml(r.vendedor || '') + '</td><td>' + escapeHtml(r.loja || '') + '</td><td>' + escapeHtml(formatDateBR(r.data_venda || '')) + '</td></tr>';
+    });
+    byId('financeBody').innerHTML = html || '<tr><td colspan="10">Nenhum dado financeiro.</td></tr>';
   }).catch(function(err) {
     setMsg('msgForm', err.message || String(err), 'err');
   });

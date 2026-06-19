@@ -213,3 +213,12 @@ test("painel contem farol, quatro datas da OS e valores visiveis", () => {
   assert.doesNotMatch(html, /canFinance\(\) \? money\(r\.ValorVenda/);
   assert.doesNotMatch(html, /if \(isOpto\(\) && !date30\(r\)\)/);
 });
+
+test("financeiro geral agrupa vendas e subtotais por loja", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "public", "index.html"), "utf8");
+  assert.match(html, /permissions\.canViewAll/);
+  assert.match(html, /storeRows\.length/);
+  assert.match(html, /venda\(s\)/);
+  assert.match(html, /Total: ' \+ money\(storeTotal\)/);
+  assert.match(html, /Descontos: ' \+ money\(storeDiscount\)/);
+});
