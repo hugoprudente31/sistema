@@ -276,11 +276,11 @@
     </div>
     <h1>Sistema de Agendamento</h1>
     <div class="subtitle">Gestão Multiloja + Acompanhamento de OS</div>
-    <div class="notice"><strong>Acesso protegido</strong>Informe seu e-mail cadastrado e a chave de acesso fornecida pela administração.</div>
+    <div class="notice"><strong>Acesso protegido</strong>Informe seu e-mail cadastrado e sua senha individual.</div>
     <label for="emailLogin">E-mail de acesso</label>
     <input id="emailLogin" type="email" placeholder="usuario@empresa.com" autocomplete="email">
-    <label for="accessKeyLogin">Chave de acesso</label>
-    <input id="accessKeyLogin" type="password" placeholder="Chave de acesso" autocomplete="current-password">
+    <label for="passwordLogin">Senha</label>
+    <input id="passwordLogin" type="password" placeholder="Senha individual" autocomplete="current-password">
     <button onclick="fazerLogin()">Entrar</button>
     <div id="msgLogin" class="msg"></div>
   </div>
@@ -708,9 +708,9 @@ function formatDateBR(value) {
 
 function fazerLogin() {
   var email = String((byId('emailLogin') && byId('emailLogin').value) || '').trim();
-  var accessKey = String((byId('accessKeyLogin') && byId('accessKeyLogin').value) || '');
-  if (!email || !accessKey) {
-    setMsg('msgLogin', 'Informe o e-mail e a chave de acesso.', 'err');
+  var password = String((byId('passwordLogin') && byId('passwordLogin').value) || '');
+  if (!email || !password) {
+    setMsg('msgLogin', 'Informe o e-mail e a senha.', 'err');
     return;
   }
 
@@ -719,7 +719,7 @@ function fazerLogin() {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'same-origin',
-    body: JSON.stringify({ email: email, accessKey: accessKey })
+    body: JSON.stringify({ email: email, password: password })
   })
     .then(function(r) {
       return r.json().then(function(data) {
@@ -743,7 +743,7 @@ function fazerLogin() {
       byId('responsavelTela').value = res.user.nome || '';
 
       aplicarPermissoesTela();
-      byId('accessKeyLogin').value = '';
+      byId('passwordLogin').value = '';
       return carregarSistemaTurbo();
     })
     .catch(function(err) {
@@ -1831,7 +1831,7 @@ function _abrirModalUsuario(u) {
   var isEdit = !!u;
   var lojasOpts = '<option value="">Todas as lojas</option>' +
     (state.lojas||[]).map(function(l){ return '<option value="' + escapeHtml(l.Loja) + '">' + escapeHtml(l.Loja) + '</option>'; }).join('');
-  var perfis = ['admin','atendimento central','gerente de loja','consultor de vendas','comprador','optometrista'];
+  var perfis = ['admin','atendimento central','gerente de loja','consultor de vendas','vendedor','comprador','optometrista'];
   var perfisOpts = perfis.map(function(p){ return '<option value="' + p + '">' + p + '</option>'; }).join('');
 
   var backdrop = document.createElement('div');
@@ -1844,6 +1844,8 @@ function _abrirModalUsuario(u) {
     '<div><label>E-mail *</label><input id="uEmail" type="email" value="' + escapeHtml((u&&u.email)||'') + '" ' + (isEdit?'readonly style="background:var(--color-background-secondary)"':'') + '></div></div>' +
     '<div class="row"><div><label>Perfil *</label><select id="uCargo">' + perfisOpts + '</select></div>' +
     '<div><label>Loja</label><select id="uLoja">' + lojasOpts + '</select></div></div>' +
+    '<div><label>' + (isEdit ? 'Nova senha (deixe vazio para manter)' : 'Senha temporária *') + '</label>' +
+    '<input id="uPassword" type="password" minlength="12" autocomplete="new-password" placeholder="Mínimo de 12 caracteres"></div>' +
     '<div class="row"><div style="display:flex;align-items:center;gap:8px;padding-top:28px"><input type="checkbox" id="uFinance"' + ((u&&u.can_view_finance)?' checked':'') + '><label for="uFinance" style="margin:0">Ver financeiro</label></div>' +
     '<div style="display:flex;align-items:center;gap:8px;padding-top:28px"><input type="checkbox" id="uAtivo"' + ((!u||u.ativo)?' checked':'') + '><label for="uAtivo" style="margin:0">Ativo</label></div></div>' +
     '<div style="margin-top:14px;display:flex;gap:10px">' +
@@ -1865,12 +1867,21 @@ function salvarUsuario(id) {
   var email = (document.getElementById('uEmail')||{}).value || '';
   var cargo = (document.getElementById('uCargo')||{}).value || '';
   var loja = (document.getElementById('uLoja')||{}).value || '';
+  var password = (document.getElementById('uPassword')||{}).value || '';
   var canFinance = !!(document.getElementById('uFinance')||{}).checked;
   var ativo = !!(document.getElementById('uAtivo')||{}).checked;
   var msgEl = document.getElementById('msgUsuarioModal');
 
   if (!nome.trim() || !email.trim() || !cargo) {
     if (msgEl) { msgEl.textContent = 'Nome, e-mail e perfil são obrigatórios.'; msgEl.className = 'msg err'; }
+    return;
+  }
+  if (!id && password.length < 12) {
+    if (msgEl) { msgEl.textContent = 'Informe uma senha temporária com pelo menos 12 caracteres.'; msgEl.className = 'msg err'; }
+    return;
+  }
+  if (password && password.length < 12) {
+    if (msgEl) { msgEl.textContent = 'A nova senha deve ter pelo menos 12 caracteres.'; msgEl.className = 'msg err'; }
     return;
   }
 
@@ -1881,7 +1892,7 @@ function salvarUsuario(id) {
   fetch(url, {
     method: method,
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ nome: nome.trim(), email: email.trim().toLowerCase(), cargo: cargo, loja: loja || null, can_view_finance: canFinance, ativo: ativo })
+    body: JSON.stringify({ nome: nome.trim(), email: email.trim().toLowerCase(), cargo: cargo, loja: loja || null, can_view_finance: canFinance, ativo: ativo, password: password || undefined })
   })
   .then(function(r){ return r.json(); })
   .then(function(res) {

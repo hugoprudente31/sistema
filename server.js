@@ -3,12 +3,12 @@ const cors = require("cors");
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
+const bcrypt = require("bcryptjs");
 const { Pool } = require("pg");
 require("dotenv").config();
 
 const app = express();
 const PORT = process.env.PORT || 8080;
-const APP_ACCESS_KEY = process.env.APP_ACCESS_KEY || "";
 const SESSION_SECRET = process.env.SESSION_SECRET || "";
 const SESSION_COOKIE = "tgt_session";
 const SESSION_TTL_HOURS = Math.max(1, Number(process.env.SESSION_TTL_HOURS || 12));
@@ -175,6 +175,40 @@ function canViewAllStores(session) {
 
 function canViewFinanceSession(session) {
   return Boolean(session?.canViewFinance) || hasRole(session, ["admin", "gerente de loja"]);
+}
+
+function buildPermissions(user) {
+  const role = clean(user?.cargo || user?.perfil).toLowerCase();
+  const admin = role === "admin";
+  const central = role === "atendimento central";
+  const manager = role === "gerente de loja";
+  const buyer = role === "comprador";
+  const seller = ["consultor de vendas", "vendedor"].includes(role);
+  const canViewFinance = admin || manager || Boolean(user?.can_view_finance);
+
+  return {
+    isAdmin: admin,
+    canViewAll: admin || central,
+    canCreateAgendamento: admin || central || manager || buyer || seller,
+    canManageOS: admin || central || manager || buyer,
+    canViewFinance,
+    canExportFinance: canViewFinance
+  };
+}
+
+function publicUser(user) {
+  const permissions = buildPermissions(user);
+  return {
+    id: user.id,
+    nome: user.nome,
+    email: user.email,
+    perfil: user.cargo,
+    cargo: user.cargo,
+    loja: user.loja || "",
+    accessTags: clean(user.access_tags).split(/[;,|]/).map((tag) => tag.trim()).filter(Boolean),
+    permissions,
+    can_view_finance: permissions.canViewFinance
+  };
 }
 
 function requireAdmin(req, res, next) {
@@ -634,6 +668,8 @@ async function initDatabase() {
   await addColumnIfMissing("faturamentos", "gas_id", "TEXT UNIQUE");
   await addColumnIfMissing("faturamentos", "origem_sync", "TEXT DEFAULT 'postgres'");
   await addColumnIfMissing("usuarios", "gas_id", "TEXT UNIQUE");
+  await addColumnIfMissing("usuarios", "senha", "TEXT");
+  await addColumnIfMissing("usuarios", "password_changed_at", "TIMESTAMP");
   await addColumnIfMissing("usuarios", "access_tags", "TEXT");
   await addColumnIfMissing("usuarios", "can_view_finance", "BOOLEAN DEFAULT false");
   await addColumnIfMissing("usuarios", "origem_sync", "TEXT DEFAULT 'postgres'");
@@ -1179,7 +1215,7 @@ function allowLoginAttempt(ip) {
 app.post("/api/auth/login", async (req, res) => {
   res.setHeader("Cache-Control", "no-store");
 
-  if (!APP_ACCESS_KEY || !SESSION_SECRET) {
+  if (!SESSION_SECRET) {
     return res.status(503).json({
       ok: false,
       message: "Autenticação ainda não configurada no servidor."
@@ -1191,23 +1227,37 @@ app.post("/api/auth/login", async (req, res) => {
   }
 
   const email = clean(req.body?.email).toLowerCase();
-  const accessKey = String(req.body?.accessKey || "");
-  if (!email || !accessKey || !safeEqual(accessKey, APP_ACCESS_KEY)) {
-    return res.status(401).json({ ok: false, message: "Credenciais inválidas." });
+  const password = String(req.body?.password || "");
+  if (!email || !password) {
+    return res.status(400).json({ ok: false, message: "Informe e-mail e senha." });
   }
 
   try {
-    const loginResult = await callGas("loginSeguro", [email], 90000);
-    if (!loginResult?.ok || !loginResult?.user) {
+    const result = await pool.query(
+      `SELECT id, nome, email, senha, cargo, loja, access_tags, can_view_finance, ativo
+       FROM usuarios
+       WHERE LOWER(email) = LOWER($1) AND ativo = true
+       LIMIT 1`,
+      [email]
+    );
+    const dbUser = result.rows[0];
+    const passwordOk = Boolean(dbUser?.senha) && await bcrypt.compare(password, dbUser.senha);
+    if (!dbUser || !passwordOk) {
       return res.status(401).json({ ok: false, message: "Credenciais inválidas." });
     }
 
-    const token = signSession(loginResult.user);
+    const user = publicUser(dbUser);
+    const token = signSession(user);
     res.setHeader("Set-Cookie", sessionCookie(token, SESSION_TTL_HOURS * 60 * 60));
-    return res.json(loginResult);
+    return res.json({
+      ok: true,
+      user,
+      session: { resolvedEmail: user.email },
+      serverVersion: "7.3.0-auth-individual"
+    });
   } catch (error) {
     console.error("Erro no login seguro:", error.message);
-    return res.status(502).json({ ok: false, message: "Não foi possível autenticar agora." });
+    return res.status(500).json({ ok: false, message: "Não foi possível autenticar agora." });
   }
 });
 
@@ -1998,23 +2048,30 @@ app.post("/api/usuarios", requireAdmin, async (req, res) => {
     const nome = clean(b.nome);
     const email = clean(b.email).toLowerCase();
     const cargo = clean(b.cargo);
+    const password = String(b.password || b.senha || "");
     if (!nome || !email || !cargo) {
       return res.status(400).json({ ok: false, message: "Nome, e-mail e perfil são obrigatórios." });
     }
+    if (password && password.length < 12) {
+      return res.status(400).json({ ok: false, message: "A senha deve ter pelo menos 12 caracteres." });
+    }
+    const passwordHash = password ? await bcrypt.hash(password, 12) : null;
     const gasId = makeGasId("usuario", email);
     const result = await pool.query(
-      `INSERT INTO usuarios (gas_id, nome, email, cargo, loja, can_view_finance, ativo, origem_sync, atualizado_em)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'postgres',CURRENT_TIMESTAMP)
+      `INSERT INTO usuarios (gas_id, nome, email, senha, cargo, loja, can_view_finance, ativo, origem_sync, password_changed_at, atualizado_em)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'postgres',CASE WHEN $4::text IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END,CURRENT_TIMESTAMP)
        ON CONFLICT (email) DO UPDATE SET
          nome = EXCLUDED.nome,
+         senha = COALESCE(EXCLUDED.senha, usuarios.senha),
          cargo = EXCLUDED.cargo,
          loja = EXCLUDED.loja,
          can_view_finance = EXCLUDED.can_view_finance,
          ativo = EXCLUDED.ativo,
          origem_sync = 'postgres',
+         password_changed_at = CASE WHEN EXCLUDED.senha IS NULL THEN usuarios.password_changed_at ELSE CURRENT_TIMESTAMP END,
          atualizado_em = CURRENT_TIMESTAMP
-       RETURNING *`,
-      [gasId, nome, email, cargo, b.loja || null, !!b.can_view_finance, b.ativo !== false]
+       RETURNING id, gas_id, nome, email, cargo, loja, access_tags, can_view_finance, ativo, criado_em, atualizado_em`,
+      [gasId, nome, email, passwordHash, cargo, b.loja || null, !!b.can_view_finance, b.ativo !== false]
     );
     res.json({ ok: true, message: "Usuário salvo com sucesso.", usuario: result.rows[0] });
   } catch (error) {
@@ -2029,6 +2086,11 @@ app.patch("/api/usuarios/:id", requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const b = req.body || {};
+    const password = String(b.password || b.senha || "");
+    if (password && password.length < 12) {
+      return res.status(400).json({ ok: false, message: "A senha deve ter pelo menos 12 caracteres." });
+    }
+    const passwordHash = password ? await bcrypt.hash(password, 12) : null;
     const result = await pool.query(
       `UPDATE usuarios SET
         nome = COALESCE($1, nome),
@@ -2036,15 +2098,18 @@ app.patch("/api/usuarios/:id", requireAdmin, async (req, res) => {
         loja = COALESCE($3, loja),
         can_view_finance = COALESCE($4, can_view_finance),
         ativo = COALESCE($5, ativo),
+        senha = COALESCE($6, senha),
+        password_changed_at = CASE WHEN $6::text IS NULL THEN password_changed_at ELSE CURRENT_TIMESTAMP END,
         atualizado_em = CURRENT_TIMESTAMP
-       WHERE id = $6
-       RETURNING *`,
+       WHERE id = $7
+       RETURNING id, gas_id, nome, email, cargo, loja, access_tags, can_view_finance, ativo, criado_em, atualizado_em`,
       [
         b.nome ? clean(b.nome) : null,
         b.cargo ? clean(b.cargo) : null,
         b.loja !== undefined ? (b.loja || null) : null,
         b.can_view_finance !== undefined ? !!b.can_view_finance : null,
         b.ativo !== undefined ? !!b.ativo : null,
+        passwordHash,
         id
       ]
     );
@@ -2181,8 +2246,11 @@ if (require.main === module) {
 
 module.exports = {
   app,
+  pool,
   startServer,
   signSession,
   verifySession,
-  requireSession
+  requireSession,
+  buildPermissions,
+  publicUser
 };

@@ -41,7 +41,6 @@ Edite o `.env`:
 ```
 GAS_DEPLOY_URL=https://script.google.com/macros/s/AKfycb.../exec
 GAS_API_KEY=uma-chave-secreta-forte-aqui
-APP_ACCESS_KEY=uma-chave-de-acesso-forte-e-diferente
 SESSION_SECRET=um-segredo-aleatorio-diferente-com-32-ou-mais-caracteres
 SESSION_TTL_HOURS=12
 ```
@@ -79,7 +78,6 @@ Acesse: **http://localhost:3000**
    - `DATABASE_URL` (normalmente fornecida pelo serviço PostgreSQL)
    - `GAS_DEPLOY_URL`
    - `GAS_API_KEY`
-   - `APP_ACCESS_KEY`
    - `SESSION_SECRET`
    - `SESSION_TTL_HOURS`
 5. O Railway detecta automaticamente o `railway.toml` e faz deploy
@@ -93,12 +91,11 @@ Acesse: **http://localhost:3000**
 | `PORT` | Porta local (Railway define automaticamente) | Não |
 | `GAS_DEPLOY_URL` | URL de deploy do Apps Script | **Sim** |
 | `GAS_API_KEY` | Chave secreta para autenticar chamadas | **Sim** |
-| `APP_ACCESS_KEY` | Chave solicitada junto com o e-mail no login | **Sim** |
-| `SESSION_SECRET` | Assina cookies de sessão; use valor diferente da chave de acesso | **Sim** |
+| `SESSION_SECRET` | Assina cookies de sessão; use valor aleatório com 32+ caracteres | **Sim** |
 | `SESSION_TTL_HOURS` | Duração da sessão; padrão 12 horas | Não |
 | `ALLOWED_ORIGINS` | Origens CORS separadas por vírgula | Não |
 
-As rotas internas em `/api/*` exigem cookie de sessão assinado. Somente `/api/auth/login`,
+Cada usuário entra com e-mail e senha individual armazenada como hash bcrypt. As rotas internas em `/api/*` exigem cookie de sessão assinado. Somente `/api/auth/login`,
 `/api/auth/logout` e `/api/public/*` ficam fora dessa exigência. Perfis e lojas também são
 validados no servidor; esconder botões no navegador não é tratado como controle de segurança.
 

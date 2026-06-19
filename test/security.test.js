@@ -1,11 +1,11 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const bcrypt = require("bcryptjs");
 
-process.env.APP_ACCESS_KEY = "test-access-key-with-at-least-32-characters";
 process.env.SESSION_SECRET = "test-session-secret-with-at-least-32-characters";
 process.env.SESSION_TTL_HOURS = "1";
 
-const { app, signSession } = require("../server");
+const { app, pool, signSession } = require("../server");
 
 let server;
 let baseUrl;
@@ -39,13 +39,45 @@ test("proxy GAS rejeita acesso anônimo", async () => {
   assert.equal(response.status, 401);
 });
 
-test("login rejeita chave de acesso incorreta", async () => {
+test("login exige e-mail e senha", async () => {
   const response = await fetch(baseUrl + "/api/auth/login", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email: "admin@example.com", accessKey: "incorreta" })
+    body: JSON.stringify({ email: "admin@example.com" })
   });
-  assert.equal(response.status, 401);
+  assert.equal(response.status, 400);
+});
+
+test("login individual valida bcrypt e emite cookie HttpOnly", async () => {
+  const originalQuery = pool.query;
+  const hash = await bcrypt.hash("SenhaIndividual#2026", 4);
+  pool.query = async () => ({
+    rows: [{
+      id: 1,
+      nome: "Administrador",
+      email: "admin@example.com",
+      senha: hash,
+      cargo: "admin",
+      loja: "Loja A",
+      access_tags: "",
+      can_view_finance: true,
+      ativo: true
+    }]
+  });
+
+  try {
+    const response = await fetch(baseUrl + "/api/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "admin@example.com", password: "SenhaIndividual#2026" })
+    });
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get("set-cookie") || "", /HttpOnly/);
+    const body = await response.json();
+    assert.equal(body.user.permissions.isAdmin, true);
+  } finally {
+    pool.query = originalQuery;
+  }
 });
 
 test("sessão assinada válida é aceita", async () => {
