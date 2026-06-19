@@ -127,9 +127,9 @@ const SYSTEM_ACCESS_TAGS = [
 ];
 
 const KOMMO_DEFAULTS = {
-  accessToken: 'eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsImp0aSI6ImE0YmYxMTA2MDk0Y2E2ZTg4MWMwZjg3MDdhODNhOWMwZjc4MGUxMGM0OTBiOGQ1MzEwNzcyZmUzZmJlMDRkMGUwZmVlZGUxZmE1YzE3ZTYzIn0.eyJhdWQiOiI1OWRhNzQ5Ni03NDkzLTQ5M2UtYjI4NC00MDYwN2Q4NzNlN2UiLCJqdGkiOiJhNGJmMTEwNjA5NGNhNmU4ODFjMGY4NzA3YTgzYTljMGY3ODBlMTBjNDkwYjhkNTMxMDc3MmZlM2ZiZTA0ZDBlMGZlZWRlMWZhNWMxN2U2MyIsImlhdCI6MTc3OTIxMzk2NywibmJmIjoxNzc5MjEzOTY3LCJleHAiOjE4NDMzNDQwMDAsInN1YiI6IjExODkxMjU5IiwiZ3JhbnRfdHlwZSI6IiIsImFjY291bnRfaWQiOjMzNDM3Nzc1LCJiYXNlX2RvbWFpbiI6ImtvbW1vLmNvbSIsInZlcnNpb24iOjIsInNjb3BlcyI6WyJwdXNoX25vdGlmaWNhdGlvbnMiLCJmaWxlcyIsImNybSIsImZpbGVzX2RlbGV0ZSIsIm5vdGlmaWNhdGlvbnMiXSwiaGFzaF91dWlkIjoiNjkxYjFkMGEtNDFlYS00N2U2LWExZTQtNzc0YmJhMGUwYjU2IiwiYXBpX2RvbWFpbiI6ImFwaS1nLmtvbW1vLmNvbSJ9.iCZrv-6oItXmVIZ7ZHlCu9bANVyWjiY_cLFEls65M04yEgB96w7aihwkoc6h4l8996rjOejkB-y5eRxhlflGHY-1UNly4TBvdY2GH3ITdfbPAJkvHSt4736GPT4Up9W846zLLruhUSW89mK0MSW6Ig7_786zhuvh_F1CLJZRAy9Xk8RQeMLQ0ZzJ5UEdIHbOd96Dp5_Qa4ZZZ19fZlbXo1IFITzhaHdHD3t5JDDvl3RJAGO2QpBHAsQODVOXJ3GQMo3gypJjQMOQjH1xk8kJLVOZvkaQcRS8uB8crBVAcoeyrzj85En-IV9sE7bzIgmIKFzhxXPW_0HpbWbQDMqWuQ',
+  accessToken: '',
   clientId: '59da7496-7493-493e-b284-40607d873e7e',
-  clientSecret: '2twz7AVfekK5WGhfrgYvRX8vGoOjWT0LIzdpxCspXAiFEmb96GCUoNyrkdWpdEWK',
+  clientSecret: '',
   gasDeployUrl: ''
 };
 
@@ -309,6 +309,9 @@ function executarAcaoApiNode_(action, body, params) {
       return getAgendamentosSeguro(user, filtros);
     }
 
+    case 'syncPostgres':
+      return syncPostgres(body.payload || {});
+
     case 'salvarAgendamento': {
       const user = resolverUsuarioApi_(body);
       const payload = body.payload || body.agendamento || body;
@@ -418,14 +421,11 @@ function resolverUsuarioApi_(body) {
  * Execute esta função uma vez para configurar o token do Node.js.
  * Use o mesmo valor no arquivo .env do Node.js em GAS_API_KEY.
  */
-function configurarApiKeyNode() {
-  const token = 'agendamento_tgt_target_2026_api_segura_XYZ520741';
-
-  PropertiesService
-    .getScriptProperties()
-    .setProperty('KOMMO_WEBHOOK_SECRET', token);
-
-  Logger.log('GAS_API_KEY configurada com sucesso: ' + token);
+function configurarApiKeyNode(token) {
+  token = String(token || '').trim();
+  if (token.length < 32) throw new Error('Informe uma API key aleatória com pelo menos 32 caracteres.');
+  PropertiesService.getScriptProperties().setProperty('API_KEY', token);
+  Logger.log('GAS API_KEY configurada com sucesso.');
 }
 // ═══════════════════════════════════════════════════════════════
 //  UTILITÁRIOS
@@ -2441,7 +2441,8 @@ function handleHttpApiCall_(params) {
     'gerarRelatorioCSV'              : gerarRelatorioCSV,
     'exportFinanceCSV'               : exportFinanceCSV,
     'atualizarPlanilhaSistemaCompleto': atualizarPlanilhaSistemaCompleto,
-    'testarBackend'                  : testarBackend
+    'testarBackend'                  : testarBackend,
+    'syncPostgres'                   : syncPostgres
   };
 
   if (!Object.prototype.hasOwnProperty.call(ALLOWED, fn)) {
@@ -2455,10 +2456,11 @@ function handleHttpApiCall_(params) {
     return saida_({ ok: false, error: ex.message || String(ex), fn: fn });
   }
 }
-function configurarChaveApi() {
-  PropertiesService.getScriptProperties()
-    .setProperty('API_KEY', 'agendamento_tgt_target_2026_api_segura_XYZ520741');
-  Logger.log('API_KEY configurada com sucesso!');
+function configurarChaveApi(apiKey) {
+  apiKey = String(apiKey || '').trim();
+  if (apiKey.length < 32) throw new Error('Informe uma API key aleatória com pelo menos 32 caracteres.');
+  PropertiesService.getScriptProperties().setProperty('API_KEY', apiKey);
+  Logger.log('API_KEY configurada com sucesso.');
 }
 function corrigirHorariosPlanilha_() {
   var sh = getSheet_(SHEETS.agendamentos);
@@ -2672,6 +2674,24 @@ function getRowsAsObjects_(sheetName) {
     try { CacheService.getScriptCache().put(key, JSON.stringify(rows), ttl); } catch(e) {}
   }
   return rows;
+}
+
+function syncPostgres(options) {
+  options = options || {};
+  ensureSystemStructure_();
+  return {
+    ok: true,
+    data: {
+      usuarios: getRowsAsObjects_(SHEETS.usuarios),
+      lojas: getRowsAsObjects_(SHEETS.lojas),
+      optometristas: getRowsAsObjects_(SHEETS.optometristas),
+      origens: getRowsAsObjects_(SHEETS.origens),
+      feriados: getRowsAsObjects_(SHEETS.feriados),
+      agendamentos: getRowsAsObjects_(SHEETS.agendamentos)
+    },
+    options: options,
+    ts: new Date().toISOString()
+  };
 }
 
 function registrarSincronizacao_(tipo, mensagem, usuario) {
