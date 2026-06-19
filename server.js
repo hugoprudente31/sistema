@@ -174,7 +174,7 @@ function canViewAllStores(session) {
 }
 
 function canViewFinanceSession(session) {
-  return Boolean(session?.canViewFinance) || hasRole(session, ["admin", "gerente de loja"]);
+  return Boolean(session?.canViewFinance) || hasRole(session, ["admin", "gerente de loja", "comprador"]);
 }
 
 function normalizeStoreKey(value) {
@@ -192,7 +192,7 @@ function buildPermissions(user) {
   const manager = role === "gerente de loja";
   const buyer = role === "comprador";
   const seller = ["consultor de vendas", "vendedor"].includes(role);
-  const canViewFinance = admin || manager || Boolean(user?.can_view_finance);
+  const canViewFinance = admin || manager || buyer || Boolean(user?.can_view_finance);
 
   return {
     isAdmin: admin,

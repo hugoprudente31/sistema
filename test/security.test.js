@@ -184,6 +184,26 @@ test("financeiro autorizado deriva valores e descontos dos agendamentos", async 
   }
 });
 
+test("comprador acessa apenas o financeiro da própria loja", async () => {
+  const originalQuery = pool.query;
+  let capturedSql = "";
+  let capturedParams = [];
+  pool.query = async (sql, params) => {
+    capturedSql = sql;
+    capturedParams = params;
+    return { rows: [{ id: 30, valor_total: "150.00", desconto: "10.00", loja: "Óticas TGT Gonzaga" }] };
+  };
+  const token = signSession({ id: "5", email: "comprador@example.com", perfil: "comprador", loja: "Óticas TGT Gonzaga" });
+  try {
+    const response = await fetch(baseUrl + "/api/faturamentos", { headers: { cookie: `tgt_session=${token}` } });
+    assert.equal(response.status, 200);
+    assert.match(capturedSql, /TRANSLATE\(LOWER/);
+    assert.deepEqual(capturedParams, ["Óticas TGT Gonzaga"]);
+  } finally {
+    pool.query = originalQuery;
+  }
+});
+
 test("painel contem farol, quatro datas da OS e valores visiveis", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "public", "index.html"), "utf8");
   assert.match(html, /AtendimentoSemaforo: semaforo/);
