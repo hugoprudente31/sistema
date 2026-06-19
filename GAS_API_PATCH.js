@@ -72,7 +72,8 @@ function handleHttpApiCall_(params) {
     'gerarRelatorioCSV'             : gerarRelatorioCSV,
     'exportFinanceCSV'              : exportFinanceCSV,
     'atualizarPlanilhaSistemaCompleto': atualizarPlanilhaSistemaCompleto,
-    'testarBackend'                 : testarBackend
+    'testarBackend'                 : testarBackend,
+    'syncPostgres'                  : syncPostgres
   };
 
   if (!Object.prototype.hasOwnProperty.call(ALLOWED, fn)) {

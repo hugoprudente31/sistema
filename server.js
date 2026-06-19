@@ -3,15 +3,41 @@ const cors = require("cors");
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
+const bcrypt = require("bcryptjs");
 const { Pool } = require("pg");
 require("dotenv").config();
 
 const app = express();
 const PORT = process.env.PORT || 8080;
+const SESSION_SECRET = process.env.SESSION_SECRET || "";
+const SESSION_COOKIE = "tgt_session";
+const SESSION_TTL_HOURS = Math.max(1, Number(process.env.SESSION_TTL_HOURS || 12));
+const ALLOWED_ORIGINS = new Set(
+  String(process.env.ALLOWED_ORIGINS || "https://sistema.oticastgt.com.br,https://sistema-production-cd20.up.railway.app")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+);
 
-app.use(cors());
-app.use(express.json({ limit: "30mb" }));
-app.use(express.urlencoded({ extended: true, limit: "30mb" }));
+app.disable("x-powered-by");
+app.use(cors({
+  credentials: true,
+  origin(origin, callback) {
+    if (!origin || ALLOWED_ORIGINS.has(origin)) return callback(null, true);
+    return callback(null, false);
+  }
+}));
+app.use(express.json({ limit: "1mb" }));
+app.use(express.urlencoded({ extended: true, limit: "1mb" }));
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  if (process.env.NODE_ENV === "production") {
+    res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  }
+  next();
+});
 
 const publicPath = path.join(__dirname, "public");
 if (fs.existsSync(publicPath)) app.use(express.static(publicPath));
@@ -38,7 +64,7 @@ function validarLandingApiKey(req, res, next) {
     });
   }
 
-  if (recebida !== LANDING_API_KEY) {
+  if (!safeEqual(recebida, LANDING_API_KEY)) {
     return res.status(401).json({
       ok: false,
       message: "Chave da landing page inválida."
@@ -53,6 +79,7 @@ const pool = new Pool({
 
 const GAS_URL =
   process.env.GAS_URL ||
+  process.env.GAS_DEPLOY_URL ||
   process.env.GAS_WEBAPP_URL ||
   process.env.URL_GAS ||
   process.env.URL_DE_IMPLANTACAO_DE_GAS ||
@@ -62,8 +89,139 @@ const GAS_URL =
 const GAS_API_KEY =
   process.env.GAS_API_KEY ||
   process.env.API_KEY ||
-  process.env.KOMMO_WEBHOOK_SECRET ||
   "";
+
+function safeEqual(value, expected) {
+  const left = crypto.createHash("sha256").update(String(value || "")).digest();
+  const right = crypto.createHash("sha256").update(String(expected || "")).digest();
+  return crypto.timingSafeEqual(left, right);
+}
+
+function parseCookies(req) {
+  return String(req.headers.cookie || "")
+    .split(";")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .reduce((cookies, item) => {
+      const index = item.indexOf("=");
+      if (index > 0) cookies[item.slice(0, index)] = decodeURIComponent(item.slice(index + 1));
+      return cookies;
+    }, {});
+}
+
+function signSession(user) {
+  const now = Date.now();
+  const payload = Buffer.from(JSON.stringify({
+    sub: String(user.id || user.user_id || user.email || ""),
+    email: String(user.email || "").toLowerCase(),
+    nome: String(user.nome || ""),
+    perfil: String(user.perfil || user.cargo || ""),
+    loja: String(user.loja || ""),
+    canViewFinance: Boolean(user.permissions?.canViewFinance || user.can_view_finance),
+    iat: now,
+    exp: now + SESSION_TTL_HOURS * 60 * 60 * 1000
+  })).toString("base64url");
+  const signature = crypto.createHmac("sha256", SESSION_SECRET).update(payload).digest("base64url");
+  return `${payload}.${signature}`;
+}
+
+function verifySession(token) {
+  if (!SESSION_SECRET || !token) return null;
+  const [payload, signature, extra] = String(token).split(".");
+  if (!payload || !signature || extra) return null;
+  const expected = crypto.createHmac("sha256", SESSION_SECRET).update(payload).digest("base64url");
+  if (!safeEqual(signature, expected)) return null;
+  try {
+    const session = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    if (!session.exp || session.exp <= Date.now() || !session.email) return null;
+    return session;
+  } catch {
+    return null;
+  }
+}
+
+function sessionCookie(token, maxAgeSeconds) {
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  return `${SESSION_COOKIE}=${encodeURIComponent(token || "")}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAgeSeconds}${secure}`;
+}
+
+function requireSession(req, res, next) {
+  if (!SESSION_SECRET) {
+    return res.status(503).json({ ok: false, message: "SESSION_SECRET não configurado." });
+  }
+  const session = verifySession(parseCookies(req)[SESSION_COOKIE]);
+  if (!session) {
+    return res.status(401).json({ ok: false, message: "Sessão ausente ou expirada." });
+  }
+  req.session = session;
+  next();
+}
+
+function roleOf(session) {
+  return clean(session?.perfil).toLowerCase();
+}
+
+function hasRole(session, roles) {
+  return roles.includes(roleOf(session));
+}
+
+function isAdmin(session) {
+  return hasRole(session, ["admin"]);
+}
+
+function canViewAllStores(session) {
+  return hasRole(session, ["admin", "atendimento central"]);
+}
+
+function canViewFinanceSession(session) {
+  return Boolean(session?.canViewFinance) || hasRole(session, ["admin", "gerente de loja"]);
+}
+
+function buildPermissions(user) {
+  const role = clean(user?.cargo || user?.perfil).toLowerCase();
+  const admin = role === "admin";
+  const central = role === "atendimento central";
+  const manager = role === "gerente de loja";
+  const buyer = role === "comprador";
+  const seller = ["consultor de vendas", "vendedor"].includes(role);
+  const canViewFinance = admin || manager || Boolean(user?.can_view_finance);
+
+  return {
+    isAdmin: admin,
+    canViewAll: admin || central,
+    canCreateAgendamento: admin || central || manager || buyer || seller,
+    canManageOS: admin || central || manager || buyer,
+    canViewFinance,
+    canExportFinance: canViewFinance
+  };
+}
+
+function publicUser(user) {
+  const permissions = buildPermissions(user);
+  return {
+    id: user.id,
+    nome: user.nome,
+    email: user.email,
+    perfil: user.cargo,
+    cargo: user.cargo,
+    loja: user.loja || "",
+    accessTags: clean(user.access_tags).split(/[;,|]/).map((tag) => tag.trim()).filter(Boolean),
+    permissions,
+    can_view_finance: permissions.canViewFinance
+  };
+}
+
+function requireAdmin(req, res, next) {
+  if (!isAdmin(req.session)) {
+    return res.status(403).json({ ok: false, message: "Acesso restrito ao administrador." });
+  }
+  next();
+}
+
+function ensureStoreAccess(session, store) {
+  if (canViewAllStores(session)) return true;
+  return Boolean(session?.loja && store && clean(session.loja).toLowerCase() === clean(store).toLowerCase());
+}
 
 // ===============================
 // CONFIGURAÇÃO PÚBLICA — LANDING PAGES
@@ -510,6 +668,8 @@ async function initDatabase() {
   await addColumnIfMissing("faturamentos", "gas_id", "TEXT UNIQUE");
   await addColumnIfMissing("faturamentos", "origem_sync", "TEXT DEFAULT 'postgres'");
   await addColumnIfMissing("usuarios", "gas_id", "TEXT UNIQUE");
+  await addColumnIfMissing("usuarios", "senha", "TEXT");
+  await addColumnIfMissing("usuarios", "password_changed_at", "TIMESTAMP");
   await addColumnIfMissing("usuarios", "access_tags", "TEXT");
   await addColumnIfMissing("usuarios", "can_view_finance", "BOOLEAN DEFAULT false");
   await addColumnIfMissing("usuarios", "origem_sync", "TEXT DEFAULT 'postgres'");
@@ -1037,6 +1197,87 @@ async function syncGasToPostgres(options = {}) {
   }
 }
 
+const loginAttempts = new Map();
+
+function allowLoginAttempt(ip) {
+  const now = Date.now();
+  const windowMs = 15 * 60 * 1000;
+  const current = loginAttempts.get(ip) || { count: 0, resetAt: now + windowMs };
+  if (current.resetAt <= now) {
+    current.count = 0;
+    current.resetAt = now + windowMs;
+  }
+  current.count += 1;
+  loginAttempts.set(ip, current);
+  return current.count <= 5;
+}
+
+app.post("/api/auth/login", async (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+
+  if (!SESSION_SECRET) {
+    return res.status(503).json({
+      ok: false,
+      message: "Autenticação ainda não configurada no servidor."
+    });
+  }
+
+  if (!allowLoginAttempt(req.ip || "unknown")) {
+    return res.status(429).json({ ok: false, message: "Muitas tentativas. Aguarde 15 minutos." });
+  }
+
+  const email = clean(req.body?.email).toLowerCase();
+  const password = String(req.body?.password || "");
+  if (!email || !password) {
+    return res.status(400).json({ ok: false, message: "Informe e-mail e senha." });
+  }
+
+  try {
+    const result = await pool.query(
+      `SELECT id, nome, email, senha, cargo, loja, access_tags, can_view_finance, ativo
+       FROM usuarios
+       WHERE LOWER(email) = LOWER($1) AND ativo = true
+       LIMIT 1`,
+      [email]
+    );
+    const dbUser = result.rows[0];
+    const passwordOk = Boolean(dbUser?.senha) && await bcrypt.compare(password, dbUser.senha);
+    if (!dbUser || !passwordOk) {
+      return res.status(401).json({ ok: false, message: "Credenciais inválidas." });
+    }
+
+    const user = publicUser(dbUser);
+    const token = signSession(user);
+    res.setHeader("Set-Cookie", sessionCookie(token, SESSION_TTL_HOURS * 60 * 60));
+    return res.json({
+      ok: true,
+      user,
+      session: { resolvedEmail: user.email },
+      serverVersion: "7.3.0-auth-individual"
+    });
+  } catch (error) {
+    console.error("Erro no login seguro:", error.message);
+    return res.status(500).json({ ok: false, message: "Não foi possível autenticar agora." });
+  }
+});
+
+app.get("/api/auth/session", requireSession, (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.json({ ok: true, session: req.session });
+});
+
+app.post("/api/auth/logout", (req, res) => {
+  res.setHeader("Set-Cookie", sessionCookie("", 0));
+  res.setHeader("Cache-Control", "no-store");
+  res.json({ ok: true });
+});
+
+app.use("/api", (req, res, next) => {
+  if (req.path === "/auth/login" || req.path === "/auth/logout") return next();
+  if (req.path.startsWith("/public/")) return next();
+  return requireSession(req, res, next);
+});
+
 app.get("/health", async (req, res) => {
   try {
     const db = await pool.query("SELECT NOW() as agora");
@@ -1068,10 +1309,38 @@ app.get("/health", async (req, res) => {
 
 app.post("/api/gas", async (req, res) => {
   try {
-    const result = await callGas(req.body?.fn || req.body?.action || "", req.body?.args || [], 90000);
+    const fn = clean(req.body?.fn || req.body?.action);
+    const incomingArgs = Array.isArray(req.body?.args) ? req.body.args : [];
+    const allowedByRole = {
+      getInfoInicial: () => true,
+      gerarRelatorioCSV: () => true,
+      getLeadTimeReport: () => hasRole(req.session, ["admin", "atendimento central", "gerente de loja"]),
+      getHistoricoOperacional: () => hasRole(req.session, ["admin", "gerente de loja"]),
+      exportFinanceCSV: () => canViewFinanceSession(req.session),
+      atualizarPlanilhaSistemaCompleto: () => isAdmin(req.session),
+      testarBackend: () => isAdmin(req.session)
+    };
+
+    if (!allowedByRole[fn] || !allowedByRole[fn]()) {
+      return res.status(403).json({ ok: false, message: "Função GAS não permitida para este perfil." });
+    }
+
+    const currentLogin = await callGas("loginSeguro", [req.session.email], 90000);
+    if (!currentLogin?.ok || !currentLogin?.user) {
+      return res.status(401).json({ ok: false, message: "Usuário da sessão não está mais ativo." });
+    }
+
+    const trustedUser = currentLogin.user;
+    let args;
+    if (fn === "getInfoInicial") args = [req.session.email];
+    else if (["getLeadTimeReport", "getHistoricoOperacional"].includes(fn)) args = [trustedUser, incomingArgs[1] || {}];
+    else if (["gerarRelatorioCSV", "exportFinanceCSV"].includes(fn)) args = [incomingArgs[0] || {}, trustedUser];
+    else args = [];
+
+    const result = await callGas(fn, args, 90000);
     res.json({
       ok: true,
-      action: req.body?.fn || req.body?.action || "",
+      action: fn,
       result
     });
   } catch (error) {
@@ -1086,6 +1355,9 @@ app.post("/api/gas", async (req, res) => {
 
 app.post("/api/sync/gas-to-postgres", async (req, res) => {
   try {
+    if (!isAdmin(req.session)) {
+      return res.status(403).json({ ok: false, message: "Sincronização restrita ao administrador." });
+    }
     const result = await syncGasToPostgres(req.body || {});
     res.json(result);
   } catch (error) {
@@ -1413,12 +1685,18 @@ app.post("/api/public/agendamentos", validarLandingApiKey, async (req, res) => {
 app.post("/api/agendamentos", async (req, res) => {
   try {
     const b = req.body || {};
+    if (!hasRole(req.session, ["admin", "atendimento central", "gerente de loja", "consultor de vendas", "vendedor", "comprador"])) {
+      return res.status(403).json({ ok: false, message: "Perfil sem permissão para criar agendamentos." });
+    }
+    if (!ensureStoreAccess(req.session, b.loja)) {
+      return res.status(403).json({ ok: false, message: "Sem permissão para operar esta loja." });
+    }
     const nomeCliente = clean(b.nome || b.nomeCompleto || b.NomeCompleto);
     if (!nomeCliente) return res.status(400).json({ ok: false, message: "Nome do cliente é obrigatório." });
     if (nomeCliente.toLowerCase().includes("teste")) return res.status(400).json({ ok: false, message: "Não é permitido cadastrar cliente com nome TESTE." });
 
-    const actorNome = clean(b.agendado_por_nome || b.agendadoPorNome || b.responsavel || b.Responsavel || b.proprietario_nome || b.proprietarioNome || b.userNome || b.nomeUsuario || "Sistema/Landing");
-    const actorEmail = clean(b.agendado_por_email || b.agendadoPorEmail || b.criado_por_email || b.userEmail || b.emailUsuario || "");
+    const actorNome = clean(req.session.nome || "Usuário autenticado");
+    const actorEmail = clean(req.session.email);
 
     const result = await pool.query(
       `INSERT INTO agendamentos (
@@ -1465,7 +1743,11 @@ app.post("/api/agendamentos", async (req, res) => {
 
 app.get("/api/agendamentos", async (req, res) => {
   try {
-    const result = await pool.query(`SELECT * FROM agendamentos ORDER BY id DESC LIMIT 1000`);
+    const result = canViewAllStores(req.session)
+      ? await pool.query(`SELECT * FROM agendamentos ORDER BY id DESC LIMIT 1000`)
+      : req.session.loja
+        ? await pool.query(`SELECT * FROM agendamentos WHERE LOWER(COALESCE(loja,'')) = LOWER($1) ORDER BY id DESC LIMIT 1000`, [req.session.loja])
+        : { rows: [] };
     res.json({ ok: true, total: result.rows.length, agendamentos: result.rows });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });
@@ -1476,11 +1758,42 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const b = req.body || {};
+    const current = await pool.query(`SELECT loja FROM agendamentos WHERE id = $1`, [id]);
+    if (!current.rows.length) return res.status(404).json({ ok: false, message: "Agendamento não encontrado." });
+    if (!ensureStoreAccess(req.session, current.rows[0].loja)) {
+      return res.status(403).json({ ok: false, message: "Sem permissão para operar esta loja." });
+    }
+    if (b.loja && !ensureStoreAccess(req.session, b.loja)) {
+      return res.status(403).json({ ok: false, message: "Sem permissão para mover o registro para esta loja." });
+    }
+    if (!hasRole(req.session, ["admin", "atendimento central", "gerente de loja", "consultor de vendas", "vendedor", "comprador", "optometrista"])) {
+      return res.status(403).json({ ok: false, message: "Perfil sem permissão para alterar agendamentos." });
+    }
+    if (roleOf(req.session) === "optometrista") {
+      const allowed = new Set([
+        "compareceu", "status", "statusAgenda", "atendimento_realizado", "atendimentoRealizado",
+        "observacao", "ultima_alteracao_por_nome", "ultima_alteracao_por_email", "ultima_alteracao_em"
+      ]);
+      const forbidden = Object.keys(b).filter((key) => !allowed.has(key));
+      if (forbidden.length) {
+        return res.status(403).json({ ok: false, message: "Optometrista só pode atualizar presença, status e observação." });
+      }
+    }
+    if (["consultor de vendas", "vendedor"].includes(roleOf(req.session))) {
+      const blocked = [
+        "numero_os", "numeroOS", "status_os", "statusOS", "valor_venda", "valorVenda", "desconto",
+        "vendedor_nome", "vendedorNome", "data_abertura_os", "dataAberturaOS", "data_entrada_os",
+        "dataEntradaOS", "data_finalizacao_os", "dataFinalizacaoOS", "data_entrega_os", "dataEntregaOS"
+      ];
+      if (blocked.some((key) => Object.prototype.hasOwnProperty.call(b, key))) {
+        return res.status(403).json({ ok: false, message: "Este perfil não pode alterar OS ou valores financeiros." });
+      }
+    }
     if (String(b.nome || b.nomeCompleto || "").toLowerCase().includes("teste")) {
       return res.status(400).json({ ok: false, message: "Não é permitido cadastrar cliente com nome TESTE." });
     }
-    const actorNome = clean(b.ultima_alteracao_por_nome || b.agendado_por_nome || b.agendadoPorNome || b.Responsavel || b.responsavel || b.userNome || b.nomeUsuario || "Sistema/Landing");
-    const actorEmail = clean(b.ultima_alteracao_por_email || b.agendado_por_email || b.agendadoPorEmail || b.userEmail || b.emailUsuario || "");
+    const actorNome = clean(req.session.nome || "Usuário autenticado");
+    const actorEmail = clean(req.session.email);
 
     const result = await pool.query(
       `UPDATE agendamentos SET
@@ -1529,8 +1842,8 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         b.numero_os || b.numeroOS || null,
         b.status_os || b.statusOS || null,
         b.vendedor_nome || b.vendedorNome || null,
-        b.valor_venda || b.valorVenda || null,
-        b.desconto || null,
+        b.valor_venda !== undefined ? b.valor_venda : (b.valorVenda !== undefined ? b.valorVenda : null),
+        b.desconto !== undefined ? b.desconto : null,
         b.vendedor_atendeu_nome || b.vendedorAtendeuNome || b.vendedor_nome || b.vendedorNome || b.consultor_responsavel || null,
         b.vendedor_atendeu_email || null,
         actorNome,
@@ -1555,6 +1868,12 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
 app.post("/api/clientes", async (req, res) => {
   try {
     const b = req.body || {};
+    if (!hasRole(req.session, ["admin", "atendimento central", "gerente de loja", "consultor de vendas", "vendedor", "comprador"])) {
+      return res.status(403).json({ ok: false, message: "Perfil sem permissão para cadastrar clientes." });
+    }
+    if (!ensureStoreAccess(req.session, b.loja_origem || req.session.loja)) {
+      return res.status(403).json({ ok: false, message: "Sem permissão para operar esta loja." });
+    }
     if (!b.nome) return res.status(400).json({ ok: false, message: "Nome do cliente é obrigatório." });
 
     const gasId = b.gas_id || (b.whatsapp || b.email ? makeGasId("cliente", (b.whatsapp || b.email).toLowerCase()) : null);
@@ -1594,7 +1913,11 @@ app.post("/api/clientes", async (req, res) => {
 
 app.get("/api/clientes", async (req, res) => {
   try {
-    const result = await pool.query(`SELECT * FROM clientes ORDER BY id DESC LIMIT 1000`);
+    const result = canViewAllStores(req.session)
+      ? await pool.query(`SELECT * FROM clientes ORDER BY id DESC LIMIT 1000`)
+      : req.session.loja
+        ? await pool.query(`SELECT * FROM clientes WHERE LOWER(COALESCE(loja_origem,'')) = LOWER($1) ORDER BY id DESC LIMIT 1000`, [req.session.loja])
+        : { rows: [] };
     res.json({ ok: true, total: result.rows.length, clientes: result.rows });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });
@@ -1621,7 +1944,13 @@ app.get("/api/origens", async (req, res) => {
 
 app.get("/api/optometristas", async (req, res) => {
   try {
-    const loja = clean(req.query.loja || "");
+    let loja = clean(req.query.loja || "");
+    if (!canViewAllStores(req.session)) {
+      if (loja && !ensureStoreAccess(req.session, loja)) {
+        return res.status(403).json({ ok: false, message: "Sem permissão para consultar esta loja." });
+      }
+      loja = clean(req.session.loja);
+    }
     const result = loja
       ? await pool.query(`SELECT * FROM optometristas WHERE ativo = true AND loja = $1 ORDER BY nome ASC`, [loja])
       : await pool.query(`SELECT * FROM optometristas WHERE ativo = true ORDER BY loja ASC, nome ASC`);
@@ -1633,7 +1962,13 @@ app.get("/api/optometristas", async (req, res) => {
 
 app.post("/api/faturamentos", async (req, res) => {
   try {
+    if (!canViewFinanceSession(req.session)) {
+      return res.status(403).json({ ok: false, message: "Perfil sem acesso ao financeiro." });
+    }
     const b = req.body || {};
+    if (!ensureStoreAccess(req.session, b.loja || req.session.loja)) {
+      return res.status(403).json({ ok: false, message: "Sem permissão para operar esta loja." });
+    }
     const result = await pool.query(
       `INSERT INTO faturamentos (
         gas_id, cliente_id, agendamento_id, loja, vendedor, valor_total,
@@ -1662,7 +1997,14 @@ app.post("/api/faturamentos", async (req, res) => {
 
 app.get("/api/faturamentos", async (req, res) => {
   try {
-    const result = await pool.query(`SELECT * FROM faturamentos ORDER BY id DESC LIMIT 1000`);
+    if (!canViewFinanceSession(req.session)) {
+      return res.status(403).json({ ok: false, message: "Perfil sem acesso ao financeiro." });
+    }
+    const result = canViewAllStores(req.session)
+      ? await pool.query(`SELECT * FROM faturamentos ORDER BY id DESC LIMIT 1000`)
+      : req.session.loja
+        ? await pool.query(`SELECT * FROM faturamentos WHERE LOWER(COALESCE(loja,'')) = LOWER($1) ORDER BY id DESC LIMIT 1000`, [req.session.loja])
+        : { rows: [] };
     res.json({ ok: true, total: result.rows.length, faturamentos: result.rows });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });
@@ -1683,7 +2025,7 @@ app.post("/api/logs", async (req, res) => {
 });
 
 
-app.get("/api/usuarios", async (req, res) => {
+app.get("/api/usuarios", requireAdmin, async (req, res) => {
   try {
     const todos = req.query.todos === 'true';
     const result = await pool.query(`
@@ -1700,29 +2042,36 @@ app.get("/api/usuarios", async (req, res) => {
   }
 });
 
-app.post("/api/usuarios", async (req, res) => {
+app.post("/api/usuarios", requireAdmin, async (req, res) => {
   try {
     const b = req.body || {};
     const nome = clean(b.nome);
     const email = clean(b.email).toLowerCase();
     const cargo = clean(b.cargo);
+    const password = String(b.password || b.senha || "");
     if (!nome || !email || !cargo) {
       return res.status(400).json({ ok: false, message: "Nome, e-mail e perfil são obrigatórios." });
     }
+    if (password && password.length < 12) {
+      return res.status(400).json({ ok: false, message: "A senha deve ter pelo menos 12 caracteres." });
+    }
+    const passwordHash = password ? await bcrypt.hash(password, 12) : null;
     const gasId = makeGasId("usuario", email);
     const result = await pool.query(
-      `INSERT INTO usuarios (gas_id, nome, email, cargo, loja, can_view_finance, ativo, origem_sync, atualizado_em)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'postgres',CURRENT_TIMESTAMP)
+      `INSERT INTO usuarios (gas_id, nome, email, senha, cargo, loja, can_view_finance, ativo, origem_sync, password_changed_at, atualizado_em)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'postgres',CASE WHEN $4::text IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END,CURRENT_TIMESTAMP)
        ON CONFLICT (email) DO UPDATE SET
          nome = EXCLUDED.nome,
+         senha = COALESCE(EXCLUDED.senha, usuarios.senha),
          cargo = EXCLUDED.cargo,
          loja = EXCLUDED.loja,
          can_view_finance = EXCLUDED.can_view_finance,
          ativo = EXCLUDED.ativo,
          origem_sync = 'postgres',
+         password_changed_at = CASE WHEN EXCLUDED.senha IS NULL THEN usuarios.password_changed_at ELSE CURRENT_TIMESTAMP END,
          atualizado_em = CURRENT_TIMESTAMP
-       RETURNING *`,
-      [gasId, nome, email, cargo, b.loja || null, !!b.can_view_finance, b.ativo !== false]
+       RETURNING id, gas_id, nome, email, cargo, loja, access_tags, can_view_finance, ativo, criado_em, atualizado_em`,
+      [gasId, nome, email, passwordHash, cargo, b.loja || null, !!b.can_view_finance, b.ativo !== false]
     );
     res.json({ ok: true, message: "Usuário salvo com sucesso.", usuario: result.rows[0] });
   } catch (error) {
@@ -1733,10 +2082,15 @@ app.post("/api/usuarios", async (req, res) => {
   }
 });
 
-app.patch("/api/usuarios/:id", async (req, res) => {
+app.patch("/api/usuarios/:id", requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const b = req.body || {};
+    const password = String(b.password || b.senha || "");
+    if (password && password.length < 12) {
+      return res.status(400).json({ ok: false, message: "A senha deve ter pelo menos 12 caracteres." });
+    }
+    const passwordHash = password ? await bcrypt.hash(password, 12) : null;
     const result = await pool.query(
       `UPDATE usuarios SET
         nome = COALESCE($1, nome),
@@ -1744,15 +2098,18 @@ app.patch("/api/usuarios/:id", async (req, res) => {
         loja = COALESCE($3, loja),
         can_view_finance = COALESCE($4, can_view_finance),
         ativo = COALESCE($5, ativo),
+        senha = COALESCE($6, senha),
+        password_changed_at = CASE WHEN $6::text IS NULL THEN password_changed_at ELSE CURRENT_TIMESTAMP END,
         atualizado_em = CURRENT_TIMESTAMP
-       WHERE id = $6
-       RETURNING *`,
+       WHERE id = $7
+       RETURNING id, gas_id, nome, email, cargo, loja, access_tags, can_view_finance, ativo, criado_em, atualizado_em`,
       [
         b.nome ? clean(b.nome) : null,
         b.cargo ? clean(b.cargo) : null,
         b.loja !== undefined ? (b.loja || null) : null,
         b.can_view_finance !== undefined ? !!b.can_view_finance : null,
         b.ativo !== undefined ? !!b.ativo : null,
+        passwordHash,
         id
       ]
     );
@@ -1796,7 +2153,20 @@ app.get("/api/access-tags", async (req, res) => {
 
 app.get("/api/dashboard", async (req, res) => {
   try {
-    const clientes = await pool.query(`SELECT COUNT(*)::int AS total FROM clientes WHERE nome NOT ILIKE '%teste%'`);
+    const scoped = !canViewAllStores(req.session);
+    if (scoped && !req.session.loja) {
+      return res.json({
+        ok: true,
+        dashboard: { total_clientes: 0, total_agendamentos: 0, total_vendas: 0, faturamento_total: 0, desconto_total: 0 }
+      });
+    }
+    const params = scoped ? [req.session.loja] : [];
+    const clientes = await pool.query(
+      `SELECT COUNT(*)::int AS total FROM clientes
+       WHERE nome NOT ILIKE '%teste%'
+       ${scoped ? "AND LOWER(COALESCE(loja_origem,'')) = LOWER($1)" : ""}`,
+      params
+    );
     const resumo = await pool.query(`
       SELECT
         COUNT(*)::int AS total_agendamentos,
@@ -1805,15 +2175,17 @@ app.get("/api/dashboard", async (req, res) => {
         COALESCE(SUM(desconto),0)::numeric AS desconto_total
       FROM agendamentos
       WHERE nome NOT ILIKE '%teste%' AND COALESCE(loja,'') NOT ILIKE '%teste%'
-    `);
+      ${scoped ? "AND LOWER(COALESCE(loja,'')) = LOWER($1)" : ""}
+    `, params);
+    const showFinance = canViewFinanceSession(req.session);
     res.json({
       ok: true,
       dashboard: {
         total_clientes: clientes.rows[0].total,
         total_agendamentos: resumo.rows[0].total_agendamentos,
-        total_vendas: resumo.rows[0].os_com_valor,
-        faturamento_total: resumo.rows[0].faturamento_total,
-        desconto_total: resumo.rows[0].desconto_total
+        total_vendas: showFinance ? resumo.rows[0].os_com_valor : 0,
+        faturamento_total: showFinance ? resumo.rows[0].faturamento_total : 0,
+        desconto_total: showFinance ? resumo.rows[0].desconto_total : 0
       }
     });
   } catch (error) {
@@ -1853,15 +2225,32 @@ app.get("/", (req, res) => {
   });
 });
 
-initDatabase()
-  .then(() => {
-    app.listen(PORT, "0.0.0.0", () => {
+async function startServer() {
+  await initDatabase();
+  return new Promise((resolve) => {
+    const server = app.listen(PORT, "0.0.0.0", () => {
       console.log(`Sistema rodando na porta ${PORT}`);
       console.log("PostgreSQL conectado e tabelas verificadas.");
       console.log("GAS configurado:", !!GAS_URL);
+      resolve(server);
     });
-  })
-  .catch((error) => {
+  });
+}
+
+if (require.main === module) {
+  startServer().catch((error) => {
     console.error("Erro ao iniciar banco:", error);
     process.exit(1);
   });
+}
+
+module.exports = {
+  app,
+  pool,
+  startServer,
+  signSession,
+  verifySession,
+  requireSession,
+  buildPermissions,
+  publicUser
+};
