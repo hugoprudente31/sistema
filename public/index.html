@@ -373,6 +373,7 @@
         <div class="row">
           <div><label>&nbsp;</label><button class="secondary" onclick="limparFiltros()">Limpar filtros</button></div>
         </div>
+        <div id="filtroResumo" class="subtitle" style="margin-top:12px;font-weight:700"></div>
       </div>
 
       <div class="scroll-x">
@@ -457,6 +458,7 @@
 <div id="toast" class="toast"></div>
 <div id="pageLoading" class="page-loading">Processando...</div>
 
+<script src="/filter-engine.js"></script>
 <script>
 var state = {
   user: null,
@@ -621,6 +623,26 @@ function getDashboardPostgres() {
   });
 }
 
+function aplicarFiltrosInteligentes(rows) {
+  rows = Array.isArray(rows) ? rows : [];
+  if (!window.TGTFilterEngine) return rows;
+  return window.TGTFilterEngine.filterAppointments(rows, coletarFiltros(), state.user || {});
+}
+
+function atualizarResumoFiltros(visiveis, total) {
+  var el = byId('filtroResumo');
+  if (!el) return;
+  el.textContent = 'Mostrando ' + visiveis + ' de ' + total + ' registro(s). Agenda e dashboard usam o mesmo filtro.';
+}
+
+function dashboardFiltrado(rows) {
+  return {
+    total_agendamentos: rows.length,
+    faturamento_total: rows.reduce(function(sum, row) { return sum + Number(row.ValorVenda || 0); }, 0),
+    desconto_total: rows.reduce(function(sum, row) { return sum + Number(row.Desconto || 0); }, 0)
+  };
+}
+
 function buildDashboardLocal(rows, db) {
   rows = Array.isArray(rows) ? rows : [];
   db = db || {};
@@ -647,7 +669,7 @@ function buildDashboardLocal(rows, db) {
   Object.keys(origemCount).sort(function(a,b){ return origemCount[b] - origemCount[a]; }).slice(0,1).forEach(function(k){ origemTop = k; });
 
   return {
-    agendados: agendados || db.total_agendamentos || 0,
+    agendados: agendados,
     compareceram: compareceram,
     naoCompareceram: naoCompareceram,
     concluidos: concluidos,
@@ -927,10 +949,12 @@ function carregarAgendaEDashboard() {
     getAgendamentosPostgres(),
     getDashboardPostgres()
   ]).then(function(results) {
-    state.agendamentos = Array.isArray(results[0]) ? results[0] : [];
-    state.dashboard = buildDashboardLocal(state.agendamentos, results[1] || {});
+    state.agendamentosTodos = Array.isArray(results[0]) ? results[0] : [];
+    state.agendamentos = aplicarFiltrosInteligentes(state.agendamentosTodos);
+    state.dashboard = buildDashboardLocal(state.agendamentos, dashboardFiltrado(state.agendamentos));
     renderAgenda(state.agendamentos);
     preencherDashboard();
+    atualizarResumoFiltros(state.agendamentos.length, state.agendamentosTodos.length);
   }).catch(function(err) {
     byId('agendaBody').innerHTML = '<tr><td colspan="18">Erro ao carregar agendamentos.</td></tr>';
     setMsg('msgForm', 'Erro ao carregar agenda: ' + (err.message || err), 'err');
@@ -946,10 +970,12 @@ function recarregarComFiltros() {
     getAgendamentosPostgres(),
     getDashboardPostgres()
   ]).then(function(results) {
-    state.agendamentos = Array.isArray(results[0]) ? results[0] : [];
-    state.dashboard = buildDashboardLocal(state.agendamentos, results[1] || {});
+    state.agendamentosTodos = Array.isArray(results[0]) ? results[0] : [];
+    state.agendamentos = aplicarFiltrosInteligentes(state.agendamentosTodos);
+    state.dashboard = buildDashboardLocal(state.agendamentos, dashboardFiltrado(state.agendamentos));
     renderAgenda(state.agendamentos);
     preencherDashboard();
+    atualizarResumoFiltros(state.agendamentos.length, state.agendamentosTodos.length);
     if (canFinance()) return carregarFaturamento();
   }).catch(function(err) {
     byId('agendaBody').innerHTML = '<tr><td colspan="18">Erro ao carregar agendamentos.</td></tr>';
@@ -1224,14 +1250,13 @@ function coletarFiltros() {
 }
 
 function limparFiltros() {
-  ['filtroCliente', 'filtroOptometrista', 'filtroStatus', 'filtroStatusOS', 'filtroOwner', 'filtroAccessTag', 'filtroPeriodoDias'].forEach(function(id) {
+  ['filtroDataDe', 'filtroDataAte', 'filtroCliente', 'filtroOptometrista', 'filtroStatus', 'filtroStatusOS', 'filtroOwner', 'filtroAccessTag', 'filtroPeriodoDias'].forEach(function(id) {
     byId(id).value = '';
   });
   byId('filtroMinhasOSAtivas').checked = false;
   byId('filtroMeus').checked = false;
   if (state.user && state.user.loja && state.user.loja !== 'Todas') byId('filtroLoja').value = state.user.loja;
   else byId('filtroLoja').value = '';
-  applyDefaultDateWindow90Dias(true);
   recarregarComFiltros();
 }
 
@@ -1240,11 +1265,8 @@ function applyDefaultDateWindow90Dias(force) {
   var ateEl = byId('filtroDataAte');
   if (!deEl || !ateEl) return;
   if (force || (!deEl.value && !ateEl.value)) {
-    var hoje = new Date();
-    var de = new Date();
-    de.setDate(hoje.getDate() - 89);
-    deEl.value = de.toISOString().slice(0, 10);
-    ateEl.value = hoje.toISOString().slice(0, 10);
+    deEl.value = '';
+    ateEl.value = '';
   }
 }
 
@@ -1787,12 +1809,16 @@ function downloadCsv(fileName, csv) {
 
 function carregarHistorico() {
   showLoading(true);
-  gas('getHistoricoOperacional', state.user, { loja: String((state.user && state.user.loja) || ''), limit: 250 })
+  apiGet('/api/historico-agendamentos?limit=250')
     .then(function(res) {
       byId('cardHistorico').classList.remove('hidden');
-      var rows = Array.isArray(res.rows) ? res.rows : [];
+      var rows = Array.isArray(res.historicos) ? res.historicos : [];
       byId('historicoBody').innerHTML = rows.map(function(r) {
-        return '<tr><td>' + escapeHtml(formatDateBR(r.DataEvento)) + '</td><td>' + escapeHtml(r.Loja || '') + '</td><td>' + escapeHtml(r.Cliente || '') + '</td><td>' + escapeHtml(r.Tipo || '') + '</td><td>' + escapeHtml(r.Acao || '') + '</td><td>' + escapeHtml(r.Campo || '') + '</td><td>' + escapeHtml(r.ValorAnterior || '') + '</td><td>' + escapeHtml(r.ValorNovo || '') + '</td><td>' + escapeHtml(r.ExecutadoPor || '') + '</td><td>' + escapeHtml(r.Perfil || '') + '</td></tr>';
+        var antes = r.registro_anterior || {};
+        var depois = r.registro_novo || {};
+        var antesResumo = antes.status || antes.status_os || (antes.id ? 'Versão anterior salva' : '—');
+        var depoisResumo = depois.status || depois.status_os || (depois.id ? 'Versão nova salva' : '—');
+        return '<tr><td>' + escapeHtml(formatDateBR(r.criado_em)) + '</td><td>' + escapeHtml(r.loja || '') + '</td><td>' + escapeHtml(r.cliente_nome || '') + '</td><td>Agendamento</td><td>' + escapeHtml(r.acao || '') + '</td><td>Backup completo</td><td>' + escapeHtml(antesResumo) + '</td><td>' + escapeHtml(depoisResumo) + '</td><td>' + escapeHtml(r.feito_por_nome || '') + '</td><td>' + escapeHtml(r.feito_por_perfil || '') + '</td></tr>';
       }).join('') || '<tr><td colspan="10">Sem histórico encontrado.</td></tr>';
     })
     .catch(function(err) {

@@ -231,6 +231,30 @@ function ensureStoreAccess(session, store) {
   return Boolean(session?.loja && store && normalizeStoreKey(session.loja) === normalizeStoreKey(store));
 }
 
+async function saveAppointmentBackup(db, { before = null, after = null, action, session = {} }) {
+  const record = after || before || {};
+  await db.query(
+    `INSERT INTO historico_alteracoes_agendamentos (
+       agendamento_id, loja, cliente_nome, acao, payload,
+       feito_por_nome, feito_por_email, feito_por_perfil, feito_por_loja,
+       registro_anterior, registro_novo
+     ) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10::jsonb,$11::jsonb)`,
+    [
+      record.id || null,
+      record.loja || null,
+      record.nome || null,
+      action,
+      JSON.stringify({ anterior: before, novo: after }),
+      clean(session.nome || "Sistema"),
+      clean(session.email),
+      clean(session.perfil || "sistema").toLowerCase(),
+      clean(session.loja || record.loja),
+      before ? JSON.stringify(before) : null,
+      after ? JSON.stringify(after) : null
+    ]
+  );
+}
+
 // ===============================
 // CONFIGURAÇÃO PÚBLICA — LANDING PAGES
 // ===============================
@@ -726,6 +750,60 @@ async function initDatabase() {
       feito_por_email TEXT,
       criado_em TIMESTAMP DEFAULT NOW()
     );
+  `);
+
+  await addColumnIfMissing("historico_alteracoes_agendamentos", "feito_por_perfil", "TEXT");
+  await addColumnIfMissing("historico_alteracoes_agendamentos", "feito_por_loja", "TEXT");
+  await addColumnIfMissing("historico_alteracoes_agendamentos", "registro_anterior", "JSONB");
+  await addColumnIfMissing("historico_alteracoes_agendamentos", "registro_novo", "JSONB");
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_hist_agendamento_data ON historico_alteracoes_agendamentos(agendamento_id, criado_em DESC);`);
+  await pool.query(`
+    INSERT INTO historico_alteracoes_agendamentos (
+      agendamento_id, loja, cliente_nome, acao, payload,
+      feito_por_nome, feito_por_perfil, feito_por_loja, registro_novo
+    )
+    SELECT a.id, a.loja, a.nome, 'BACKUP_INICIAL',
+      jsonb_build_object('anterior', NULL, 'novo', to_jsonb(a)),
+      'Sistema', 'sistema', a.loja, to_jsonb(a)
+    FROM agendamentos a
+    WHERE NOT EXISTS (
+      SELECT 1 FROM historico_alteracoes_agendamentos h
+      WHERE h.agendamento_id = a.id AND h.acao = 'BACKUP_INICIAL'
+    );
+  `);
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION backup_agendamento_tgt()
+    RETURNS trigger AS $$
+    DECLARE
+      anterior JSONB;
+      novo JSONB;
+      registro JSONB;
+    BEGIN
+      IF current_setting('app.audit_managed', true) = 'true' THEN
+        IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+        RETURN NEW;
+      END IF;
+      anterior := CASE WHEN TG_OP IN ('UPDATE','DELETE') THEN to_jsonb(OLD) ELSE NULL END;
+      novo := CASE WHEN TG_OP IN ('INSERT','UPDATE') THEN to_jsonb(NEW) ELSE NULL END;
+      registro := COALESCE(novo, anterior);
+      INSERT INTO historico_alteracoes_agendamentos (
+        agendamento_id, loja, cliente_nome, acao, payload,
+        feito_por_nome, feito_por_perfil, feito_por_loja,
+        registro_anterior, registro_novo
+      ) VALUES (
+        (registro->>'id')::integer, registro->>'loja', registro->>'nome',
+        'SISTEMA_' || TG_OP, jsonb_build_object('anterior', anterior, 'novo', novo),
+        'Sistema/Integração', 'sistema', registro->>'loja', anterior, novo
+      );
+      IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS trg_backup_agendamento_tgt ON agendamentos;
+    CREATE TRIGGER trg_backup_agendamento_tgt
+    AFTER INSERT OR UPDATE OR DELETE ON agendamentos
+    FOR EACH ROW EXECUTE FUNCTION backup_agendamento_tgt();
   `);
 
   await pool.query(`
@@ -1719,8 +1797,12 @@ app.post("/api/agendamentos", async (req, res) => {
     const actorNome = clean(req.session.nome || "Usuário autenticado");
     const actorEmail = clean(req.session.email);
 
-    const result = await pool.query(
-      `INSERT INTO agendamentos (
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(`SELECT set_config('app.audit_managed', 'true', true)`);
+      const result = await client.query(
+        `INSERT INTO agendamentos (
         gas_id, nome, whatsapp, email, loja, optometrista, origem,
         data_agendamento, horario, observacao, status, compareceu,
         responsavel, criado_por_email, proprietario_id, proprietario_nome,
@@ -1729,8 +1811,8 @@ app.post("/api/agendamentos", async (req, res) => {
         access_tags, origem_sync
       )
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,CURRENT_TIMESTAMP,$23,'postgres')
-      RETURNING *`,
-      [
+        RETURNING *`,
+        [
         b.gas_id || null,
         nomeCliente,
         b.whatsapp || b.whatsApp || null,
@@ -1754,9 +1836,21 @@ app.post("/api/agendamentos", async (req, res) => {
         actorNome,
         actorEmail || null,
         b.access_tags || b.accessTags || null
-      ]
-    );
-    res.json({ ok: true, message: "Agendamento salvo no PostgreSQL.", agendamento: result.rows[0] });
+        ]
+      );
+      await saveAppointmentBackup(client, {
+        action: "CRIACAO",
+        after: result.rows[0],
+        session: req.session
+      });
+      await client.query("COMMIT");
+      res.json({ ok: true, message: "Agendamento salvo no PostgreSQL.", agendamento: result.rows[0] });
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
   } catch (error) {
     res.status(500).json({ ok: false, message: "Erro ao salvar agendamento.", error: error.message });
   }
@@ -1779,7 +1873,7 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const b = req.body || {};
-    const current = await pool.query(`SELECT loja FROM agendamentos WHERE id = $1`, [id]);
+    const current = await pool.query(`SELECT * FROM agendamentos WHERE id = $1`, [id]);
     if (!current.rows.length) return res.status(404).json({ ok: false, message: "Agendamento não encontrado." });
     if (!ensureStoreAccess(req.session, current.rows[0].loja)) {
       return res.status(403).json({ ok: false, message: "Sem permissão para operar esta loja." });
@@ -1816,8 +1910,13 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
     const actorNome = clean(req.session.nome || "Usuário autenticado");
     const actorEmail = clean(req.session.email);
 
-    const result = await pool.query(
-      `UPDATE agendamentos SET
+    const client = await pool.connect();
+    let result;
+    try {
+      await client.query("BEGIN");
+      await client.query(`SELECT set_config('app.audit_managed', 'true', true)`);
+      result = await client.query(
+        `UPDATE agendamentos SET
         origem = COALESCE($1, origem),
         nome = COALESCE($2, nome),
         whatsapp = COALESCE($3, whatsapp),
@@ -1847,8 +1946,8 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         ultima_alteracao_em = CURRENT_TIMESTAMP,
         atualizado_em = CURRENT_TIMESTAMP
       WHERE id = $23
-      RETURNING *`,
-      [
+        RETURNING *`,
+        [
         b.origem || null,
         b.nome || b.nomeCompleto || null,
         b.whatsapp || b.whatsApp || null,
@@ -1876,10 +1975,26 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         b.data_entrada_os || b.dataEntradaOS || null,
         b.data_finalizacao_os || b.dataFinalizacaoOS || null,
         b.data_entrega_os || b.dataEntregaOS || null
-      ]
-    );
+        ]
+      );
+      if (!result.rows.length) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ ok: false, message: "Agendamento não encontrado." });
+      }
+      await saveAppointmentBackup(client, {
+        action: "ALTERACAO",
+        before: current.rows[0],
+        after: result.rows[0],
+        session: req.session
+      });
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
 
-    if (!result.rows.length) return res.status(404).json({ ok: false, message: "Agendamento não encontrado." });
     res.json({ ok: true, agendamento: result.rows[0] });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });
@@ -2178,6 +2293,31 @@ app.get("/api/access-tags", async (req, res) => {
     res.json({ ok: true, accessTags: tags });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+app.get("/api/historico-agendamentos", async (req, res) => {
+  try {
+    if (!hasRole(req.session, ["admin", "gerente de loja"])) {
+      return res.status(403).json({ ok: false, message: "Histórico restrito à administração e gerência." });
+    }
+    const limit = Math.min(Math.max(Number(req.query.limit || 250), 1), 1000);
+    const scoped = !canViewAllStores(req.session);
+    const result = scoped && !req.session.loja
+      ? { rows: [] }
+      : await pool.query(
+        `SELECT id, agendamento_id, loja, cliente_nome, acao,
+                feito_por_nome, feito_por_email, feito_por_perfil, feito_por_loja,
+                registro_anterior, registro_novo, criado_em
+         FROM historico_alteracoes_agendamentos
+         ${scoped ? `WHERE ${storeSql("loja")}` : ""}
+         ORDER BY criado_em DESC, id DESC
+         LIMIT ${limit}`,
+        scoped ? [req.session.loja] : []
+      );
+    res.json({ ok: true, total: result.rows.length, historicos: result.rows });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: "Erro ao carregar histórico.", error: error.message });
   }
 });
 
