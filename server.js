@@ -198,7 +198,7 @@ function buildPermissions(user) {
     isAdmin: admin,
     canViewAll: admin || central,
     canCreateAgendamento: admin || central || manager || buyer || seller,
-    canManageOS: admin || central || manager || buyer,
+    canManageOS: admin || manager || buyer,
     canViewFinance,
     canExportFinance: canViewFinance
   };
@@ -1894,7 +1894,7 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         return res.status(403).json({ ok: false, message: "Optometrista só pode atualizar presença, status e observação." });
       }
     }
-    if (["consultor de vendas", "vendedor"].includes(roleOf(req.session))) {
+    if (["consultor de vendas", "vendedor", "atendimento central"].includes(roleOf(req.session))) {
       const blocked = [
         "numero_os", "numeroOS", "status_os", "statusOS", "valor_venda", "valorVenda", "desconto",
         "vendedor_nome", "vendedorNome", "data_abertura_os", "dataAberturaOS", "data_entrada_os",
