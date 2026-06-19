@@ -1334,25 +1334,34 @@ function aplicarPermissoesModal() {
   var role = roleName();
   var main = ['editOrigem', 'editNomeCompleto', 'editWhatsApp', 'editEmail', 'editLoja', 'editOptometrista', 'editDataAgendamento', 'editHorario', 'editStatusAgenda', 'editObservacao'];
   var os = ['editNumeroOS', 'editDataAberturaOS', 'editDataEntradaOS', 'editDataEntregaOS', 'editDataFinalizacaoOS', 'editStatusOS', 'editVendedorNome', 'editValorVenda', 'editDesconto'];
+
+  // Habilita tudo por padrão
   main.concat(os).forEach(function(id) { byId(id).disabled = false; });
 
-  if (['vendedor', 'consultor de vendas', 'outros'].indexOf(role) > -1) {
+  // Consultor/vendedor: só pode editar dados principais, NÃO pode editar OS e financeiro
+  if (['consultor de vendas', 'vendedor', 'outros'].indexOf(role) > -1) {
+    os.forEach(function(id) { byId(id).disabled = true; });
+  }
+
+  // Comprador: pode editar OS e valores mas NÃO pode editar dados do agendamento
+  if (role === 'comprador') {
     main.forEach(function(id) { byId(id).disabled = true; });
     os.forEach(function(id) { byId(id).disabled = false; });
   }
 
+  // Optometrista: só pode mudar status de presença
   if (role === 'optometrista') {
     main.concat(os).forEach(function(id) { byId(id).disabled = true; });
     byId('editStatusAgenda').disabled = false;
   }
 
-  if (!canManageOS()) os.forEach(function(id) { byId(id).disabled = true; });
-
-  if (!canFinance() && !canManageOS()) {
+  // Financeiro só para admin, gerente, comprador
+  if (['admin', 'gerente de loja', 'comprador'].indexOf(role) === -1) {
     byId('editValorVenda').disabled = true;
     byId('editDesconto').disabled = true;
   }
 
+  // Loja travada para perfis de loja
   if (['admin', 'atendimento central'].indexOf(role) === -1 && state.user && state.user.loja && state.user.loja !== 'Todas') {
     byId('editLoja').value = state.user.loja;
     byId('editLoja').disabled = true;
@@ -1643,28 +1652,41 @@ function getActionHtml(r) {
   var ownStore = normalizeKey(r.Loja || '') === normalizeKey(state.user && state.user.loja || '');
   var central = ['admin', 'atendimento central'].indexOf(role) > -1;
   var gerente = role === 'gerente de loja' && ownStore;
+  var comprador = role === 'comprador' && ownStore;
+  var consultor = ['consultor de vendas', 'vendedor', 'outros'].indexOf(role) > -1 && ownStore;
   var isOwner = typeof window.isOwnerDoRegistro === 'function' ? window.isOwnerDoRegistro(r) : true;
   var buttons = '';
   var options = '<option value="">Mais ações</option>';
 
+  // Cancelar e excluir — Admin, Central, Gerente
   if (central || gerente) {
     if (st === 'Agendado') options += '<option value="confirmar">Confirmar</option>';
     if (['Agendado', 'Confirmado'].indexOf(st) > -1) options += '<option value="cancelar">Cancelar</option>';
     options += '<option value="excluir">Excluir</option>';
   }
 
-  if (['admin', 'atendimento central', 'optometrista', 'gerente de loja'].indexOf(role) > -1 && ['Agendado', 'Confirmado'].indexOf(st) > -1) {
+  // Comprador pode cancelar
+  if (comprador && ['Agendado', 'Confirmado'].indexOf(st) > -1) {
+    options += '<option value="cancelar">Cancelar</option>';
+  }
+
+  // Check-in — Admin, Central, Gerente, Optometrista, Comprador
+  if (['admin', 'atendimento central', 'gerente de loja', 'optometrista', 'comprador'].indexOf(role) > -1 && ['Agendado', 'Confirmado'].indexOf(st) > -1) {
     buttons += '<button onclick="marcarCompareceu(\'' + id + '\')">Check-in Sim</button>';
     buttons += '<button class="secondary" onclick="marcarNaoCompareceu(\'' + id + '\')">Check-in Não</button>';
   }
 
+  // Editar — Admin, Central, Gerente (todos), Comprador (todos da loja), Consultor (só os seus)
   if (central || gerente) {
     buttons += '<button class="secondary" onclick="abrirModalEdicao(\'' + id + '\')">Editar</button>';
     options += '<option value="editar">Editar/Reagendar</option>';
-    options += '<option value="os">Registrar/Atualizar OS</option>';
-  } else if (['consultor de vendas', 'vendedor', 'outros'].indexOf(role) > -1 && isOwner) {
+  } else if (comprador || (consultor && isOwner)) {
     buttons += '<button class="secondary" onclick="abrirModalEdicao(\'' + id + '\')">Editar</button>';
     options += '<option value="editar">Editar/Reagendar</option>';
+  }
+
+  // OS — Admin, Central, Gerente, Comprador
+  if (['admin', 'atendimento central', 'gerente de loja', 'comprador'].indexOf(role) > -1) {
     options += '<option value="os">Registrar/Atualizar OS</option>';
   }
 
@@ -1791,7 +1813,7 @@ function _abrirModalUsuario(u) {
   var isEdit = !!u;
   var lojasOpts = '<option value="">Todas as lojas</option>' +
     (state.lojas||[]).map(function(l){ return '<option value="' + escapeHtml(l.Loja) + '">' + escapeHtml(l.Loja) + '</option>'; }).join('');
-  var perfis = ['admin','atendimento central','gerente de loja','optometrista','consultor de vendas','vendedor','outros'];
+  var perfis = ['admin','atendimento central','gerente de loja','consultor de vendas','comprador','optometrista'];
   var perfisOpts = perfis.map(function(p){ return '<option value="' + p + '">' + p + '</option>'; }).join('');
 
   var backdrop = document.createElement('div');
@@ -1913,7 +1935,7 @@ function executarDiagnostico() {
   function isAdmin()    { return role() === 'admin'; }
   function isCentral()  { return role() === 'atendimento central'; }
   function isGerente()  { return role() === 'gerente de loja'; }
-  function isConsultor(){ return role() === 'consultor de vendas'; }
+  function isConsultor(){ return ['consultor de vendas','vendedor'].indexOf(role()) > -1; }
   function isComprador(){ return role() === 'comprador'; }
   function isOpto()     { return role() === 'optometrista'; }
   function isGeralVision(){ return isAdmin() || isCentral(); }
@@ -1969,30 +1991,42 @@ function executarDiagnostico() {
 
   // ── PERMISSÕES POR PERFIL ────────────────────────────────────
   window.tgtPodeEditarOS = function() {
-    return ['admin','atendimento central','gerente de loja','comprador'].indexOf(role()) > -1;
+    // Admin, Gerente, Comprador podem registrar/editar OS
+    return ['admin','gerente de loja','comprador'].indexOf(role()) > -1;
   };
 
   window.tgtPodeEditarValoresVenda = function() {
+    // Admin, Gerente, Comprador podem ver/editar valores
     return ['admin','gerente de loja','comprador'].indexOf(role()) > -1;
   };
 
   window.tgtPodeConfirmarPresenca = function() {
-    return ['admin','atendimento central','gerente de loja','consultor de vendas','optometrista','comprador'].indexOf(role()) > -1;
+    // Admin, Central, Gerente, Consultor, Optometrista, Comprador
+    return ['admin','atendimento central','gerente de loja','consultor de vendas','vendedor','optometrista','comprador'].indexOf(role()) > -1;
   };
 
   window.tgtPodeVerFinanceiro = function() {
     var r = role(), u = user(), p = u.permissions || {};
+    // Admin e Gerente sempre; Central só se autorizado
     if (r === 'admin' || r === 'gerente de loja') return true;
     if (r === 'atendimento central') return p.canViewFinance === true || String(u.CanViewFinance || u.canViewFinance || '').toLowerCase() === 'sim';
     return false;
   };
 
   window.tgtPodeCriarAgendamento = function() {
-    return ['admin','atendimento central','gerente de loja','consultor de vendas','comprador'].indexOf(role()) > -1;
+    // Admin, Central, Gerente, Consultor, Comprador
+    return ['admin','atendimento central','gerente de loja','consultor de vendas','vendedor','comprador'].indexOf(role()) > -1;
   };
 
   window.tgtPodeVerOS = function() {
+    // Admin, Central, Gerente, Comprador
     return ['admin','atendimento central','gerente de loja','comprador'].indexOf(role()) > -1;
+  };
+
+  window.tgtPodeCancelar = function() {
+    // Admin, Central, Gerente podem cancelar qualquer um
+    // Comprador e Consultor podem cancelar conforme regra
+    return ['admin','atendimento central','gerente de loja','comprador','consultor de vendas'].indexOf(role()) > -1;
   };
 
   // ── VALIDAÇÃO DE PAYLOAD ─────────────────────────────────────
@@ -2038,8 +2072,8 @@ function executarDiagnostico() {
           var r = role();
           var clone = Object.assign({}, payload);
 
-          // Consultor não pode preencher OS, valor, desconto
-          if (r === 'consultor de vendas') {
+          // Consultor/vendedor não pode preencher OS, valor, desconto
+          if (r === 'consultor de vendas' || r === 'vendedor' || r === 'outros') {
             var bloqueados = ['NumeroOS','numeroOS','numero_os','StatusOS','statusOS','status_os',
               'DataAberturaOS','dataAberturaOS','data_abertura_os','DataEntradaOS','dataEntradaOS','data_entrada_os',
               'DataFinalizacaoOS','dataFinalizacaoOS','data_finalizacao_os','DataEntregaOS','dataEntregaOS','data_entrega_os',
