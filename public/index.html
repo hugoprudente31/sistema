@@ -2056,11 +2056,9 @@ function executarDiagnostico() {
   };
 
   window.tgtPodeVerFinanceiro = function() {
-    var r = role(), u = user(), p = u.permissions || {};
-    // Admin e Gerente sempre; Central só se autorizado
-    if (r === 'admin' || r === 'gerente de loja') return true;
-    if (r === 'atendimento central') return p.canViewFinance === true || String(u.CanViewFinance || u.canViewFinance || '').toLowerCase() === 'sim';
-    return false;
+    var u = user(), p = u.permissions || {};
+    // A permissão assinada pelo servidor é a fonte única: Admin, Gerente e Comprador.
+    return p.canViewFinance === true;
   };
 
   window.tgtPodeCriarAgendamento = function() {

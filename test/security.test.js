@@ -222,3 +222,10 @@ test("financeiro geral agrupa vendas e subtotais por loja", () => {
   assert.match(html, /Total: ' \+ money\(storeTotal\)/);
   assert.match(html, /Descontos: ' \+ money\(storeDiscount\)/);
 });
+
+test("interface usa a permissão financeira assinada pelo servidor", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "public", "index.html"), "utf8");
+  assert.match(html, /window\.tgtPodeVerFinanceiro = function\(\)/);
+  assert.match(html, /return p\.canViewFinance === true/);
+  assert.doesNotMatch(html, /if \(r === 'admin' \|\| r === 'gerente de loja'\) return true/);
+});
