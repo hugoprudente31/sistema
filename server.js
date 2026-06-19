@@ -343,8 +343,8 @@ function horarioValidoPorRegra(data, horario) {
     return { ok: false, message: "Aos sábados, escolha entre 10:00 e 16:00." };
   }
 
-  if (["12:00", "12:30", "13:00", "13:30"].includes(hr)) {
-    return { ok: false, message: "Horário de almoço não disponível. Escolha um horário entre 10:00-11:30 ou 14:00-18:00." };
+  if (hr === "13:00" || hr === "13:30") {
+    return { ok: false, message: "Horário de almoço não disponível. Escolha um horário fora do intervalo 13:00–13:30." };
   }
 
   return { ok: true };
@@ -363,13 +363,11 @@ function gerarHorariosBase(data) {
   const fim = dia === 6 ? 16 * 60 : 18 * 60;
   const horarios = [];
 
-  const almoco = new Set(["12:00", "12:30", "13:00", "13:30"]);
-
   for (let m = inicio; m <= fim; m += 30) {
     const hh = String(Math.floor(m / 60)).padStart(2, "0");
     const mm = String(m % 60).padStart(2, "0");
     const h = `${hh}:${mm}`;
-    if (!almoco.has(h)) horarios.push(h);
+    if (h !== "13:00" && h !== "13:30") horarios.push(h);
   }
 
   return horarios;
@@ -1546,7 +1544,14 @@ app.get("/api/public/horarios-disponiveis", validarLandingApiKey, async (req, re
       return res.status(400).json({ ok: false, message: "Informe uma data válida." });
     }
 
-    const horariosBase = gerarHorariosBase(data);
+    let horariosBase = gerarHorariosBase(data);
+
+    // Santo Antônio tem almoço 14:00-14:30 em dias úteis (seg-sex)
+    const diaRef = new Date(data + "T12:00:00").getDay();
+    const isSantoAntonio = loja.toLowerCase().replace(/[^a-z]/g, "").includes("santoantonio");
+    if (isSantoAntonio && diaRef >= 1 && diaRef <= 5) {
+      horariosBase = horariosBase.filter(h => h !== "14:00" && h !== "14:30");
+    }
 
     if (!horariosBase.length) {
       return res.json({
@@ -1641,6 +1646,14 @@ app.post("/api/public/agendamentos", validarLandingApiKey, async (req, res) => {
     const regraHorario = horarioValidoPorRegra(dataAgendamento, horario);
     if (!regraHorario.ok) {
       return res.status(400).json(regraHorario);
+    }
+
+    // Santo Antônio: almoço 14:00-14:30 em dias úteis
+    if ((horario === "14:00" || horario === "14:30") && loja.toLowerCase().replace(/[^a-z]/g, "").includes("santoantonio")) {
+      const diaPost = new Date(dataAgendamento + "T12:00:00").getDay();
+      if (diaPost >= 1 && diaPost <= 5) {
+        return res.status(400).json({ ok: false, message: "Horário de almoço não disponível para esta unidade." });
+      }
     }
 
     await client.query("BEGIN");
