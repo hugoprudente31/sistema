@@ -343,6 +343,10 @@ function horarioValidoPorRegra(data, horario) {
     return { ok: false, message: "Aos sábados, escolha entre 10:00 e 16:00." };
   }
 
+  if (["12:00", "12:30", "13:00", "13:30"].includes(hr)) {
+    return { ok: false, message: "Horário de almoço não disponível. Escolha um horário entre 10:00-11:30 ou 14:00-18:00." };
+  }
+
   return { ok: true };
 }
 
@@ -359,10 +363,13 @@ function gerarHorariosBase(data) {
   const fim = dia === 6 ? 16 * 60 : 18 * 60;
   const horarios = [];
 
+  const almoco = new Set(["12:00", "12:30", "13:00", "13:30"]);
+
   for (let m = inicio; m <= fim; m += 30) {
     const hh = String(Math.floor(m / 60)).padStart(2, "0");
     const mm = String(m % 60).padStart(2, "0");
-    horarios.push(`${hh}:${mm}`);
+    const h = `${hh}:${mm}`;
+    if (!almoco.has(h)) horarios.push(h);
   }
 
   return horarios;
@@ -372,7 +379,8 @@ async function buscarOptometristasAtivosPorLoja(client, loja) {
   const result = await client.query(
     `SELECT nome
      FROM optometristas
-     WHERE ativo = true AND LOWER(loja) = LOWER($1)
+     WHERE ativo = true
+       AND LOWER(REGEXP_REPLACE(loja, '\\s*-\\s*', ' ', 'g')) = LOWER(REGEXP_REPLACE($1, '\\s*-\\s*', ' ', 'g'))
      ORDER BY nome ASC`,
     [loja]
   );
