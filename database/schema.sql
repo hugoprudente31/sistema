@@ -23,6 +23,45 @@ CREATE TABLE IF NOT EXISTS historico_alteracoes_agendamentos (
   criado_em TIMESTAMP DEFAULT NOW()
 );
 
+ALTER TABLE historico_alteracoes_agendamentos
+  ADD COLUMN IF NOT EXISTS feito_por_perfil TEXT,
+  ADD COLUMN IF NOT EXISTS feito_por_loja TEXT,
+  ADD COLUMN IF NOT EXISTS registro_anterior JSONB,
+  ADD COLUMN IF NOT EXISTS registro_novo JSONB;
+
+CREATE OR REPLACE FUNCTION backup_agendamento_tgt()
+RETURNS trigger AS $$
+DECLARE
+  anterior JSONB;
+  novo JSONB;
+  registro JSONB;
+BEGIN
+  IF current_setting('app.audit_managed', true) = 'true' THEN
+    IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+    RETURN NEW;
+  END IF;
+  anterior := CASE WHEN TG_OP IN ('UPDATE','DELETE') THEN to_jsonb(OLD) ELSE NULL END;
+  novo := CASE WHEN TG_OP IN ('INSERT','UPDATE') THEN to_jsonb(NEW) ELSE NULL END;
+  registro := COALESCE(novo, anterior);
+  INSERT INTO historico_alteracoes_agendamentos (
+    agendamento_id, loja, cliente_nome, acao, payload,
+    feito_por_nome, feito_por_perfil, feito_por_loja,
+    registro_anterior, registro_novo
+  ) VALUES (
+    (registro->>'id')::integer, registro->>'loja', registro->>'nome',
+    'SISTEMA_' || TG_OP, jsonb_build_object('anterior', anterior, 'novo', novo),
+    'Sistema/Integração', 'sistema', registro->>'loja', anterior, novo
+  );
+  IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_backup_agendamento_tgt ON agendamentos;
+CREATE TRIGGER trg_backup_agendamento_tgt
+AFTER INSERT OR UPDATE OR DELETE ON agendamentos
+FOR EACH ROW EXECUTE FUNCTION backup_agendamento_tgt();
+
 CREATE TABLE IF NOT EXISTS historico_os (
   id SERIAL PRIMARY KEY,
   agendamento_id INTEGER,

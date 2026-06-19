@@ -229,3 +229,97 @@ test("interface usa a permissão financeira assinada pelo servidor", () => {
   assert.match(html, /return p\.canViewFinance === true/);
   assert.doesNotMatch(html, /if \(r === 'admin' \|\| r === 'gerente de loja'\) return true/);
 });
+
+test("criação de agendamento grava backup com perfil na mesma transação", async () => {
+  const originalConnect = pool.connect;
+  const queries = [];
+  const client = {
+    query: async (sql, params) => {
+      queries.push({ sql: String(sql), params });
+      if (String(sql).includes("INSERT INTO agendamentos")) {
+        return { rows: [{ id: 99, nome: "Cliente Real", loja: "Loja A", status: "Agendado" }] };
+      }
+      return { rows: [] };
+    },
+    release: () => {}
+  };
+  pool.connect = async () => client;
+  const token = signSession({ id: "1", nome: "Admin", email: "admin@example.com", perfil: "admin", loja: "Todas" });
+  try {
+    const response = await fetch(baseUrl + "/api/agendamentos", {
+      method: "POST",
+      headers: { cookie: `tgt_session=${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ nome: "Cliente Real", loja: "Loja A", data_agendamento: "2026-06-20", horario: "10:00" })
+    });
+    assert.equal(response.status, 200);
+    assert.equal(queries[0].sql, "BEGIN");
+    assert.ok(queries.some((q) => q.sql.includes("app.audit_managed")));
+    const backup = queries.find((q) => q.sql.includes("INSERT INTO historico_alteracoes_agendamentos"));
+    assert.ok(backup);
+    assert.equal(backup.params[7], "admin");
+    assert.equal(queries.at(-1).sql, "COMMIT");
+  } finally {
+    pool.connect = originalConnect;
+  }
+});
+
+test("alteração guarda versões anterior e nova com o perfil responsável", async () => {
+  const originalConnect = pool.connect;
+  const originalQuery = pool.query;
+  const queries = [];
+  pool.query = async () => ({ rows: [{ id: 77, nome: "Cliente", loja: "Loja A", status: "Agendado" }] });
+  pool.connect = async () => ({
+    query: async (sql, params) => {
+      queries.push({ sql: String(sql), params });
+      if (String(sql).includes("UPDATE agendamentos SET")) {
+        return { rows: [{ id: 77, nome: "Cliente", loja: "Loja A", status: "Confirmado" }] };
+      }
+      return { rows: [] };
+    },
+    release: () => {}
+  });
+  const token = signSession({ id: "9", nome: "Gerente", email: "gerente@example.com", perfil: "gerente de loja", loja: "Loja A" });
+  try {
+    const response = await fetch(baseUrl + "/api/agendamentos/77", {
+      method: "PATCH",
+      headers: { cookie: `tgt_session=${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ status: "Confirmado" })
+    });
+    assert.equal(response.status, 200);
+    const backup = queries.find((q) => q.sql.includes("INSERT INTO historico_alteracoes_agendamentos"));
+    assert.ok(backup);
+    assert.equal(backup.params[7], "gerente de loja");
+    assert.equal(JSON.parse(backup.params[9]).status, "Agendado");
+    assert.equal(JSON.parse(backup.params[10]).status, "Confirmado");
+    assert.equal(queries.at(-1).sql, "COMMIT");
+  } finally {
+    pool.connect = originalConnect;
+    pool.query = originalQuery;
+  }
+});
+
+test("gerente consulta backups somente da própria loja", async () => {
+  const originalQuery = pool.query;
+  let capturedSql = "";
+  let capturedParams = [];
+  pool.query = async (sql, params) => {
+    capturedSql = String(sql);
+    capturedParams = params;
+    return { rows: [{ id: 1, agendamento_id: 77, loja: "Loja A", acao: "ALTERACAO" }] };
+  };
+  const token = signSession({ id: "9", nome: "Gerente", email: "gerente@example.com", perfil: "gerente de loja", loja: "Loja A" });
+  try {
+    const response = await fetch(baseUrl + "/api/historico-agendamentos", { headers: { cookie: `tgt_session=${token}` } });
+    assert.equal(response.status, 200);
+    assert.match(capturedSql, /TRANSLATE\(LOWER/);
+    assert.deepEqual(capturedParams, ["Loja A"]);
+  } finally {
+    pool.query = originalQuery;
+  }
+});
+
+test("vendedor não acessa backups operacionais", async () => {
+  const token = signSession({ id: "10", email: "vendedor@example.com", perfil: "vendedor", loja: "Loja A" });
+  const response = await fetch(baseUrl + "/api/historico-agendamentos", { headers: { cookie: `tgt_session=${token}` } });
+  assert.equal(response.status, 403);
+});
