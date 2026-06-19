@@ -700,6 +700,7 @@ async function initDatabase() {
   await addColumnIfMissing("agendamentos", "ultima_alteracao_por_nome", "TEXT");
   await addColumnIfMissing("agendamentos", "ultima_alteracao_por_email", "TEXT");
   await addColumnIfMissing("agendamentos", "ultima_alteracao_em", "TIMESTAMP");
+  await addColumnIfMissing("agendamentos", "excluido_em", "TIMESTAMP");
 
   await addColumnIfMissing("clientes", "gas_id", "TEXT UNIQUE");
   await addColumnIfMissing("clientes", "origem_sync", "TEXT DEFAULT 'postgres'");
@@ -1880,9 +1881,9 @@ app.post("/api/agendamentos", async (req, res) => {
 app.get("/api/agendamentos", async (req, res) => {
   try {
     const result = canViewAllStores(req.session)
-      ? await pool.query(`SELECT * FROM agendamentos ORDER BY id DESC LIMIT 1000`)
+      ? await pool.query(`SELECT * FROM agendamentos WHERE excluido_em IS NULL ORDER BY id DESC LIMIT 1000`)
       : req.session.loja
-        ? await pool.query(`SELECT * FROM agendamentos WHERE ${storeSql("loja")} ORDER BY id DESC LIMIT 1000`, [req.session.loja])
+        ? await pool.query(`SELECT * FROM agendamentos WHERE excluido_em IS NULL AND ${storeSql("loja")} ORDER BY id DESC LIMIT 1000`, [req.session.loja])
         : { rows: [] };
     res.json({ ok: true, total: result.rows.length, agendamentos: result.rows });
   } catch (error) {
@@ -1904,6 +1905,9 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
     }
     if (!hasRole(req.session, ["admin", "atendimento central", "gerente de loja", "consultor de vendas", "vendedor", "comprador", "optometrista"])) {
       return res.status(403).json({ ok: false, message: "Perfil sem permissão para alterar agendamentos." });
+    }
+    if ((b.excluir_lead || b.restaurar_lead) && !isAdmin(req.session)) {
+      return res.status(403).json({ ok: false, message: "Apenas admin pode mover leads para a lixeira." });
     }
     if (roleOf(req.session) === "optometrista") {
       const allowed = new Set([
@@ -1965,6 +1969,7 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         ultima_alteracao_por_nome = $21,
         ultima_alteracao_por_email = $22,
         ultima_alteracao_em = CURRENT_TIMESTAMP,
+        excluido_em = CASE WHEN $28::text = 'LIXEIRA' THEN CURRENT_TIMESTAMP WHEN $28::text = 'RESTAURAR' THEN NULL ELSE excluido_em END,
         atualizado_em = CURRENT_TIMESTAMP
       WHERE id = $23
         RETURNING *`,
@@ -1995,7 +2000,8 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         b.data_abertura_os || b.dataAberturaOS || null,
         b.data_entrada_os || b.dataEntradaOS || null,
         b.data_finalizacao_os || b.dataFinalizacaoOS || null,
-        b.data_entrega_os || b.dataEntregaOS || null
+        b.data_entrega_os || b.dataEntregaOS || null,
+        b.excluir_lead ? 'LIXEIRA' : (b.restaurar_lead ? 'RESTAURAR' : null)
         ]
       );
       if (!result.rows.length) {
@@ -2017,6 +2023,62 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
     }
 
     res.json({ ok: true, agendamento: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+app.get("/api/lixeira", requireAdmin, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, nome, whatsapp, email, loja, status, status_os, data_agendamento,
+              ultima_alteracao_por_nome, excluido_em
+       FROM agendamentos WHERE excluido_em IS NOT NULL ORDER BY excluido_em DESC LIMIT 500`
+    );
+    res.json({ ok: true, agendamentos: result.rows });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+app.delete("/api/agendamentos/:id", requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const check = await pool.query('SELECT id, excluido_em FROM agendamentos WHERE id = $1', [id]);
+    if (!check.rows.length) return res.status(404).json({ ok: false, message: "Agendamento não encontrado." });
+    if (!check.rows[0].excluido_em) {
+      return res.status(400).json({ ok: false, message: "Mova o lead para a lixeira antes de excluir permanentemente." });
+    }
+    await pool.query('DELETE FROM agendamentos WHERE id = $1', [id]);
+    res.json({ ok: true, message: "Lead excluído permanentemente." });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: "Erro ao excluir lead.", error: error.message });
+  }
+});
+
+app.get("/api/lead-time", async (req, res) => {
+  try {
+    if (!hasRole(req.session, ["admin", "atendimento central", "gerente de loja"])) {
+      return res.status(403).json({ ok: false, message: "Acesso restrito." });
+    }
+    const scoped = !canViewAllStores(req.session);
+    const whereStore = scoped && req.session.loja ? `AND ${storeSql("loja")}` : '';
+    const params = scoped && req.session.loja ? [req.session.loja] : [];
+    const result = await pool.query(
+      `SELECT id, nome AS cliente_nome, loja, vendedor_nome, numero_os,
+              data_abertura_os, data_finalizacao_os,
+              (data_finalizacao_os - data_abertura_os) AS lead_time_dias
+       FROM agendamentos
+       WHERE excluido_em IS NULL
+         AND data_abertura_os IS NOT NULL AND data_finalizacao_os IS NOT NULL
+         ${whereStore}
+       ORDER BY data_finalizacao_os DESC LIMIT 500`,
+      params
+    );
+    const rows = result.rows;
+    const total = rows.length;
+    const media = total > 0 ? rows.reduce((s, r) => s + (Number(r.lead_time_dias) || 0), 0) / total : 0;
+    res.json({ ok: true, rows, mediaLeadTime: media.toFixed(1), totalLinhas: total });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });
   }

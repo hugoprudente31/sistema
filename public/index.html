@@ -347,6 +347,7 @@
           <button class="btn-relatorio hidden" id="btnLeadTime" onclick="carregarLeadTime()">Lead Time</button>
           <button class="btn-relatorio hidden" id="btnHistorico" onclick="carregarHistorico()">Histórico</button>
           <button class="btn-relatorio hidden" id="btnUsuarios" onclick="carregarUsuarios()">Usuários</button>
+          <button class="btn-relatorio hidden" id="btnLixeira" onclick="carregarLixeira()" style="background:#7f1d1d">🗑 Lixeira</button>
           <button class="btn-relatorio secondary hidden" id="btnSyncSistema" onclick="sincronizarSistema()">Sincronizar sistema</button>
         </div>
       </div>
@@ -356,7 +357,7 @@
           <div><label>Data inicial</label><input id="filtroDataDe" type="date" onchange="recarregarComFiltros()"></div>
           <div><label>Data final</label><input id="filtroDataAte" type="date" onchange="recarregarComFiltros()"></div>
           <div><label>Status agendamento</label><select id="filtroStatus" onchange="recarregarComFiltros()"><option value="">Todos</option><option>Agendado</option><option>Confirmado</option><option>Compareceu</option><option>Não Compareceu</option><option>OS em Andamento</option><option>Concluído</option><option>Cancelado</option></select></div>
-          <div><label>Status OS</label><select id="filtroStatusOS" onchange="recarregarComFiltros()"><option value="">Todos</option><option>Aberta</option><option>Em produção</option><option>Recebida</option><option>Pronta</option><option>Entregue</option><option>Concluído</option><option>Cancelada</option><option>Cancelado</option></select></div>
+          <div><label>Status OS</label><select id="filtroStatusOS" onchange="recarregarComFiltros()"><option value="">Todos</option><option>Aberta</option><option>Em produção</option><option>Recebida</option><option>Pronta</option><option>Entregue</option><option>Concluído</option><option>Cancelada</option><option>Cancelado</option><option>Reembolso</option></select></div>
         </div>
         <div class="row-4">
           <div><label>Cliente</label><input id="filtroCliente" type="text" oninput="debouncedReload()" placeholder="Nome, WhatsApp ou e-mail"></div>
@@ -417,7 +418,7 @@
           <div class="row"><div><label>WhatsApp</label><input id="editWhatsApp" type="text"></div><div><label>Email</label><input id="editEmail" type="email"></div></div>
           <div class="row"><div><label>Loja</label><select id="editLoja"></select></div><div><label>Optometrista</label><input id="editOptometrista" type="text"></div></div>
           <div class="row"><div><label>Data do Agendamento</label><input id="editDataAgendamento" type="date"></div><div><label>Horário</label><input id="editHorario" type="time"></div></div>
-          <div class="row"><div><label>Status do Agendamento</label><select id="editStatusAgenda"><option>Agendado</option><option>Confirmado</option><option>Compareceu</option><option>Não Compareceu</option><option>OS em Andamento</option><option>Concluído</option><option>Cancelado</option></select></div><div><label>Status da OS</label><select id="editStatusOS"><option value=""></option><option>Aberta</option><option>Em produção</option><option>Recebida</option><option>Pronta</option><option>Entregue</option><option>Concluído</option><option>Cancelada</option><option>Cancelado</option></select></div></div>
+          <div class="row"><div><label>Status do Agendamento</label><select id="editStatusAgenda"><option>Agendado</option><option>Confirmado</option><option>Compareceu</option><option>Não Compareceu</option><option>OS em Andamento</option><option>Concluído</option><option>Cancelado</option></select></div><div><label>Status da OS</label><select id="editStatusOS"><option value=""></option><option>Aberta</option><option>Em produção</option><option>Recebida</option><option>Pronta</option><option>Entregue</option><option>Concluído</option><option>Cancelada</option><option>Cancelado</option><option>Reembolso</option></select></div></div>
           <div class="row"><div><label>Número da OS</label><input id="editNumeroOS" type="text"></div><div><label>Data de Abertura da OS</label><input id="editDataAberturaOS" type="date"></div></div>
           <div class="row"><div><label>Data de Entrada da OS</label><input id="editDataEntradaOS" type="date"></div><div><label>Data prevista de entrega</label><input id="editDataEntregaOS" type="date"></div></div>
           <div class="row"><div><label>Data de Finalização da OS</label><input id="editDataFinalizacaoOS" type="date"></div><div><label>Vendedor Nome</label><input id="editVendedorNome" type="text"></div></div>
@@ -447,6 +448,22 @@
         <table>
           <thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Loja</th><th>Ver financeiro</th><th>Ativo</th><th>Ações</th></tr></thead>
           <tbody id="usuariosBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card hidden" id="cardLixeira">
+      <div class="topbar" style="margin-bottom:14px;">
+        <h3 style="margin:0;">🗑 Lixeira de Leads (Admin)</h3>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+          <button class="btn-relatorio secondary" onclick="carregarLixeira()">Atualizar</button>
+        </div>
+      </div>
+      <p style="color:#6b7280;font-size:13px;margin-bottom:12px;">Leads enviados para a lixeira. Somente o Admin consegue ver esta lista. Para excluir definitivamente, clique em <strong>Excluir</strong>.</p>
+      <div class="scroll-x">
+        <table>
+          <thead><tr><th>ID</th><th>Cliente</th><th>WhatsApp</th><th>Loja</th><th>Status</th><th>Excluído em</th><th>Por</th><th>Ações</th></tr></thead>
+          <tbody id="lixeiraBody"></tbody>
         </table>
       </div>
     </div>
@@ -801,6 +818,7 @@ function aplicarPermissoesTela() {
   var p = state.user.permissions || {};
   if (p.isAdmin) byId('cardDiagnostico').classList.remove('hidden');
   if (p.isAdmin) byId('btnUsuarios').classList.remove('hidden');
+  if (p.isAdmin) byId('btnLixeira').classList.remove('hidden');
   if (p.isAdmin) byId('cardUsuarios').classList.remove('hidden');
   if (p.canCreateAgendamento) byId('cardAgendamento').classList.remove('hidden');
   if (p.canViewFinance) {
@@ -1074,17 +1092,18 @@ function carregarFaturamento() {
 
 function carregarLeadTime() {
   if (['admin', 'atendimento central', 'gerente de loja'].indexOf(roleName()) === -1) return;
-  gas('getLeadTimeReport', state.user, coletarFiltros()).then(function(res) {
+  showLoading(true);
+  apiGet('/api/lead-time').then(function(res) {
     byId('cardLeadTime').classList.remove('hidden');
     byId('leadTimeMedia').textContent = Number(res.mediaLeadTime || 0).toFixed(1);
     byId('leadTimeQtd').textContent = String(res.totalLinhas || 0);
     var rows = Array.isArray(res.rows) ? res.rows : [];
     byId('leadTimeBody').innerHTML = rows.map(function(r) {
-      return '<tr><td>' + escapeHtml(r.ID) + '</td><td>' + escapeHtml(r.Cliente) + '</td><td>' + escapeHtml(r.Loja) + '</td><td>' + escapeHtml(r.Vendedor) + '</td><td>' + escapeHtml(r.NumeroOS) + '</td><td>' + escapeHtml(formatDateBR(r.Abertura)) + '</td><td>' + escapeHtml(formatDateBR(r.Finalizacao)) + '</td><td>' + escapeHtml(r.LeadTimeDias) + '</td></tr>';
-    }).join('') || '<tr><td colspan="8">Nenhum dado para lead time.</td></tr>';
+      return '<tr><td>' + escapeHtml(String(r.id)) + '</td><td>' + escapeHtml(r.cliente_nome||'') + '</td><td>' + escapeHtml(r.loja||'') + '</td><td>' + escapeHtml(r.vendedor_nome||'') + '</td><td>' + escapeHtml(r.numero_os||'') + '</td><td>' + escapeHtml(formatDateBR(r.data_abertura_os)) + '</td><td>' + escapeHtml(formatDateBR(r.data_finalizacao_os)) + '</td><td>' + escapeHtml(String(r.lead_time_dias||'')) + ' dias</td></tr>';
+    }).join('') || '<tr><td colspan="8">Nenhum dado de OS com abertura e finalização preenchidos.</td></tr>';
   }).catch(function(err) {
     setMsg('msgForm', err.message || String(err), 'err');
-  });
+  }).finally(function() { showLoading(false); });
 }
 
 function preencherOrigens() {
@@ -1554,9 +1573,8 @@ function runAction(fn, id) {
   } else if (fn === 'cancelarAgendamento') {
     patch.statusAgenda = 'Cancelado';
   } else if (fn === 'excluirAgendamento') {
-    // Exclusão segura: cancelamento lógico para não perder histórico e liberar o horário.
     patch.statusAgenda = 'Cancelado';
-    patch.observacao = 'Registro marcado como cancelado/excluído pela tela.';
+    patch.excluir_lead = true;
   } else {
     setMsg('msgForm', 'Ação não reconhecida: ' + fn, 'err');
     return Promise.resolve(false);
@@ -1589,7 +1607,7 @@ function abrirModalOS(id, row) {
   backdrop.innerHTML = '<div class="modal-card" style="max-width:560px">' +
     '<div class="topbar"><h3 style="margin:0">Registrar / Atualizar OS</h3><button class="secondary icon-btn" onclick="document.getElementById(\'osModalBackdrop\').remove()">Fechar</button></div>' +
     '<div class="row"><div><label>Número da OS *</label><input id="osNumero" type="text" value="' + escapeHtml(row.NumeroOS||'') + '"></div>' +
-    '<div><label>Status da OS</label><select id="osStatus"><option value="">Selecione</option><option>Aberta</option><option>Em produção</option><option>Recebida</option><option>Pronta</option><option>Entregue</option><option>Concluído</option><option>Cancelada</option></select></div></div>' +
+    '<div><label>Status da OS</label><select id="osStatus"><option value="">Selecione</option><option>Aberta</option><option>Em produção</option><option>Recebida</option><option>Pronta</option><option>Entregue</option><option>Concluído</option><option>Cancelada</option><option>Reembolso</option></select></div></div>' +
     '<div class="row"><div><label>Data de abertura</label><input id="osAbertura" type="date" value="' + escapeHtml(row.DataAberturaOS||new Date().toISOString().slice(0,10)) + '"></div>' +
     '<div><label>Data de entrada (lab.)</label><input id="osEntrada" type="date" value="' + escapeHtml(row.DataEntradaOS||'') + '"></div></div>' +
     '<div class="row"><div><label>Previsão de entrega</label><input id="osEntrega" type="date" value="' + escapeHtml(row.DataEntregaOS||'') + '"></div>' +
@@ -1776,16 +1794,18 @@ function getActionHtml(r) {
 }
 
 function gerarRelatorioCSV() {
-  showLoading(true);
-  gas('gerarRelatorioCSV', coletarFiltros(), state.user).then(function(res) {
-    if (!res || !res.ok) throw new Error((res && res.message) || 'Falha ao gerar relatório.');
-    downloadCsv(res.fileName || 'relatorio_sistema_agendamento.csv', res.csv || '');
-    setMsg('msgForm', 'Relatório operacional gerado com sucesso.', 'ok');
-  }).catch(function(err) {
-    setMsg('msgForm', err.message || String(err), 'err');
-  }).finally(function() {
-    showLoading(false);
-  });
+  var rows = state.agendamentos || [];
+  if (!rows.length) { setMsg('msgForm', 'Nenhum dado carregado para exportar.', 'err'); return; }
+  var cols = ['ID','DataCadastro','Origem','NomeCompleto','WhatsApp','Email','Loja','Optometrista',
+    'Responsavel','DataAgendamento','Horario','StatusAgenda','Compareceu','NumeroOS','StatusOS',
+    'DataAberturaOS','DataEntradaOS','DataFinalizacaoOS','DataEntregaOS','ValorVenda','Desconto',
+    'VendedorNome','AccessTags','LeadTimeDias','AgendadoPorNome','UltimaAlteracaoPorNome','UltimaAlteracaoEm','Observacao'];
+  function esc(v) { var s = String(v === null || v === undefined ? '' : v); return '"' + s.replace(/"/g, '""') + '"'; }
+  var csv = cols.join(';') + '\n' + rows.map(function(r) {
+    return cols.map(function(c) { return esc(r[c]); }).join(';');
+  }).join('\n');
+  downloadCsv('relatorio_tgt_' + new Date().toISOString().slice(0,10) + '.csv', csv);
+  setMsg('msgForm', 'Relatório exportado com ' + rows.length + ' registros.', 'ok');
 }
 
 function exportarFaturamentoCSV() {
@@ -2005,6 +2025,58 @@ function deletarUsuario(id, nome) {
     })
     .catch(function(err){ toast(err.message||String(err), 'err'); })
     .finally(function(){ showLoading(false); });
+}
+
+function carregarLixeira() {
+  byId('cardLixeira').classList.remove('hidden');
+  byId('lixeiraBody').innerHTML = '<tr><td colspan="8"><div class="loading-box">Carregando...</div></td></tr>';
+  apiGet('/api/lixeira').then(function(res) {
+    var rows = Array.isArray(res.agendamentos) ? res.agendamentos : [];
+    if (!rows.length) {
+      byId('lixeiraBody').innerHTML = '<tr><td colspan="8">Lixeira vazia.</td></tr>';
+      return;
+    }
+    byId('lixeiraBody').innerHTML = rows.map(function(r) {
+      var nomeEsc = escapeHtml(r.nome||'').replace(/'/g, "\\'");
+      return '<tr>' +
+        '<td>' + escapeHtml(String(r.id)) + '</td>' +
+        '<td><strong>' + escapeHtml(r.nome||'') + '</strong></td>' +
+        '<td>' + escapeHtml(r.whatsapp||'') + '</td>' +
+        '<td>' + escapeHtml(r.loja||'') + '</td>' +
+        '<td>' + escapeHtml(r.status||'') + '</td>' +
+        '<td>' + escapeHtml(formatDateBR(r.excluido_em)) + '</td>' +
+        '<td>' + escapeHtml(r.ultima_alteracao_por_nome||'') + '</td>' +
+        '<td style="display:flex;gap:6px">' +
+        '<button class="secondary icon-btn" onclick="restaurarLead(' + r.id + ')">Restaurar</button>' +
+        '<button class="danger icon-btn" style="background:#7f1d1d" onclick="deletarPermanenteLead(' + r.id + ',\'' + nomeEsc + '\')">Excluir</button>' +
+        '</td></tr>';
+    }).join('');
+  }).catch(function(err) {
+    byId('lixeiraBody').innerHTML = '<tr><td colspan="8" class="err">Erro: ' + escapeHtml(err.message||String(err)) + '</td></tr>';
+  });
+}
+
+function restaurarLead(id) {
+  if (!confirm('Restaurar este lead de volta ao painel principal?')) return;
+  showLoading(true);
+  apiPatch('/api/agendamentos/' + id, { restaurar_lead: true })
+    .then(function() { toast('Lead restaurado com sucesso.', 'ok'); carregarLixeira(); return carregarAgendaEDashboard(); })
+    .catch(function(err) { toast(err.message||String(err), 'err'); })
+    .finally(function() { showLoading(false); });
+}
+
+function deletarPermanenteLead(id, nome) {
+  if (!confirm('EXCLUIR DEFINITIVAMENTE o lead "' + nome + '"?\n\nEsta ação NÃO pode ser desfeita.')) return;
+  showLoading(true);
+  fetch('/api/agendamentos/' + id, { method: 'DELETE' })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      if (!res || !res.ok) throw new Error(res.message || 'Falha ao excluir.');
+      toast('Lead excluído permanentemente.', 'ok');
+      carregarLixeira();
+    })
+    .catch(function(err) { toast(err.message||String(err), 'err'); })
+    .finally(function() { showLoading(false); });
 }
 
 function executarDiagnostico() {
