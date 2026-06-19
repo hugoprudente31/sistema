@@ -1199,17 +1199,28 @@ async function syncGasToPostgres(options = {}) {
 
 const loginAttempts = new Map();
 
-function allowLoginAttempt(ip) {
+function loginAttemptKey(req, email) {
+  return `${req.ip || "unknown"}|${String(email || "").toLowerCase()}`;
+}
+
+function isLoginBlocked(key) {
   const now = Date.now();
   const windowMs = 15 * 60 * 1000;
-  const current = loginAttempts.get(ip) || { count: 0, resetAt: now + windowMs };
+  const current = loginAttempts.get(key);
+  if (!current) return false;
   if (current.resetAt <= now) {
-    current.count = 0;
-    current.resetAt = now + windowMs;
+    loginAttempts.delete(key);
+    return false;
   }
+  return current.count >= 5;
+}
+
+function recordFailedLogin(key) {
+  const now = Date.now();
+  const windowMs = 15 * 60 * 1000;
+  const current = loginAttempts.get(key) || { count: 0, resetAt: now + windowMs };
   current.count += 1;
-  loginAttempts.set(ip, current);
-  return current.count <= 5;
+  loginAttempts.set(key, current);
 }
 
 app.post("/api/auth/login", async (req, res) => {
@@ -1222,14 +1233,14 @@ app.post("/api/auth/login", async (req, res) => {
     });
   }
 
-  if (!allowLoginAttempt(req.ip || "unknown")) {
-    return res.status(429).json({ ok: false, message: "Muitas tentativas. Aguarde 15 minutos." });
-  }
-
   const email = clean(req.body?.email).toLowerCase();
   const password = String(req.body?.password || "");
   if (!email || !password) {
     return res.status(400).json({ ok: false, message: "Informe e-mail e senha." });
+  }
+  const attemptKey = loginAttemptKey(req, email);
+  if (isLoginBlocked(attemptKey)) {
+    return res.status(429).json({ ok: false, message: "Muitas tentativas para esta conta. Aguarde 15 minutos." });
   }
 
   try {
@@ -1243,9 +1254,11 @@ app.post("/api/auth/login", async (req, res) => {
     const dbUser = result.rows[0];
     const passwordOk = Boolean(dbUser?.senha) && await bcrypt.compare(password, dbUser.senha);
     if (!dbUser || !passwordOk) {
+      recordFailedLogin(attemptKey);
       return res.status(401).json({ ok: false, message: "Credenciais inválidas." });
     }
 
+    loginAttempts.delete(attemptKey);
     const user = publicUser(dbUser);
     const token = signSession(user);
     res.setHeader("Set-Cookie", sessionCookie(token, SESSION_TTL_HOURS * 60 * 60));

@@ -66,15 +66,17 @@ test("login individual valida bcrypt e emite cookie HttpOnly", async () => {
   });
 
   try {
-    const response = await fetch(baseUrl + "/api/auth/login", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ email: "admin@example.com", password: "SenhaIndividual#2026" })
-    });
-    assert.equal(response.status, 200);
-    assert.match(response.headers.get("set-cookie") || "", /HttpOnly/);
-    const body = await response.json();
-    assert.equal(body.user.permissions.isAdmin, true);
+    for (let index = 0; index < 6; index += 1) {
+      const response = await fetch(baseUrl + "/api/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: "admin@example.com", password: "SenhaIndividual#2026" })
+      });
+      assert.equal(response.status, 200, `login válido ${index + 1}`);
+      assert.match(response.headers.get("set-cookie") || "", /HttpOnly/);
+      const body = await response.json();
+      assert.equal(body.user.permissions.isAdmin, true);
+    }
   } finally {
     pool.query = originalQuery;
   }
