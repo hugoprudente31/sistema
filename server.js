@@ -275,40 +275,57 @@ function normalizeLojaPublica(loja) {
     .replace(/\s+/g, " ")
     .trim();
 
+  // Valores canônicos = nomes EXATOS da tabela lojas no banco de dados
   const mapa = {
-    "gonzaga": "Óticas TGT Gonzaga",
-    "gonzaga & santos": "Óticas TGT Gonzaga",
-    "oticas tgt gonzaga": "Óticas TGT Gonzaga",
-    "oticas tgt gonzaga santos": "Óticas TGT Gonzaga",
-    "oticas tgt gonzaga · santos": "Óticas TGT Gonzaga",
-    "óticas tgt gonzaga": "Óticas TGT Gonzaga",
-    "óticas tgt gonzaga santos": "Óticas TGT Gonzaga",
-    "óticas tgt gonzaga · santos": "Óticas TGT Gonzaga",
+    // Gonzaga (DB: "óticas TGT - Gonzaga")
+    "gonzaga":                       "óticas TGT - Gonzaga",
+    "gonzaga & santos":              "óticas TGT - Gonzaga",
+    "gonzaga · santos":              "óticas TGT - Gonzaga",
+    "oticas tgt gonzaga":            "óticas TGT - Gonzaga",
+    "oticas tgt gonzaga santos":     "óticas TGT - Gonzaga",
+    "oticas tgt gonzaga · santos":   "óticas TGT - Gonzaga",
+    "oticas tgt - gonzaga":          "óticas TGT - Gonzaga",
+    "óticas tgt gonzaga":            "óticas TGT - Gonzaga",
+    "óticas tgt - gonzaga":          "óticas TGT - Gonzaga",
 
-    "enseada": "Óticas TGT Enseada",
-    "oticas tgt enseada": "Óticas TGT Enseada",
-    "oticas tgt enseada guaruja": "Óticas TGT Enseada",
-    "oticas tgt enseada guarujá": "Óticas TGT Enseada",
-    "óticas tgt enseada": "Óticas TGT Enseada",
-    "óticas tgt enseada guaruja": "Óticas TGT Enseada",
-    "óticas tgt enseada guarujá": "Óticas TGT Enseada",
+    // Enseada (DB: "óticas TGT Enseada")
+    "enseada":                       "óticas TGT Enseada",
+    "oticas tgt enseada":            "óticas TGT Enseada",
+    "oticas tgt enseada guaruja":    "óticas TGT Enseada",
+    "oticas tgt enseada guarujá":    "óticas TGT Enseada",
+    "óticas tgt enseada":            "óticas TGT Enseada",
+    "óticas tgt enseada guaruja":    "óticas TGT Enseada",
+    "óticas tgt enseada guarujá":    "óticas TGT Enseada",
 
-    "pitangueiras": "Óticas TGT Pitangueiras",
-    "oticas tgt pitangueiras": "Óticas TGT Pitangueiras",
-    "oticas tgt pitangueiras guaruja": "Óticas TGT Pitangueiras",
-    "oticas tgt pitangueiras guarujá": "Óticas TGT Pitangueiras",
-    "óticas tgt pitangueiras": "Óticas TGT Pitangueiras",
-    "óticas tgt pitangueiras guaruja": "Óticas TGT Pitangueiras",
-    "óticas tgt pitangueiras guarujá": "Óticas TGT Pitangueiras",
+    // Pitangueiras (DB: "óticas TGT Pitangueiras")
+    "pitangueiras":                        "óticas TGT Pitangueiras",
+    "oticas tgt pitangueiras":             "óticas TGT Pitangueiras",
+    "oticas tgt pitangueiras guaruja":     "óticas TGT Pitangueiras",
+    "oticas tgt pitangueiras guarujá":     "óticas TGT Pitangueiras",
+    "óticas tgt pitangueiras":             "óticas TGT Pitangueiras",
+    "óticas tgt pitangueiras guaruja":     "óticas TGT Pitangueiras",
+    "óticas tgt pitangueiras guarujá":     "óticas TGT Pitangueiras",
 
-    "santo antonio": "Óticas TGT Santo Antônio",
-    "santo antônio": "Óticas TGT Santo Antônio",
-    "target sto. antonio": "Óticas TGT Santo Antônio",
-    "target · sto. antonio": "Óticas TGT Santo Antônio",
-    "oticas tgt santo antonio": "Óticas TGT Santo Antônio",
-    "oticas tgt santo antônio": "Óticas TGT Santo Antônio",
-    "óticas tgt santo antonio": "Óticas TGT Santo Antônio",
-    "óticas tgt santo antônio": "Óticas TGT Santo Antônio"
+    // Ademar (DB: "óticas Target - Ademar de Barros")
+    "ademar":                              "óticas Target - Ademar de Barros",
+    "ademar de barros":                    "óticas Target - Ademar de Barros",
+    "oticas target ademar de barros":      "óticas Target - Ademar de Barros",
+    "oticas target - ademar de barros":    "óticas Target - Ademar de Barros",
+    "óticas target - ademar de barros":    "óticas Target - Ademar de Barros",
+    "óticas target ademar de barros":      "óticas Target - Ademar de Barros",
+
+    // Santos / Santo Antônio (DB: "Óticas TGT Santos")
+    "santos":                        "Óticas TGT Santos",
+    "oticas tgt santos":             "Óticas TGT Santos",
+    "óticas tgt santos":             "Óticas TGT Santos",
+    "santo antonio":                 "Óticas TGT Santos",
+    "santo antônio":                 "Óticas TGT Santos",
+    "target sto. antonio":           "Óticas TGT Santos",
+    "target · sto. antonio":         "Óticas TGT Santos",
+    "oticas tgt santo antonio":      "Óticas TGT Santos",
+    "oticas tgt santo antônio":      "Óticas TGT Santos",
+    "óticas tgt santo antonio":      "Óticas TGT Santos",
+    "óticas tgt santo antônio":      "Óticas TGT Santos"
   };
 
   return mapa[key] || raw;
@@ -404,11 +421,12 @@ async function buscarPrimeiroOptometristaLivre(client, loja, data, horario, opto
     const ocupado = await client.query(
       `SELECT id
        FROM agendamentos
-       WHERE LOWER(COALESCE(loja,'')) = LOWER($1)
+       WHERE LOWER(REGEXP_REPLACE(COALESCE(loja,''), '\\s*-\\s*', ' ', 'g')) = LOWER(REGEXP_REPLACE($1, '\\s*-\\s*', ' ', 'g'))
          AND LOWER(COALESCE(optometrista,'')) = LOWER($2)
          AND data_agendamento = $3
          AND horario = $4
          AND status = ANY($5::text[])
+         AND excluido_em IS NULL
        LIMIT 1`,
       [loja, optometrista, data, horario, PUBLIC_BLOCKING_STATUSES]
     );
@@ -1579,11 +1597,12 @@ app.get("/api/public/horarios-disponiveis", validarLandingApiKey, async (req, re
         const ocupado = await client.query(
           `SELECT id
            FROM agendamentos
-           WHERE LOWER(COALESCE(loja,'')) = LOWER($1)
+           WHERE LOWER(REGEXP_REPLACE(COALESCE(loja,''), '\\s*-\\s*', ' ', 'g')) = LOWER(REGEXP_REPLACE($1, '\\s*-\\s*', ' ', 'g'))
              AND LOWER(COALESCE(optometrista,'')) = LOWER($2)
              AND data_agendamento = $3
              AND horario = $4
              AND status = ANY($5::text[])
+             AND excluido_em IS NULL
            LIMIT 1`,
           [loja, optometrista, data, horario, PUBLIC_BLOCKING_STATUSES]
         );
@@ -1675,11 +1694,12 @@ app.post("/api/public/agendamentos", validarLandingApiKey, async (req, res) => {
       const conflito = await client.query(
         `SELECT id
          FROM agendamentos
-         WHERE LOWER(COALESCE(loja,'')) = LOWER($1)
+         WHERE LOWER(REGEXP_REPLACE(COALESCE(loja,''), '\\s*-\\s*', ' ', 'g')) = LOWER(REGEXP_REPLACE($1, '\\s*-\\s*', ' ', 'g'))
            AND LOWER(COALESCE(optometrista,'')) = LOWER($2)
            AND data_agendamento = $3
            AND horario = $4
            AND status = ANY($5::text[])
+           AND excluido_em IS NULL
          LIMIT 1`,
         [loja, optometrista, dataAgendamento, horario, PUBLIC_BLOCKING_STATUSES]
       );
