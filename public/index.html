@@ -800,7 +800,15 @@ function fazerLogin() {
 
       aplicarPermissoesTela();
       byId('passwordLogin').value = '';
-      return carregarSistemaTurbo();
+      return carregarInfoBase().then(function() {
+        return carregarAgendaEDashboard();
+      }).then(function() {
+        iniciarAutoRefreshPostgres();
+        atualizarStatusSistema({
+          serverVersion: 'Railway + PostgreSQL',
+          dataAtualizacao: new Date().toLocaleString('pt-BR')
+        });
+      });
     })
     .catch(function(err) {
       setMsg('msgLogin', err.message || String(err), 'err');
