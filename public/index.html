@@ -1818,15 +1818,19 @@ function gerarRelatorioCSV() {
 
 function exportarFaturamentoCSV() {
   showLoading(true);
-  gas('exportFinanceCSV', coletarFiltros(), state.user).then(function(res) {
-    if (!res || !res.ok) throw new Error((res && res.message) || 'Falha ao exportar faturamento.');
-    downloadCsv(res.fileName || 'relatorio_faturamento.csv', res.csv || '');
-    setMsg('msgForm', 'Relatório financeiro exportado com sucesso.', 'ok');
+  apiGet('/api/faturamentos').then(function(res) {
+    var rows = Array.isArray(res.faturamentos) ? res.faturamentos : [];
+    if (!rows.length) throw new Error('Nenhum dado de faturamento para exportar.');
+    var cols = ['id','loja','vendedor','valor_total','desconto','status_pagamento','data_venda','observacao'];
+    function esc(v) { var s = String(v === null || v === undefined ? '' : v); return '"' + s.replace(/"/g,'""') + '"'; }
+    var csv = cols.join(';') + '\n' + rows.map(function(r) {
+      return cols.map(function(c) { return esc(r[c]); }).join(';');
+    }).join('\n');
+    downloadCsv('faturamento_tgt_' + new Date().toISOString().slice(0,10) + '.csv', csv);
+    setMsg('msgForm', 'Faturamento exportado: ' + rows.length + ' registros.', 'ok');
   }).catch(function(err) {
     setMsg('msgForm', err.message || String(err), 'err');
-  }).finally(function() {
-    showLoading(false);
-  });
+  }).finally(function() { showLoading(false); });
 }
 
 function downloadCsv(fileName, csv) {
@@ -1864,17 +1868,11 @@ function carregarHistorico() {
 
 function sincronizarSistema() {
   showLoading(true);
-  gas('atualizarPlanilhaSistemaCompleto')
-    .then(function(res) {
-      if (!res || !res.ok) throw new Error((res && res.message) || 'Falha ao sincronizar sistema.');
-      toast(res.message || 'Sistema sincronizado com sucesso.', 'ok');
-      return carregarInfoBase();
-    })
+  carregarInfoBase()
     .then(function() { return carregarAgendaEDashboard(); })
     .then(function() { if (canFinance()) return carregarFaturamento(); })
-    .catch(function(err) {
-      setMsg('msgForm', err.message || String(err), 'err');
-    })
+    .then(function() { toast('Dados recarregados com sucesso.', 'ok'); })
+    .catch(function(err) { setMsg('msgForm', err.message || String(err), 'err'); })
     .finally(function() { showLoading(false); });
 }
 
