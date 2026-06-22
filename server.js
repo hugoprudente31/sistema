@@ -321,14 +321,23 @@ function normalizeLojaPublica(loja) {
     "óticas tgt santos":             "óticas TGT - Gonzaga",
     "floriano":                      "óticas TGT - Gonzaga",
     "marechal floriano":             "óticas TGT - Gonzaga",
-    "santo antonio":                 "óticas TGT - Gonzaga",
-    "santo antônio":                 "óticas TGT - Gonzaga",
-    "target sto. antonio":           "óticas TGT - Gonzaga",
-    "target · sto. antonio":         "óticas TGT - Gonzaga",
-    "oticas tgt santo antonio":      "óticas TGT - Gonzaga",
-    "oticas tgt santo antônio":      "óticas TGT - Gonzaga",
-    "óticas tgt santo antonio":      "óticas TGT - Gonzaga",
-    "óticas tgt santo antônio":      "óticas TGT - Gonzaga"
+
+    // Ademar de Barros — também conhecido como "Sto. Antônio" na landing page
+    // (4º card: Av. Ademar de Barros, 1450 — Santa Rosa, Guarujá SP)
+    "santo antonio":                       "óticas Target - Ademar de Barros",
+    "santo antônio":                       "óticas Target - Ademar de Barros",
+    "sto. antonio":                        "óticas Target - Ademar de Barros",
+    "sto. antônio":                        "óticas Target - Ademar de Barros",
+    "target sto. antonio":                 "óticas Target - Ademar de Barros",
+    "target · sto. antonio":              "óticas Target - Ademar de Barros",
+    "target sto. antônio":                "óticas Target - Ademar de Barros",
+    "target · sto. antônio":             "óticas Target - Ademar de Barros",
+    "oticas tgt santo antonio":           "óticas Target - Ademar de Barros",
+    "oticas tgt santo antônio":          "óticas Target - Ademar de Barros",
+    "óticas tgt santo antonio":          "óticas Target - Ademar de Barros",
+    "óticas tgt santo antônio":         "óticas Target - Ademar de Barros",
+    "oticas target santo antonio":        "óticas Target - Ademar de Barros",
+    "oticas target santo antônio":       "óticas Target - Ademar de Barros"
   };
 
   return mapa[key] || raw;
