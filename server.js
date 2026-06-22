@@ -314,18 +314,21 @@ function normalizeLojaPublica(loja) {
     "óticas target - ademar de barros":    "óticas Target - Ademar de Barros",
     "óticas target ademar de barros":      "óticas Target - Ademar de Barros",
 
-    // Santos / Santo Antônio (DB: "Óticas TGT Santos")
-    "santos":                        "Óticas TGT Santos",
-    "oticas tgt santos":             "Óticas TGT Santos",
-    "óticas tgt santos":             "Óticas TGT Santos",
-    "santo antonio":                 "Óticas TGT Santos",
-    "santo antônio":                 "Óticas TGT Santos",
-    "target sto. antonio":           "Óticas TGT Santos",
-    "target · sto. antonio":         "Óticas TGT Santos",
-    "oticas tgt santo antonio":      "Óticas TGT Santos",
-    "oticas tgt santo antônio":      "Óticas TGT Santos",
-    "óticas tgt santo antonio":      "Óticas TGT Santos",
-    "óticas tgt santo antônio":      "Óticas TGT Santos"
+    // Santos / Gonzaga (mesma unidade — DB: "óticas TGT - Gonzaga", end: Av. Marechal Floriano Peixoto, 27, Santos/SP)
+    "santos":                        "óticas TGT - Gonzaga",
+    "gonzaga santos":                "óticas TGT - Gonzaga",
+    "oticas tgt santos":             "óticas TGT - Gonzaga",
+    "óticas tgt santos":             "óticas TGT - Gonzaga",
+    "floriano":                      "óticas TGT - Gonzaga",
+    "marechal floriano":             "óticas TGT - Gonzaga",
+    "santo antonio":                 "óticas TGT - Gonzaga",
+    "santo antônio":                 "óticas TGT - Gonzaga",
+    "target sto. antonio":           "óticas TGT - Gonzaga",
+    "target · sto. antonio":         "óticas TGT - Gonzaga",
+    "oticas tgt santo antonio":      "óticas TGT - Gonzaga",
+    "oticas tgt santo antônio":      "óticas TGT - Gonzaga",
+    "óticas tgt santo antonio":      "óticas TGT - Gonzaga",
+    "óticas tgt santo antônio":      "óticas TGT - Gonzaga"
   };
 
   return mapa[key] || raw;
@@ -1565,10 +1568,11 @@ app.get("/api/public/horarios-disponiveis", validarLandingApiKey, async (req, re
 
     let horariosBase = gerarHorariosBase(data);
 
-    // Santo Antônio tem almoço 14:00-14:30 em dias úteis (seg-sex)
+    // Unidade Santos/Gonzaga tem almoço 14:00-14:30 em dias úteis (seg-sex)
     const diaRef = new Date(data + "T12:00:00").getDay();
-    const isSantoAntonio = loja.toLowerCase().replace(/[^a-z]/g, "").includes("santoantonio");
-    if (isSantoAntonio && diaRef >= 1 && diaRef <= 5) {
+    const lojaKey = loja.toLowerCase().replace(/[^a-z]/g, "");
+    const isGonzagaSantos = lojaKey.includes("gonzaga") || lojaKey.includes("santos");
+    if (isGonzagaSantos && diaRef >= 1 && diaRef <= 5) {
       horariosBase = horariosBase.filter(h => h !== "14:00" && h !== "14:30");
     }
 
@@ -1668,11 +1672,14 @@ app.post("/api/public/agendamentos", validarLandingApiKey, async (req, res) => {
       return res.status(400).json(regraHorario);
     }
 
-    // Santo Antônio: almoço 14:00-14:30 em dias úteis
-    if ((horario === "14:00" || horario === "14:30") && loja.toLowerCase().replace(/[^a-z]/g, "").includes("santoantonio")) {
-      const diaPost = new Date(dataAgendamento + "T12:00:00").getDay();
-      if (diaPost >= 1 && diaPost <= 5) {
-        return res.status(400).json({ ok: false, message: "Horário de almoço não disponível para esta unidade." });
+    // Unidade Santos/Gonzaga: almoço 14:00-14:30 em dias úteis
+    if (horario === "14:00" || horario === "14:30") {
+      const lojaKeyPost = loja.toLowerCase().replace(/[^a-z]/g, "");
+      if (lojaKeyPost.includes("gonzaga") || lojaKeyPost.includes("santos")) {
+        const diaPost = new Date(dataAgendamento + "T12:00:00").getDay();
+        if (diaPost >= 1 && diaPost <= 5) {
+          return res.status(400).json({ ok: false, message: "Horário de almoço não disponível para esta unidade." });
+        }
       }
     }
 
