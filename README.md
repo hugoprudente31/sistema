@@ -136,3 +136,9 @@ npm run dev
 # Verificar saúde da API
 curl http://localhost:3000/health
 ```
+
+## Revisão automática no GitHub
+
+Os pull requests executam os testes do aplicativo e uma revisão automática com
+`openai/codex-action`. A chave deve permanecer somente no segredo de repositório
+`OPENAI_API_KEY`; nunca registre o valor da chave em arquivos, commits ou logs.
