@@ -7,17 +7,31 @@ on:
 jobs:
   codex:
     runs-on: ubuntu-latest
+    continue-on-error: true
     permissions:
       contents: read
     outputs:
       final_message: ${{ steps.run_codex.outputs.final-message }}
     steps:
+      - name: Check OpenAI key
+        id: check_key
+        run: |
+          if [ -z "$OPENAI_KEY" ]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          OPENAI_KEY: ${{ secrets.OPENAI_API_KEY }}
+
       - uses: actions/checkout@v5
+        if: steps.check_key.outputs.available == 'true'
         with:
           ref: refs/pull/${{ github.event.pull_request.number }}/merge
           persist-credentials: false
 
       - name: Pre-fetch base and head refs
+        if: steps.check_key.outputs.available == 'true'
         env:
           PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -28,6 +42,7 @@ jobs:
 
       - name: Run Codex
         id: run_codex
+        if: steps.check_key.outputs.available == 'true'
         uses: openai/codex-action@v1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
