@@ -369,9 +369,10 @@
           <div><label>Tag de acesso</label><select id="filtroAccessTag" onchange="recarregarComFiltros()"></select></div>
           <div class="checkbox-line"><input id="filtroMeus" type="checkbox" onchange="recarregarComFiltros()"><label for="filtroMeus" style="margin:0;">Meus Serviços</label></div>
           <div class="checkbox-line"><input id="filtroMinhasOSAtivas" type="checkbox" onchange="recarregarComFiltros()"><label for="filtroMinhasOSAtivas" style="margin:0;">Minhas OS Ativas</label></div>
-          <div><label>Período relatório</label><select id="filtroPeriodoDias" onchange="recarregarComFiltros()"><option value="">Sem período</option><option value="7">7 dias</option><option value="15">15 dias</option><option value="30">30 dias</option><option value="45">45 dias</option><option value="90">90 dias</option><option value="120">120 dias</option></select></div>
+          <div><label>Resultado da visita</label><select id="filtroResultado" onchange="recarregarComFiltros()"><option value="">Todos</option><option value="compareceu">Compareceu</option><option value="nao-compareceu">Não Compareceu</option><option value="comprou">Comprou</option><option value="cancelou">Cancelou</option><option value="reagendou">Reagendou</option></select></div>
         </div>
         <div class="row">
+          <div><label>Período relatório</label><select id="filtroPeriodoDias" onchange="recarregarComFiltros()"><option value="">Sem período</option><option value="7">7 dias</option><option value="15">15 dias</option><option value="30">30 dias</option><option value="45">45 dias</option><option value="90">90 dias</option><option value="120">120 dias</option></select></div>
           <div><label>&nbsp;</label><button class="secondary" onclick="limparFiltros()">Limpar filtros</button></div>
         </div>
         <div id="filtroResumo" class="subtitle" style="margin-top:12px;font-weight:700"></div>
@@ -1252,6 +1253,7 @@ function coletarFiltros() {
     ownerId: byId('filtroOwner').value.trim(),
     accessTag: byId('filtroAccessTag').value.trim(),
     periodoDias: byId('filtroPeriodoDias').value.trim(),
+    resultado: byId('filtroResultado').value.trim(),
     meus: byId('filtroMeus').checked ? 'true' : 'false',
     minhasOSAtivas: byId('filtroMinhasOSAtivas').checked ? 'true' : 'false',
     userEmail: String((state.user && state.user.email) || '').trim(),
@@ -1277,7 +1279,7 @@ function coletarFiltros() {
 }
 
 function limparFiltros() {
-  ['filtroDataDe', 'filtroDataAte', 'filtroCliente', 'filtroOptometrista', 'filtroStatus', 'filtroStatusOS', 'filtroOwner', 'filtroAccessTag', 'filtroPeriodoDias'].forEach(function(id) {
+  ['filtroDataDe', 'filtroDataAte', 'filtroCliente', 'filtroOptometrista', 'filtroStatus', 'filtroStatusOS', 'filtroOwner', 'filtroAccessTag', 'filtroPeriodoDias', 'filtroResultado'].forEach(function(id) {
     byId(id).value = '';
   });
   byId('filtroMinhasOSAtivas').checked = false;
