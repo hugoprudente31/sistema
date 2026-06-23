@@ -1916,11 +1916,47 @@ app.post("/api/agendamentos", async (req, res) => {
 
 app.get("/api/agendamentos", async (req, res) => {
   try {
-    const result = canViewAllStores(req.session)
-      ? await pool.query(`SELECT * FROM agendamentos WHERE excluido_em IS NULL ORDER BY id DESC LIMIT 1000`)
-      : req.session.loja
-        ? await pool.query(`SELECT * FROM agendamentos WHERE excluido_em IS NULL AND ${storeSql("loja")} ORDER BY id DESC LIMIT 1000`, [req.session.loja])
-        : { rows: [] };
+    const q = req.query;
+    const params = [];
+    const conditions = ["excluido_em IS NULL"];
+
+    // Loja: session-enforced for store-scoped roles; query param only for admin/central
+    if (!canViewAllStores(req.session)) {
+      if (!req.session.loja) return res.json({ ok: true, total: 0, agendamentos: [] });
+      params.push(req.session.loja);
+      conditions.push(storeSql("loja", `$${params.length}`));
+    } else if (q.loja) {
+      params.push(q.loja);
+      conditions.push(storeSql("loja", `$${params.length}`));
+    }
+
+    // Date range — push to SQL so records beyond LIMIT are reachable
+    const periodoDias = Number(q.periodoDias || 0);
+    let dataDe = String(q.de || q.dataDe || "").trim();
+    let dataAte = String(q.ate || q.dataAte || "").trim();
+
+    if (periodoDias > 0 && !dataDe && !dataAte) {
+      const hoje = new Date().toISOString().slice(0, 10);
+      const inicio = new Date(hoje + "T12:00:00");
+      inicio.setDate(inicio.getDate() - (periodoDias - 1));
+      dataDe = inicio.toISOString().slice(0, 10);
+      dataAte = hoje;
+    }
+
+    if (dataDe) { params.push(dataDe); conditions.push(`data_agendamento >= $${params.length}`); }
+    if (dataAte) { params.push(dataAte); conditions.push(`data_agendamento <= $${params.length}`); }
+
+    if (q.status) { params.push(q.status); conditions.push(`LOWER(COALESCE(status,'')) = LOWER($${params.length})`); }
+    if (q.statusOS) { params.push(q.statusOS); conditions.push(`LOWER(COALESCE(status_os,'')) = LOWER($${params.length})`); }
+
+    // Sem filtro de data: LIMIT 1000 (carga inicial rápida). Com filtro: até 5000.
+    const temFiltroData = !!(dataDe || dataAte);
+    const limite = Math.min(Number(q.limit || 0) || (temFiltroData ? 5000 : 1000), 5000);
+
+    const result = await pool.query(
+      `SELECT * FROM agendamentos WHERE ${conditions.join(" AND ")} ORDER BY id DESC LIMIT ${limite}`,
+      params
+    );
     res.json({ ok: true, total: result.rows.length, agendamentos: result.rows });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });

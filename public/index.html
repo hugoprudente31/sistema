@@ -628,8 +628,21 @@ function mapAgendamentoDb(r) {
   };
 }
 
+function buildAgendamentosUrl(extra) {
+  var f = (typeof coletarFiltros === 'function') ? coletarFiltros() : {};
+  var p = [];
+  if (f.dataDe)      p.push('de='          + encodeURIComponent(f.dataDe));
+  if (f.dataAte)     p.push('ate='         + encodeURIComponent(f.dataAte));
+  if (f.periodoDias) p.push('periodoDias=' + encodeURIComponent(f.periodoDias));
+  if (f.loja)        p.push('loja='        + encodeURIComponent(f.loja));
+  if (f.status)      p.push('status='      + encodeURIComponent(f.status));
+  if (f.statusOS)    p.push('statusOS='    + encodeURIComponent(f.statusOS));
+  if (extra) p.push(extra);
+  return '/api/agendamentos' + (p.length ? '?' + p.join('&') : '');
+}
+
 function getAgendamentosPostgres() {
-  return apiGet('/api/agendamentos').then(function(res) {
+  return apiGet(buildAgendamentosUrl()).then(function(res) {
     var rows = Array.isArray(res.agendamentos) ? res.agendamentos : [];
     return rows.map(mapAgendamentoDb);
   });
@@ -2275,7 +2288,7 @@ function executarDiagnostico() {
     // Override getAgendamentosPostgres para aplicar filtro por loja
     if (typeof window.apiGet === 'function' && typeof window.mapAgendamentoDb === 'function') {
       window.getAgendamentosPostgres = function() {
-        return apiGet('/api/agendamentos?limit=10000&all=true').then(function(res) {
+        return apiGet(buildAgendamentosUrl()).then(function(res) {
           var rows = Array.isArray(res.agendamentos) ? res.agendamentos : [];
           return window.aplicarRestricaoLojaUsuario(rows.map(mapAgendamentoDb));
         });
@@ -2283,7 +2296,7 @@ function executarDiagnostico() {
 
       window.getDashboardPostgres = function() {
         if (!window.tgtPodeVerFinanceiro()) return Promise.resolve({});
-        return apiGet('/api/agendamentos?limit=10000&all=true').then(function(res) {
+        return apiGet(buildAgendamentosUrl()).then(function(res) {
           var rows = Array.isArray(res.agendamentos) ? res.agendamentos : [];
           var mapped = window.aplicarRestricaoLojaUsuario(rows.map(mapAgendamentoDb)).filter(function(r) { return valor(r) > 0; });
           return {
@@ -2374,7 +2387,7 @@ function executarDiagnostico() {
       alert('Seu perfil não tem acesso ao módulo financeiro.');
       return Promise.resolve();
     }
-    return apiGet('/api/agendamentos?limit=10000&all=true').then(function(res) {
+    return apiGet(buildAgendamentosUrl()).then(function(res) {
       var rows = Array.isArray(res.agendamentos) ? res.agendamentos : [];
       var mapped = window.aplicarRestricaoLojaUsuario(rows.map(mapAgendamentoDb)).filter(function(r){ return valor(r) > 0; });
       var total = mapped.reduce(function(a,r){ return a+valor(r); }, 0);
