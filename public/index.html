@@ -54,6 +54,13 @@
 
     label { display: block; font-size: 13px; font-weight: 700; margin-bottom: 4px; }
 
+    .filtro-btn-group { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+    .filtro-btn { padding: 5px 14px; border-radius: 20px; border: 1.5px solid #cbd5e1; background: #f8fafc; color: #475569; font-size: 13px; font-weight: 500; cursor: pointer; transition: all .15s; line-height: 1.4; }
+    .filtro-btn:hover { border-color: #3b82f6; color: #1d4ed8; background: #eff6ff; }
+    .filtro-btn.ativo { background: #1d4ed8; border-color: #1d4ed8; color: #fff; font-weight: 700; }
+    .filtro-btn.ativo:hover { background: #1e40af; border-color: #1e40af; }
+    .filtro-btn-row { margin-top: 10px; }
+
     input, select, textarea, button {
       width: 100%;
       padding: 12px;
@@ -365,11 +372,20 @@
           <div><label>Optometrista</label><input id="filtroOptometrista" type="text" oninput="debouncedReload()" placeholder="Digite o nome"></div>
           <div><label>Usuário / Proprietário</label><select id="filtroOwner" onchange="recarregarComFiltros()"></select></div>
         </div>
-        <div class="row-4">
+        <div class="row-3">
           <div><label>Tag de acesso</label><select id="filtroAccessTag" onchange="recarregarComFiltros()"></select></div>
           <div class="checkbox-line"><input id="filtroMeus" type="checkbox" onchange="recarregarComFiltros()"><label for="filtroMeus" style="margin:0;">Meus Serviços</label></div>
           <div class="checkbox-line"><input id="filtroMinhasOSAtivas" type="checkbox" onchange="recarregarComFiltros()"><label for="filtroMinhasOSAtivas" style="margin:0;">Minhas OS Ativas</label></div>
-          <div><label>Resultado da visita</label><select id="filtroResultado" onchange="recarregarComFiltros()"><option value="">Todos</option><option value="compareceu">Compareceu</option><option value="nao-compareceu">Não Compareceu</option><option value="comprou">Comprou</option><option value="cancelou">Cancelou</option><option value="reagendou">Reagendou</option></select></div>
+        </div>
+        <div class="filtro-btn-row">
+          <label>Resultado da visita</label>
+          <div id="filtroResultadoGroup" class="filtro-btn-group">
+            <button type="button" class="filtro-btn" data-valor="compareceu"     onclick="toggleFiltroResultado(this)">Compareceu</button>
+            <button type="button" class="filtro-btn" data-valor="nao-compareceu" onclick="toggleFiltroResultado(this)">Não Compareceu</button>
+            <button type="button" class="filtro-btn" data-valor="comprou"        onclick="toggleFiltroResultado(this)">Comprou</button>
+            <button type="button" class="filtro-btn" data-valor="cancelou"       onclick="toggleFiltroResultado(this)">Cancelou</button>
+            <button type="button" class="filtro-btn" data-valor="reagendou"      onclick="toggleFiltroResultado(this)">Reagendou</button>
+          </div>
         </div>
         <div class="row">
           <div><label>Período relatório</label><select id="filtroPeriodoDias" onchange="recarregarComFiltros()"><option value="">Sem período</option><option value="7">7 dias</option><option value="15">15 dias</option><option value="30">30 dias</option><option value="45">45 dias</option><option value="90">90 dias</option><option value="120">120 dias</option></select></div>
@@ -1253,6 +1269,11 @@ function carregarOptometristas() {
     });
 }
 
+function toggleFiltroResultado(btn) {
+  btn.classList.toggle('ativo');
+  recarregarComFiltros();
+}
+
 function coletarFiltros() {
   var role = roleName();
   var filtros = {
@@ -1266,7 +1287,12 @@ function coletarFiltros() {
     ownerId: byId('filtroOwner').value.trim(),
     accessTag: byId('filtroAccessTag').value.trim(),
     periodoDias: byId('filtroPeriodoDias').value.trim(),
-    resultado: byId('filtroResultado').value.trim(),
+    resultado: (function() {
+      var ativos = [];
+      var btns = document.querySelectorAll('#filtroResultadoGroup .filtro-btn.ativo');
+      for (var i = 0; i < btns.length; i++) ativos.push(btns[i].getAttribute('data-valor'));
+      return ativos;
+    }()),
     meus: byId('filtroMeus').checked ? 'true' : 'false',
     minhasOSAtivas: byId('filtroMinhasOSAtivas').checked ? 'true' : 'false',
     userEmail: String((state.user && state.user.email) || '').trim(),
@@ -1292,9 +1318,10 @@ function coletarFiltros() {
 }
 
 function limparFiltros() {
-  ['filtroDataDe', 'filtroDataAte', 'filtroCliente', 'filtroOptometrista', 'filtroStatus', 'filtroStatusOS', 'filtroOwner', 'filtroAccessTag', 'filtroPeriodoDias', 'filtroResultado'].forEach(function(id) {
+  ['filtroDataDe', 'filtroDataAte', 'filtroCliente', 'filtroOptometrista', 'filtroStatus', 'filtroStatusOS', 'filtroOwner', 'filtroAccessTag', 'filtroPeriodoDias'].forEach(function(id) {
     byId(id).value = '';
   });
+  document.querySelectorAll('#filtroResultadoGroup .filtro-btn.ativo').forEach(function(b) { b.classList.remove('ativo'); });
   byId('filtroMinhasOSAtivas').checked = false;
   byId('filtroMeus').checked = false;
   if (state.user && state.user.loja && state.user.loja !== 'Todas') byId('filtroLoja').value = state.user.loja;

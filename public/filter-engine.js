@@ -69,18 +69,22 @@
       }
       if (String(filters.meus) === 'true' && !isMine(row, user)) return false;
       if (String(filters.minhasOSAtivas) === 'true' && (!isMine(row, user) || !activeOS(row))) return false;
-      if (filters.resultado) {
-        var res = filters.resultado;
+      if (filters.resultado && filters.resultado.length) {
         var comp = normalize(value(row, ['Compareceu', 'compareceu']));
         var stag = normalize(value(row, ['StatusAgenda', 'status']));
         var nos  = String(value(row, ['NumeroOS', 'numero_os']) || '').trim();
         var sos  = normalize(value(row, ['StatusOS', 'status_os']));
         var tags = normalize(value(row, ['AccessTags', 'access_tags']));
-        if (res === 'compareceu'     && !(comp === 'sim' || stag === 'compareceu')) return false;
-        if (res === 'nao-compareceu' && !(comp === 'nao' || stag === 'nao compareceu')) return false;
-        if (res === 'comprou'        && !(nos && sos !== '' && ['cancelada','cancelado','reembolso'].indexOf(sos) === -1)) return false;
-        if (res === 'cancelou'       && stag !== 'cancelado') return false;
-        if (res === 'reagendou'      && tags.indexOf('reagendado') < 0) return false;
+        var matchAny = false;
+        for (var ri = 0; ri < filters.resultado.length; ri++) {
+          var r = filters.resultado[ri];
+          if (r === 'compareceu'     && (comp === 'sim' || stag === 'compareceu'))                                  { matchAny = true; break; }
+          if (r === 'nao-compareceu' && (comp === 'nao' || stag === 'nao compareceu'))                              { matchAny = true; break; }
+          if (r === 'comprou'        && nos && sos !== '' && ['cancelada','cancelado','reembolso'].indexOf(sos) < 0) { matchAny = true; break; }
+          if (r === 'cancelou'       && stag === 'cancelado')                                                       { matchAny = true; break; }
+          if (r === 'reagendou'      && tags.indexOf('reagendado') >= 0)                                            { matchAny = true; break; }
+        }
+        if (!matchAny) return false;
       }
       return true;
     });
