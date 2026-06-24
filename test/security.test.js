@@ -298,6 +298,54 @@ test("alteração guarda versões anterior e nova com o perfil responsável", as
   }
 });
 
+test("gerente move lead da própria loja para a lixeira", async () => {
+  const originalConnect = pool.connect;
+  const originalQuery = pool.query;
+  const queries = [];
+  pool.query = async () => ({ rows: [{ id: 78, nome: "Cliente", loja: "Loja A", status: "Agendado" }] });
+  pool.connect = async () => ({
+    query: async (sql, params) => {
+      queries.push({ sql: String(sql), params });
+      if (String(sql).includes("UPDATE agendamentos SET")) {
+        return { rows: [{ id: 78, nome: "Cliente", loja: "Loja A", status: "Cancelado", excluido_em: new Date() }] };
+      }
+      return { rows: [] };
+    },
+    release: () => {}
+  });
+  const token = signSession({ id: "9", nome: "Gerente", email: "gerente@example.com", perfil: "gerente de loja", loja: "Loja A" });
+  try {
+    const response = await fetch(baseUrl + "/api/agendamentos/78", {
+      method: "PATCH",
+      headers: { cookie: `tgt_session=${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ statusAgenda: "Cancelado", excluir_lead: true })
+    });
+    assert.equal(response.status, 200);
+    const update = queries.find((q) => q.sql.includes("UPDATE agendamentos SET"));
+    assert.ok(update);
+    assert.equal(update.params[27], "LIXEIRA");
+  } finally {
+    pool.connect = originalConnect;
+    pool.query = originalQuery;
+  }
+});
+
+test("gerente não restaura lead da lixeira", async () => {
+  const originalQuery = pool.query;
+  pool.query = async () => ({ rows: [{ id: 79, nome: "Cliente", loja: "Loja A", status: "Cancelado", excluido_em: new Date() }] });
+  const token = signSession({ id: "9", nome: "Gerente", email: "gerente@example.com", perfil: "gerente de loja", loja: "Loja A" });
+  try {
+    const response = await fetch(baseUrl + "/api/agendamentos/79", {
+      method: "PATCH",
+      headers: { cookie: `tgt_session=${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ restaurar_lead: true })
+    });
+    assert.equal(response.status, 403);
+  } finally {
+    pool.query = originalQuery;
+  }
+});
+
 test("gerente consulta backups somente da própria loja", async () => {
   const originalQuery = pool.query;
   let capturedSql = "";
