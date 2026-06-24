@@ -1942,8 +1942,11 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
     if (!hasRole(req.session, ["admin", "atendimento central", "gerente de loja", "consultor de vendas", "vendedor", "comprador", "optometrista"])) {
       return res.status(403).json({ ok: false, message: "Perfil sem permissão para alterar agendamentos." });
     }
-    if ((b.excluir_lead || b.restaurar_lead) && !isAdmin(req.session)) {
-      return res.status(403).json({ ok: false, message: "Apenas admin pode mover leads para a lixeira." });
+    if (b.excluir_lead && !hasRole(req.session, ["admin", "atendimento central", "gerente de loja"])) {
+      return res.status(403).json({ ok: false, message: "Perfil sem permissão para mover leads para a lixeira." });
+    }
+    if (b.restaurar_lead && !isAdmin(req.session)) {
+      return res.status(403).json({ ok: false, message: "Apenas admin pode restaurar leads da lixeira." });
     }
     if (roleOf(req.session) === "optometrista") {
       const allowed = new Set([
