@@ -195,6 +195,37 @@
       font-weight: 700;
     }
 
+    .recovery-alerts {
+      border-color: #f97316;
+      background: #fff7ed;
+    }
+
+    .recovery-alerts h3 {
+      color: #c2410c;
+    }
+
+    .recovery-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 10px;
+    }
+
+    .recovery-item {
+      border: 1px solid #fed7aa;
+      border-radius: 12px;
+      padding: 12px;
+      background: #fff;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .recovery-item strong {
+      display: block;
+      color: #9a3412;
+      font-size: 14px;
+      margin-bottom: 4px;
+    }
+
     .logo-shell { display: flex; justify-content: center; align-items: center; padding: 8px 0 2px; }
     .logo-carousel { position: relative; width: min(100%, 520px); height: 90px; overflow: hidden; border-radius: 18px; background: linear-gradient(135deg, #fff 0%, #fff5ef 100%); border: 1px solid var(--line); box-shadow: 0 10px 20px rgba(252,81,2,.08); }
     .logo-track { display: flex; width: 200%; height: 100%; animation: slideLogos 12s linear infinite; }
@@ -324,6 +355,17 @@
         <div class="kpi"><div class="label">OS 15 dias</div><div class="value" id="kOs15">0 / 0</div></div>
         <div class="kpi"><div class="label">OS 30 dias</div><div class="value" id="kOs30">0 / 0</div></div>
       </div>
+    </div>
+
+    <div class="card recovery-alerts hidden" id="cardRecuperarLead">
+      <div class="topbar" style="margin-bottom:12px;">
+        <div>
+          <h3>RECUPERAR LEAD</h3>
+          <div class="subtitle">Agendamentos com mais de 2 horas que precisam de recuperação.</div>
+        </div>
+        <div class="pill" id="qtdRecuperarLead">0 lead(s)</div>
+      </div>
+      <div id="listaRecuperarLead" class="recovery-list"></div>
     </div>
 
     <div class="card hidden" id="cardAgendamento">
@@ -980,6 +1022,7 @@ function carregarAgendaEDashboard() {
     state.dashboard = buildDashboardLocal(state.agendamentos, dashboardFiltrado(state.agendamentos));
     renderAgenda(state.agendamentos);
     preencherDashboard();
+    renderRecuperarLead();
     atualizarResumoFiltros(state.agendamentos.length, state.agendamentosTodos.length);
   }).catch(function(err) {
     byId('agendaBody').innerHTML = '<tr><td colspan="18">Erro ao carregar agendamentos.</td></tr>';
@@ -1001,6 +1044,7 @@ function recarregarComFiltros() {
     state.dashboard = buildDashboardLocal(state.agendamentos, dashboardFiltrado(state.agendamentos));
     renderAgenda(state.agendamentos);
     preencherDashboard();
+    renderRecuperarLead();
     atualizarResumoFiltros(state.agendamentos.length, state.agendamentosTodos.length);
     if (canFinance()) return carregarFaturamento();
   }).catch(function(err) {
@@ -1057,6 +1101,97 @@ function preencherDashboard() {
     byId('kOs15').textContent = ((d.os15 || {}).opened || 0) + ' / ' + ((d.os15 || {}).finalized || 0);
     byId('kOs30').textContent = ((d.os30 || {}).opened || 0) + ' / ' + ((d.os30 || {}).finalized || 0);
   }
+}
+
+function podeVerRecuperarLead() {
+  return ['gerente de loja', 'atendimento central'].indexOf(roleName()) > -1;
+}
+
+function dataHoraAgendamento(row) {
+  row = row || {};
+  var data = String(row.DataAgendamento || '').slice(0, 10);
+  var horario = String(row.Horario || '').trim();
+  var match = horario.match(/^(\d{1,2}):(\d{2})/);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(data) || !match) return null;
+  var parts = data.split('-').map(Number);
+  var hora = Number(match[1]);
+  var minuto = Number(match[2]);
+  if (hora > 23 || minuto > 59) return null;
+  return new Date(parts[0], parts[1] - 1, parts[2], hora, minuto, 0, 0);
+}
+
+function precisaRecuperarLead(row, agora) {
+  row = row || {};
+  agora = agora || new Date();
+  var agendadoEm = dataHoraAgendamento(row);
+  if (!agendadoEm) return false;
+  if ((agora.getTime() - agendadoEm.getTime()) < (2 * 60 * 60 * 1000)) return false;
+
+  var semaforo = normalizeKey(row.AtendimentoSemaforo || '');
+  var status = normalizeKey(row.StatusAgenda || '');
+  var compareceu = normalizeKey(row.Compareceu || '');
+  var semCompra = semaforo === 'amarelo' || (
+    (compareceu === 'sim' || compareceu === 'compareceu' || status === 'compareceu') &&
+    Number(row.ValorVenda || 0) <= 0
+  );
+  var naoCompareceu = semaforo === 'vermelho' ||
+    compareceu === 'nao' ||
+    compareceu === 'não' ||
+    compareceu === 'nao compareceu' ||
+    compareceu === 'não compareceu' ||
+    status === 'nao compareceu' ||
+    status === 'não compareceu';
+
+  return naoCompareceu || semCompra;
+}
+
+function motivoRecuperarLead(row) {
+  var semaforo = normalizeKey(row && row.AtendimentoSemaforo || '');
+  if (semaforo === 'vermelho') return 'Não compareceu';
+  if (semaforo === 'amarelo') return 'Compareceu e não comprou';
+  if (normalizeKey(row && row.StatusAgenda || '') === 'nao compareceu' || normalizeKey(row && row.StatusAgenda || '') === 'não compareceu') return 'Não compareceu';
+  return 'Compareceu e não comprou';
+}
+
+function renderRecuperarLead() {
+  var card = byId('cardRecuperarLead');
+  var lista = byId('listaRecuperarLead');
+  var qtd = byId('qtdRecuperarLead');
+  if (!card || !lista || !qtd) return;
+
+  if (!podeVerRecuperarLead()) {
+    card.classList.add('hidden');
+    lista.innerHTML = '';
+    qtd.textContent = '0 lead(s)';
+    return;
+  }
+
+  var rows = (state.agendamentosTodos || []).filter(function(row) {
+    return precisaRecuperarLead(row);
+  }).sort(function(a, b) {
+    return (dataHoraAgendamento(a) || 0) - (dataHoraAgendamento(b) || 0);
+  });
+
+  qtd.textContent = rows.length + ' lead(s)';
+  if (!rows.length) {
+    card.classList.add('hidden');
+    lista.innerHTML = '';
+    return;
+  }
+
+  card.classList.remove('hidden');
+  lista.innerHTML = rows.slice(0, 12).map(function(row) {
+    var whats = String(row.WhatsApp || '').replace(/\D/g, '');
+    var whatsText = row.WhatsApp || 'Sem WhatsApp';
+    var link = whats ? '<a href="https://wa.me/55' + escapeHtml(whats) + '" target="_blank" rel="noopener">' + escapeHtml(whatsText) + '</a>' : escapeHtml(whatsText);
+    return '<div class="recovery-item">' +
+      '<strong>RECUPERAR LEAD</strong>' +
+      '<div><b>Nome:</b> ' + escapeHtml(row.NomeCompleto || '') + '</div>' +
+      '<div><b>WhatsApp:</b> ' + link + '</div>' +
+      '<div><b>Motivo:</b> ' + escapeHtml(motivoRecuperarLead(row)) + '</div>' +
+      '<div><b>Agendado:</b> ' + escapeHtml(formatDateBR(row.DataAgendamentoBR || row.DataAgendamento || '')) + ' ' + escapeHtml(row.Horario || '') + '</div>' +
+      '</div>';
+  }).join('');
 }
 
 function carregarFaturamento() {
