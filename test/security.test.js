@@ -21,6 +21,20 @@ test.before(async () => {
   });
 });
 
+test("filtros do acompanhamento seguem a politica do perfil", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "public", "index.html"), "utf8");
+  assert.match(html, /function politicaFiltrosPorPerfil\(role\)/);
+  assert.match(html, /function aplicarPoliticaFiltrosPerfil\(\)/);
+  assert.match(html, /function normalizarFiltrosPorPerfil\(filtros\)/);
+  assert.match(html, /'gerente de loja', 'comprador'\]\.indexOf\(role\) > -1 \? 'Todos da minha loja'/);
+  assert.match(html, /'optometrista', 'consultor de vendas', 'vendedor', 'outros', 'gerente de loja', 'comprador'/);
+  assert.match(html, /politica\.resultados = \['comprou', 'cancelou', 'reagendou'\]/);
+  assert.match(html, /politica\.resultados = \['compareceu', 'nao-compareceu', 'cancelou', 'reagendou'\]/);
+  assert.match(html, /if \(!politica\.owner\) filtros\.ownerId = ''/);
+  assert.match(html, /if \(!politica\.statusOS\) filtros\.statusOS = ''/);
+  assert.match(html, /filtros\.resultado = \(filtros\.resultado \|\| \[\]\)\.filter/);
+});
+
 test.after(async () => {
   await new Promise((resolve) => server.close(resolve));
 });
