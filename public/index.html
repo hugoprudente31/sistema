@@ -515,6 +515,127 @@ function byId(id) { return document.getElementById(id); }
 function roleName() { return String(state.user && state.user.perfil || '').toLowerCase(); }
 function canFinance() { return !!(state.user && state.user.permissions && state.user.permissions.canViewFinance); }
 function canManageOS() { return !!(state.user && state.user.permissions && state.user.permissions.canManageOS); }
+function perfilDeLojaFiltro(role) {
+  return ['optometrista', 'consultor de vendas', 'vendedor', 'outros', 'gerente de loja', 'comprador'].indexOf(role) > -1;
+}
+function politicaFiltrosPorPerfil(role) {
+  var todosResultados = ['compareceu', 'nao-compareceu', 'comprou', 'cancelou', 'reagendou'];
+  var politica = {
+    lojaTravada: false,
+    owner: true,
+    statusOS: true,
+    accessTag: true,
+    optometrista: true,
+    meus: true,
+    minhasOSAtivas: true,
+    resultados: todosResultados
+  };
+
+  if (role === 'admin' || role === 'atendimento central') return politica;
+
+  if (role === 'gerente de loja') {
+    politica.lojaTravada = true;
+    politica.meus = false;
+    return politica;
+  }
+
+  if (role === 'comprador') {
+    politica.lojaTravada = true;
+    politica.meus = false;
+    politica.resultados = ['comprou', 'cancelou', 'reagendou'];
+    return politica;
+  }
+
+  if (role === 'consultor de vendas' || role === 'vendedor' || role === 'outros') {
+    politica.lojaTravada = true;
+    politica.statusOS = false;
+    politica.minhasOSAtivas = false;
+    politica.resultados = ['compareceu', 'nao-compareceu', 'cancelou', 'reagendou'];
+    return politica;
+  }
+
+  if (role === 'optometrista') {
+    politica.lojaTravada = true;
+    politica.owner = false;
+    politica.statusOS = false;
+    politica.accessTag = false;
+    politica.optometrista = false;
+    politica.meus = false;
+    politica.minhasOSAtivas = false;
+    politica.resultados = ['compareceu', 'nao-compareceu'];
+    return politica;
+  }
+
+  return politica;
+}
+
+function aplicarPoliticaFiltrosPerfil() {
+  if (!state.user) return;
+  var role = roleName();
+  var politica = politicaFiltrosPorPerfil(role);
+  var lojaUsuario = state.user && state.user.loja && state.user.loja !== 'Todas' ? state.user.loja : '';
+  var filtroLoja = byId('filtroLoja');
+  var filtroOwner = byId('filtroOwner');
+  var filtroStatusOS = byId('filtroStatusOS');
+  var filtroAccessTag = byId('filtroAccessTag');
+  var filtroOptometrista = byId('filtroOptometrista');
+  var filtroMeus = byId('filtroMeus');
+  var filtroMinhasOSAtivas = byId('filtroMinhasOSAtivas');
+
+  if (filtroLoja) {
+    if (politica.lojaTravada && lojaUsuario) filtroLoja.value = lojaUsuario;
+    filtroLoja.disabled = !!(politica.lojaTravada && lojaUsuario);
+  }
+
+  [
+    { el: filtroOwner, permitido: politica.owner },
+    { el: filtroStatusOS, permitido: politica.statusOS },
+    { el: filtroAccessTag, permitido: politica.accessTag },
+    { el: filtroOptometrista, permitido: politica.optometrista }
+  ].forEach(function(item) {
+    if (!item.el) return;
+    item.el.disabled = !item.permitido;
+    if (!item.permitido) item.el.value = '';
+  });
+
+  [
+    { el: filtroMeus, permitido: politica.meus },
+    { el: filtroMinhasOSAtivas, permitido: politica.minhasOSAtivas }
+  ].forEach(function(item) {
+    if (!item.el) return;
+    item.el.disabled = !item.permitido;
+    if (!item.permitido) item.el.checked = false;
+  });
+
+  var permitidos = {};
+  politica.resultados.forEach(function(resultado) { permitidos[resultado] = true; });
+  var btns = document.querySelectorAll('#filtroResultadoGroup .filtro-btn');
+  for (var i = 0; i < btns.length; i++) {
+    var valor = btns[i].getAttribute('data-valor');
+    var permitido = !!permitidos[valor];
+    btns[i].disabled = !permitido;
+    btns[i].title = permitido ? '' : 'Filtro indisponivel para este perfil';
+    if (!permitido) btns[i].classList.remove('ativo');
+  }
+}
+
+function normalizarFiltrosPorPerfil(filtros) {
+  var role = roleName();
+  var politica = politicaFiltrosPorPerfil(role);
+  var lojaUsuario = state.user && state.user.loja && state.user.loja !== 'Todas' ? state.user.loja : '';
+  var permitidos = {};
+  politica.resultados.forEach(function(resultado) { permitidos[resultado] = true; });
+
+  if (perfilDeLojaFiltro(role) && lojaUsuario) filtros.loja = lojaUsuario;
+  if (!politica.owner) filtros.ownerId = '';
+  if (!politica.statusOS) filtros.statusOS = '';
+  if (!politica.accessTag) filtros.accessTag = '';
+  if (!politica.optometrista) filtros.optometrista = '';
+  if (!politica.meus) filtros.meus = 'false';
+  if (!politica.minhasOSAtivas) filtros.minhasOSAtivas = 'false';
+  filtros.resultado = (filtros.resultado || []).filter(function(resultado) { return !!permitidos[resultado]; });
+  return filtros;
+}
 
 function gas(fnName) {
   var args = Array.prototype.slice.call(arguments, 1);
@@ -868,6 +989,7 @@ function aplicarPermissoesTela() {
   if (p.isAdmin || roleName() === 'gerente de loja') byId('btnHistorico').classList.remove('hidden');
   if (p.isAdmin) byId('btnSyncSistema').classList.remove('hidden');
   byId('filtroMeus').checked = false;
+  aplicarPoliticaFiltrosPerfil();
 }
 
 function carregarInfoBase() {
@@ -1186,12 +1308,13 @@ function preencherFiltroLojas() {
   }).join('') : '<option value="">Nenhuma loja encontrada</option>';
   el.innerHTML = html;
 
-  if (['optometrista', 'consultor de vendas', 'vendedor', 'outros', 'gerente de loja'].indexOf(roleName()) > -1 && state.user && state.user.loja && state.user.loja !== 'Todas') {
+  if (perfilDeLojaFiltro(roleName()) && state.user && state.user.loja && state.user.loja !== 'Todas') {
     el.value = state.user.loja;
     el.disabled = true;
   } else {
     el.disabled = false;
   }
+  aplicarPoliticaFiltrosPerfil();
 }
 
 function preencherOwners() {
@@ -1201,20 +1324,21 @@ function preencherOwners() {
     el.innerHTML = '<option value="">Filtrado automaticamente pela sua loja</option>';
     el.value = '';
     el.disabled = true;
+    aplicarPoliticaFiltrosPerfil();
     return;
   }
 
   var owners = state.owners || [];
   var lojaUser = normalizeKey(state.user && state.user.loja);
 
-  if (['gerente de loja', 'vendedor', 'consultor de vendas', 'outros'].indexOf(role) > -1) {
+  if (['gerente de loja', 'vendedor', 'consultor de vendas', 'outros', 'comprador'].indexOf(role) > -1) {
     owners = owners.filter(function(o) {
       var lojaOwner = normalizeKey(o.loja || o.Loja || '');
       return !lojaOwner || lojaOwner === lojaUser;
     });
   }
 
-  var labelInicial = role === 'gerente de loja' ? 'Todos da minha loja' : 'Todos os proprietários';
+  var labelInicial = ['gerente de loja', 'comprador'].indexOf(role) > -1 ? 'Todos da minha loja' : 'Todos os proprietários';
   var html = '<option value="">' + labelInicial + '</option>';
   html += owners.length ? owners.map(function(o) {
     var loja = o.loja || o.Loja || '';
@@ -1222,6 +1346,7 @@ function preencherOwners() {
   }).join('') : '<option value="">Nenhum proprietário encontrado</option>';
   el.innerHTML = html;
   el.disabled = false;
+  aplicarPoliticaFiltrosPerfil();
 }
 
 function preencherAccessTags() {
@@ -1241,6 +1366,7 @@ function preencherAccessTags() {
   byId('filtroAccessTag').innerHTML = '<option value="">Todas as tags</option>' + unique.map(function(t) {
     return '<option value="' + escapeHtml(t.id) + '">' + escapeHtml(t.nome) + '</option>';
   }).join('');
+  aplicarPoliticaFiltrosPerfil();
 }
 
 function carregarOptometristas() {
@@ -1270,12 +1396,12 @@ function carregarOptometristas() {
 }
 
 function toggleFiltroResultado(btn) {
+  if (btn && btn.disabled) return;
   btn.classList.toggle('ativo');
   recarregarComFiltros();
 }
 
 function coletarFiltros() {
-  var role = roleName();
   var filtros = {
     dataDe: byId('filtroDataDe').value.trim(),
     dataAte: byId('filtroDataAte').value.trim(),
@@ -1302,19 +1428,7 @@ function coletarFiltros() {
     lojaUsuario: String((state.user && state.user.loja) || '').trim()
   };
 
-  if (['optometrista', 'consultor de vendas', 'vendedor', 'outros', 'gerente de loja'].indexOf(role) > -1 && state.user && state.user.loja && state.user.loja !== 'Todas') {
-    filtros.loja = state.user.loja;
-  }
-
-  if (role === 'gerente de loja') {
-    filtros.meus = 'false';
-  }
-
-  if (role === 'optometrista') {
-    filtros.ownerId = '';
-  }
-
-  return filtros;
+  return normalizarFiltrosPorPerfil(filtros);
 }
 
 function limparFiltros() {
@@ -1326,6 +1440,7 @@ function limparFiltros() {
   byId('filtroMeus').checked = false;
   if (state.user && state.user.loja && state.user.loja !== 'Todas') byId('filtroLoja').value = state.user.loja;
   else byId('filtroLoja').value = '';
+  aplicarPoliticaFiltrosPerfil();
   recarregarComFiltros();
 }
 
