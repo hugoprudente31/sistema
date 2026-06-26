@@ -20,6 +20,15 @@ const ALLOWED_ORIGINS = new Set(
 );
 
 app.disable("x-powered-by");
+
+// Rotas públicas (landing pages) — abertas para qualquer origem, protegidas por API Key
+app.use('/api/public', cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'X-API-Key', 'X-Landing-API-Key']
+}));
+
+// Rotas privadas — restritas às origens autorizadas
 app.use(cors({
   credentials: true,
   origin(origin, callback) {
