@@ -4,10 +4,8 @@ const crypto      = require("crypto");
 const express     = require("express");
 const router      = express.Router();
 const kommo       = require("./client");
+const scheduling  = require("./scheduling");
 const { processMessage, processNewLead } = require("./bot/flowEngine");
-
-const GAS_URL     = () => process.env.GAS_DEPLOY_URL || "";
-const GAS_API_KEY = () => process.env.GAS_API_KEY    || "";
 
 function safeEqual(value, expected) {
   const a = Buffer.from(String(value || ""));
@@ -44,20 +42,6 @@ function normalizeLoja(loja = "") {
 function getCampo(campos = [], code) {
   const f = campos.find((c) => c.field_code === code);
   return f?.values?.[0]?.value || "";
-}
-
-async function criarAgendamentoNoGAS(dados) {
-  const params = new URLSearchParams({
-    format: "api",
-    fn:     "salvarAgendamento",
-    key:    GAS_API_KEY(),
-    args:   JSON.stringify([dados]),
-  });
-  const res = await fetch(`${GAS_URL()}?${params}`, {
-    method: "GET",
-    signal: AbortSignal.timeout(55000),
-  });
-  return res.json();
 }
 
 // ── Extrai entrada de mensagem do payload do Kommo ───────────────
@@ -165,29 +149,24 @@ router.post("/webhook/kommo", requireWebhookSecret, async (req, res) => {
       return;
     }
 
-    const agendamento = {
-      nome:             contato.name || lead.name || "Sem nome",
-      whatsapp:         getCampo(campos, "PHONE") || "",
-      email:            getCampo(campos, "EMAIL") || "",
+    const dbResult = await scheduling.criarAgendamento({
+      nome: contato.name || lead.name || "Sem nome",
+      whatsapp: getCampo(campos, "PHONE") || "",
+      email: getCampo(campos, "EMAIL") || "",
       loja,
       optometrista,
-      data_agendamento: dataAgendamento,
+      data: dataAgendamento,
       horario,
-      origem:           "Kommo",
-      observacao:       `Lead Kommo #${leadId}`,
-      status:           "Agendado",
-      kommo_lead_id:    String(leadId),
-    };
+      leadId,
+    });
+    console.log("[Webhook/Kommo] PostgreSQL:", JSON.stringify(dbResult).slice(0, 200));
 
-    const gasResult = await criarAgendamentoNoGAS(agendamento);
-    console.log("[Webhook/Kommo] GAS:", JSON.stringify(gasResult).slice(0, 200));
-
-    if (gasResult?.ok) {
+    if (dbResult?.ok) {
       await kommo.addNote(leadId,
         `✅ Agendamento criado no sistema\n📅 ${dataAgendamento} às ${horario}\n🏪 ${loja}\n👁 ${optometrista || "A definir"}`
       );
     } else {
-      await kommo.addNote(leadId, `⚠️ Erro ao criar agendamento: ${gasResult?.error || "desconhecido"}`);
+      await kommo.addNote(leadId, `⚠️ Erro ao criar agendamento: ${dbResult?.error || "desconhecido"}`);
     }
 
   } catch (err) {
@@ -204,7 +183,7 @@ router.get("/kommo/health", (req, res) => {
     salesbot:    process.env.KOMMO_USE_SALESBOT === "true",
     webhook_secret_configured: !!process.env.KOMMO_WEBHOOK_SECRET,
     subdomain:   process.env.KOMMO_SUBDOMAIN || "não configurado",
-    gas:         !!process.env.GAS_DEPLOY_URL,
+    database:    !!process.env.DATABASE_URL,
     timestamp:   new Date().toISOString(),
   });
 });

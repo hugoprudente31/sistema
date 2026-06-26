@@ -1,167 +1,363 @@
-// Kommo Scheduling — Sistema Óticas Target
-// Consulta disponibilidade e cria agendamentos no GAS
+// Kommo Scheduling - Sistema Oticas Target
+// Consulta disponibilidade e cria agendamentos diretamente no PostgreSQL.
 
-const GAS_URL     = () => process.env.GAS_DEPLOY_URL || "";
-const GAS_API_KEY = () => process.env.GAS_API_KEY    || "";
+const crypto = require("crypto");
+const { Pool } = require("pg");
 
-// Fallback — usado quando não há dados suficientes para calcular a loja/data
-const TODOS_HORARIOS = [
-  "10:00","10:30","11:00","11:30",
-  "14:00","14:30","15:00","15:30","16:00","16:30","17:00","17:30",
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_SSL === "false" ? false : { rejectUnauthorized: false },
+});
+
+const PUBLIC_BLOCKING_STATUSES = [
+  "Agendado",
+  "Confirmado",
+  "Compareceu",
+  "OS em Andamento",
 ];
 
-// Gera slots de 30 em 30 minutos com pausa para almoço 12h-14h
-function generateSlots(startHour, endHour) {
-  const slots = [];
-  for (let h = startHour; h < endHour; h++) {
-    if (h >= 12 && h < 14) continue; // pausa almoço
-    slots.push(`${String(h).padStart(2, "0")}:00`);
-    slots.push(`${String(h).padStart(2, "0")}:30`);
-  }
-  return slots;
-}
+const TODOS_HORARIOS = [
+  "10:00", "10:30", "11:00", "11:30",
+  "14:00", "14:30", "15:00", "15:30", "16:00", "16:30", "17:00", "17:30",
+];
 
-// Retorna os horários do optometrista por loja e data (DD/MM/AAAA)
-// Gonzaga & Santos: Seg-Sex 10h-18h | Sáb 10h-18h | Dom fechado
-// Demais lojas:     Seg-Sex 10h-18h | Sáb 9h-15h  | Dom fechado
-function getHorariosLoja(loja, data) {
-  const [dd, mm, yyyy] = (data || "").split("/").map(Number);
-  if (!dd || !mm || !yyyy) return TODOS_HORARIOS;
-
-  const date = new Date(yyyy, mm - 1, dd);
-  const day  = date.getDay(); // 0=Dom, 6=Sáb
-
-  if (day === 0) return []; // Domingo fechado
-
-  const isGonzaga = /gonzaga|santos/i.test(loja || "");
-
-  if (day === 6) { // Sábado
-    if (isGonzaga) return generateSlots(10, 18);
-    return generateSlots(9, 15);
-  }
-
-  // Seg–Sex: optometrista 10h–18h em todas as lojas
-  return generateSlots(10, 18);
-}
-
-// Cache simples para evitar múltiplas chamadas ao GAS no mesmo segundo
 const _cache = new Map();
-const CACHE_TTL = 30_000; // 30 segundos
+const CACHE_TTL = 30_000;
+
+function clean(v) {
+  if (v === null || v === undefined) return "";
+  return String(v).trim();
+}
+
+function stripAccents(v) {
+  return clean(v)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeLoja(loja) {
+  const raw = clean(loja);
+  const key = stripAccents(raw).replace(/\s*-\s*/g, " ");
+  const gonzaga = "\u00f3ticas TGT - Gonzaga";
+  const enseada = "\u00f3ticas TGT Enseada";
+  const pitangueiras = "\u00f3ticas TGT Pitangueiras";
+  const ademar = "\u00f3ticas Target - Ademar de Barros";
+
+  const mapa = {
+    "gonzaga": gonzaga,
+    "gonzaga & santos": gonzaga,
+    "gonzaga santos": gonzaga,
+    "santos": gonzaga,
+    "oticas tgt gonzaga": gonzaga,
+    "oticas tgt santos": gonzaga,
+    "oticas tgt gonzaga santos": gonzaga,
+    "enseada": enseada,
+    "oticas tgt enseada": enseada,
+    "oticas tgt enseada guaruja": enseada,
+    "pitangueiras": pitangueiras,
+    "oticas tgt pitangueiras": pitangueiras,
+    "oticas tgt pitangueiras guaruja": pitangueiras,
+    "ademar": ademar,
+    "ademar de barros": ademar,
+    "oticas target ademar de barros": ademar,
+    "santo antonio": ademar,
+    "sto. antonio": ademar,
+  };
+
+  return mapa[key] || raw;
+}
+
+function toPgDate(v) {
+  const s = clean(v);
+  if (!s) return null;
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  const br = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if (br) return `${br[3]}-${br[2]}-${br[1]}`;
+  const d = new Date(s);
+  if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  return null;
+}
+
+function toBrDate(v) {
+  const pg = toPgDate(v);
+  if (!pg) return clean(v);
+  const [yyyy, mm, dd] = pg.split("-");
+  return `${dd}/${mm}/${yyyy}`;
+}
+
+function normalizeWhatsapp(v) {
+  return clean(v).replace(/\D/g, "");
+}
+
+function makeId(prefix, value) {
+  const base = clean(value);
+  if (base) return `${prefix}:${base}`;
+  return `${prefix}:hash:${crypto.randomBytes(8).toString("hex")}`;
+}
+
+function stableHash(obj) {
+  return crypto.createHash("sha1").update(JSON.stringify(obj || {})).digest("hex");
+}
 
 function cacheGet(key) {
   const entry = _cache.get(key);
   if (!entry) return null;
-  if (Date.now() > entry.expiresAt) { _cache.delete(key); return null; }
+  if (Date.now() > entry.expiresAt) {
+    _cache.delete(key);
+    return null;
+  }
   return entry.data;
 }
+
 function cacheSet(key, data) {
   _cache.set(key, { data, expiresAt: Date.now() + CACHE_TTL });
 }
 
-// ── Chamada direta ao GAS ────────────────────────────────────────
-
-async function callGAS(fn, args = []) {
-  if (!GAS_URL()) throw new Error("GAS_DEPLOY_URL não configurado");
-
-  const params = new URLSearchParams({
-    format: "api",
-    fn,
-    key:  GAS_API_KEY(),
-    args: JSON.stringify(args),
-  });
-
-  const res = await fetch(`${GAS_URL()}?${params}`, {
-    method: "GET",
-    headers: { "Accept": "application/json" },
-    signal: AbortSignal.timeout(30_000),
-  });
-
-  const data = await res.json().catch(() => ({ ok: false, error: "Resposta inválida do GAS" }));
-  return data;
+function generateSlots(startHour, endHour) {
+  const slots = [];
+  for (let h = startHour; h <= endHour; h += 1) {
+    slots.push(`${String(h).padStart(2, "0")}:00`);
+    if (h !== endHour) slots.push(`${String(h).padStart(2, "0")}:30`);
+  }
+  return slots.filter((h) => h !== "13:00" && h !== "13:30");
 }
 
-// ── Disponibilidade de horários ──────────────────────────────────
+function getHorariosLoja(loja, data) {
+  const pgDate = toPgDate(data);
+  if (!pgDate) return TODOS_HORARIOS;
 
-// Retorna lista de horários livres para loja + data (formato DD/MM/AAAA)
+  const date = new Date(pgDate + "T12:00:00");
+  const day = date.getDay();
+  if (day === 0) return [];
+
+  let slots = generateSlots(10, day === 6 ? 16 : 18);
+  const lojaKey = stripAccents(loja).replace(/[^a-z]/g, "");
+  if ((lojaKey.includes("gonzaga") || lojaKey.includes("santos")) && day >= 1 && day <= 5) {
+    slots = slots.filter((h) => h !== "14:00" && h !== "14:30");
+  }
+
+  return slots;
+}
+
+function lojaComparableSql(columnSql) {
+  return `
+    TRANSLATE(
+      LOWER(REGEXP_REPLACE(COALESCE(${columnSql}, ''), '\\s*-\\s*', ' ', 'g')),
+      'áàâãäéèêëíìîïóòôõöúùûüç',
+      'aaaaaeeeeiiiiooooouuuuc'
+    )
+  `;
+}
+
+async function buscarOptometristasAtivosPorLoja(client, loja) {
+  const result = await client.query(
+    `SELECT nome
+     FROM optometristas
+     WHERE ativo = true
+       AND ${lojaComparableSql("loja")} = ${lojaComparableSql("$1")}
+     ORDER BY nome ASC`,
+    [loja]
+  );
+
+  return result.rows.map((r) => clean(r.nome)).filter(Boolean);
+}
+
+async function buscarPrimeiroOptometristaLivre(client, loja, data, horario, optometristaPreferido, gasIdIgnorado = null) {
+  const optometristas = await buscarOptometristasAtivosPorLoja(client, loja);
+  const candidatos = [];
+
+  if (clean(optometristaPreferido)) candidatos.push(clean(optometristaPreferido));
+  for (const optometrista of optometristas) {
+    if (!candidatos.some((x) => x.toLowerCase() === optometrista.toLowerCase())) {
+      candidatos.push(optometrista);
+    }
+  }
+  if (!candidatos.length) candidatos.push("A definir");
+
+  for (const optometrista of candidatos) {
+    const ocupado = await client.query(
+      `SELECT id
+       FROM agendamentos
+       WHERE ${lojaComparableSql("loja")} = ${lojaComparableSql("$1")}
+         AND LOWER(COALESCE(optometrista, '')) = LOWER($2)
+         AND data_agendamento = $3
+         AND horario = $4
+         AND status = ANY($5::text[])
+         AND excluido_em IS NULL
+         AND ($6::text IS NULL OR gas_id IS DISTINCT FROM $6)
+       LIMIT 1`,
+      [loja, optometrista, data, horario, PUBLIC_BLOCKING_STATUSES, gasIdIgnorado]
+    );
+
+    if (!ocupado.rows.length) return optometrista;
+  }
+
+  return "";
+}
+
 async function getHorariosDisponiveis(loja, data) {
-  const cacheKey = `disponibilidade|${loja}|${data}`;
-  const cached   = cacheGet(cacheKey);
-  if (cached) {
-    console.log(`[Scheduling] Cache hit — ${loja} / ${data}`);
-    return cached;
-  }
+  const lojaNormalizada = normalizeLoja(loja);
+  const dataPg = toPgDate(data);
+  const cacheKey = `disponibilidade|${lojaNormalizada}|${dataPg || data}`;
+  const cached = cacheGet(cacheKey);
+  if (cached) return cached;
 
+  if (!lojaNormalizada || !dataPg) return getHorariosLoja(lojaNormalizada, data);
+
+  const client = await pool.connect();
   try {
-    console.log(`[Scheduling] Buscando disponibilidade: ${loja} / ${data}`);
-    const result = await callGAS("getAgendamentos", []);
-
-    if (!result?.ok || !Array.isArray(result?.data)) {
-      console.log("[Scheduling] GAS não retornou dados válidos — usando todos os horários");
-      return TODOS_HORARIOS;
+    const horarios = [];
+    for (const horario of getHorariosLoja(lojaNormalizada, dataPg)) {
+      const optometristaLivre = await buscarPrimeiroOptometristaLivre(client, lojaNormalizada, dataPg, horario);
+      if (optometristaLivre) horarios.push(horario);
     }
-
-    // Normaliza o nome da loja para comparação
-    const normLoja = loja.trim().toLowerCase();
-
-    // Horários já ocupados nesta loja e data
-    const ocupados = result.data
-      .filter(a => {
-        const mesmaLoja = (a.loja || "").trim().toLowerCase() === normLoja;
-        const mesmaData = a.data_agendamento === data;
-        const ativo     = !["Cancelado", "Não Compareceu"].includes(a.status);
-        return mesmaLoja && mesmaData && ativo;
-      })
-      .map(a => (a.horario || "").trim());
-
-    console.log(`[Scheduling] Ocupados em ${loja} / ${data}:`, ocupados);
-
-    const horariosLoja = getHorariosLoja(loja, data);
-    const livres = horariosLoja.filter(h => !ocupados.includes(h));
-    cacheSet(cacheKey, livres);
-    return livres;
-
+    cacheSet(cacheKey, horarios);
+    return horarios;
   } catch (e) {
-    console.error("[Scheduling] Erro ao buscar disponibilidade:", e.message);
-    // Em caso de erro, usa horários da loja como fallback
-    return getHorariosLoja(loja, data) || TODOS_HORARIOS;
+    console.error("[Scheduling] Erro ao buscar disponibilidade no banco:", e.message);
+    return getHorariosLoja(lojaNormalizada, data);
+  } finally {
+    client.release();
   }
 }
 
-// ── Criação de agendamento ───────────────────────────────────────
+async function criarAgendamento({ nome, whatsapp, email, loja, data, horario, leadId, optometrista }) {
+  const lojaNormalizada = normalizeLoja(loja);
+  const dataPg = toPgDate(data);
+  const horarioNormalizado = clean(horario);
+  const nomeNormalizado = clean(nome) || "Sem nome";
+  const whatsappNormalizado = normalizeWhatsapp(whatsapp);
+  const emailNormalizado = clean(email);
 
-async function criarAgendamento({ nome, whatsapp, email, loja, data, horario, leadId }) {
-  console.log(`[Scheduling] Criando agendamento: ${nome} — ${loja} — ${data} ${horario}`);
+  if (!lojaNormalizada) return { ok: false, error: "Loja nao informada." };
+  if (!dataPg) return { ok: false, error: "Data do agendamento invalida." };
+  if (!/^\d{2}:\d{2}$/.test(horarioNormalizado)) return { ok: false, error: "Horario invalido." };
 
-  const dados = {
-    nome:             nome    || "Sem nome",
-    whatsapp:         whatsapp || "",
-    email:            email    || "",
-    loja,
-    optometrista:     "",
-    data_agendamento: data,
-    horario,
-    origem:           "Kommo Bot",
-    observacao:       `Agendado pelo bot${leadId ? ` — Lead Kommo #${leadId}` : ""}`,
-    status:           "Agendado",
-    kommo_lead_id:    leadId ? String(leadId) : "",
-  };
-
+  const client = await pool.connect();
   try {
-    const result = await callGAS("salvarAgendamento", [dados]);
-    console.log("[Scheduling] GAS respondeu:", JSON.stringify(result).slice(0, 200));
+    await client.query("BEGIN");
 
-    if (result?.ok) {
-      // Invalida cache de disponibilidade para esta loja/data
-      _cache.delete(`disponibilidade|${loja}|${data}`);
+    const gasId = leadId
+      ? makeId("kommo", String(leadId))
+      : makeId("kommo", stableHash({ nomeNormalizado, whatsappNormalizado, lojaNormalizada, dataPg, horarioNormalizado }));
+
+    const optometristaLivre = await buscarPrimeiroOptometristaLivre(
+      client,
+      lojaNormalizada,
+      dataPg,
+      horarioNormalizado,
+      optometrista,
+      gasId
+    );
+
+    if (!optometristaLivre) {
+      await client.query("ROLLBACK");
+      return { ok: false, error: "Esse horario acabou de ser reservado. Escolha outro horario." };
     }
-    return result;
+
+    const clienteGasId = makeId("cliente", (whatsappNormalizado || emailNormalizado || nomeNormalizado).toLowerCase());
+    const cliente = await client.query(
+      `INSERT INTO clientes (gas_id, nome, whatsapp, email, origem, loja_origem, observacoes, origem_sync, atualizado_em)
+       VALUES ($1,$2,$3,$4,'Kommo Bot',$5,$6,'kommo_bot',CURRENT_TIMESTAMP)
+       ON CONFLICT (gas_id) DO UPDATE SET
+         nome = EXCLUDED.nome,
+         whatsapp = EXCLUDED.whatsapp,
+         email = EXCLUDED.email,
+         origem = EXCLUDED.origem,
+         loja_origem = EXCLUDED.loja_origem,
+         observacoes = EXCLUDED.observacoes,
+         origem_sync = 'kommo_bot',
+         atualizado_em = CURRENT_TIMESTAMP
+       RETURNING id`,
+      [
+        clienteGasId,
+        nomeNormalizado,
+        whatsappNormalizado,
+        emailNormalizado || null,
+        lojaNormalizada,
+        `Cliente originado do Kommo${leadId ? ` - Lead #${leadId}` : ""}`,
+      ]
+    );
+
+    const agendamento = await client.query(
+      `INSERT INTO agendamentos (
+        gas_id, nome, whatsapp, email, loja, optometrista, origem,
+        data_agendamento, horario, observacao, status, compareceu,
+        responsavel, criado_por_email, proprietario_id, proprietario_nome,
+        access_tags, kommo_lead_id, origem_sync, criado_em, atualizado_em
+      )
+      VALUES (
+        $1,$2,$3,$4,$5,$6,'Kommo Bot',
+        $7,$8,$9,'Agendado','Pendente',
+        'Kommo Bot','kommo-bot@sistema.local','kommo-bot','Kommo Bot',
+        'origem:kommo;canal:salesbot;fluxo:agendamento',$10,'kommo_bot',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+      )
+      ON CONFLICT (gas_id) DO UPDATE SET
+        nome = EXCLUDED.nome,
+        whatsapp = EXCLUDED.whatsapp,
+        email = EXCLUDED.email,
+        loja = EXCLUDED.loja,
+        optometrista = EXCLUDED.optometrista,
+        data_agendamento = EXCLUDED.data_agendamento,
+        horario = EXCLUDED.horario,
+        observacao = EXCLUDED.observacao,
+        status = EXCLUDED.status,
+        compareceu = EXCLUDED.compareceu,
+        access_tags = EXCLUDED.access_tags,
+        kommo_lead_id = EXCLUDED.kommo_lead_id,
+        origem_sync = 'kommo_bot',
+        excluido_em = NULL,
+        atualizado_em = CURRENT_TIMESTAMP
+      RETURNING *`,
+      [
+        gasId,
+        nomeNormalizado,
+        whatsappNormalizado,
+        emailNormalizado || null,
+        lojaNormalizada,
+        optometristaLivre,
+        dataPg,
+        horarioNormalizado,
+        `Agendado pelo bot${leadId ? ` - Lead Kommo #${leadId}` : ""}`,
+        leadId ? String(leadId) : null,
+      ]
+    );
+
+    await client.query(
+      `INSERT INTO logs_sistema (tipo, origem, mensagem, detalhes)
+       VALUES ('kommo','salesbot','Agendamento Kommo gravado no PostgreSQL',$1)`,
+      [JSON.stringify({
+        agendamento_id: agendamento.rows[0].id,
+        cliente_id: cliente.rows[0].id,
+        loja: lojaNormalizada,
+        data_agendamento: dataPg,
+        horario: horarioNormalizado,
+        kommo_lead_id: leadId ? String(leadId) : null,
+      })]
+    );
+
+    await client.query("COMMIT");
+    _cache.delete(`disponibilidade|${lojaNormalizada}|${dataPg}`);
+
+    return {
+      ok: true,
+      id: agendamento.rows[0].id,
+      data_agendamento: toBrDate(dataPg),
+      horario: horarioNormalizado,
+      loja: lojaNormalizada,
+      optometrista: optometristaLivre,
+    };
   } catch (e) {
-    console.error("[Scheduling] Erro ao criar agendamento:", e.message);
+    await client.query("ROLLBACK").catch(() => {});
+    console.error("[Scheduling] Erro ao criar agendamento no banco:", e.message);
     return { ok: false, error: e.message };
+  } finally {
+    client.release();
   }
 }
-
-// ── Busca contato do lead para pegar WhatsApp ────────────────────
 
 async function getContatoDoLead(kommoClient, leadId) {
   try {
@@ -170,11 +366,11 @@ async function getContatoDoLead(kommoClient, leadId) {
     if (!contato) return { nome: null, whatsapp: null, email: null };
 
     const campos = contato.custom_fields_values || [];
-    const phone  = campos.find(c => c.field_code === "PHONE")?.values?.[0]?.value || "";
-    const email  = campos.find(c => c.field_code === "EMAIL")?.values?.[0]?.value || "";
+    const phone = campos.find((c) => c.field_code === "PHONE")?.values?.[0]?.value || "";
+    const email = campos.find((c) => c.field_code === "EMAIL")?.values?.[0]?.value || "";
 
     return {
-      nome:     contato.name || lead.name || null,
+      nome: contato.name || lead.name || null,
       whatsapp: phone,
       email,
     };
