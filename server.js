@@ -41,6 +41,8 @@ app.use((req, res, next) => {
 
 const publicPath = path.join(__dirname, "public");
 if (fs.existsSync(publicPath)) app.use(express.static(publicPath));
+app.use(require("./kommo/salesbot"));
+app.use(require("./kommo/webhook"));
 // ===============================
 // SEGURANÇA DAS LANDING PAGES
 // ===============================
@@ -1431,6 +1433,9 @@ app.get("/health", async (req, res) => {
         publicOptometristas: true,
         publicHorariosDisponiveis: true,
         publicAgendamentos: true,
+        kommoHealth: true,
+        kommoWebhook: true,
+        salesbot: true,
         agendamentos: true,
         clientes: true,
         faturamentos: true,
