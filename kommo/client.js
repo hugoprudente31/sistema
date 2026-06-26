@@ -94,7 +94,7 @@ class KommoClient {
   // Retorna as conversas (talks) associadas ao lead
   async getLeadTalks(leadId) {
     try {
-      const data = await this.request("GET", `/talks?filter[lead_id]=${leadId}`);
+      const data = await this.request("GET", `/talks?filter[entity_type]=leads&filter[entity_id]=${leadId}`);
       return data?._embedded?.talks || [];
     } catch (e) {
       console.error("[Kommo] Erro ao buscar talks:", e.message);
@@ -111,16 +111,20 @@ class KommoClient {
         () => this.request("POST", `/chats/messages`, { chat_id: chatId, text }),
       ] : []),
       // 2: array body em /talks/{id}/messages
-      () => this.request("POST",  `/talks/${talkId}/messages`, [{ text }]),
+      ...(talkId ? [
+        () => this.request("POST",  `/talks/${talkId}/messages`, [{ text }]),
       // 3: objeto simples em /talks/{id}/messages
-      () => this.request("POST",  `/talks/${talkId}/messages`, { text }),
+        () => this.request("POST",  `/talks/${talkId}/messages`, { text }),
+      ] : []),
       // 4: /chats/{chatId}/messages — variação de path
       ...(chatId ? [
         () => this.request("POST", `/chats/${chatId}/messages`, { text }),
         () => this.request("POST", `/chats/${chatId}/messages`, [{ text }]),
       ] : []),
       // 5: PATCH /talks/{id}
-      () => this.request("PATCH", `/talks/${talkId}`,          { messages: [{ text }] }),
+      ...(talkId ? [
+        () => this.request("PATCH", `/talks/${talkId}`,          { messages: [{ text }] }),
+      ] : []),
     ];
 
     for (let i = 0; i < attempts.length; i++) {
@@ -142,7 +146,8 @@ class KommoClient {
     if (!talks.length) {
       throw new Error(`Lead ${leadId}: nenhuma conversa encontrada para enviar mensagem`);
     }
-    return this.sendMessage(String(talks[0].id), text);
+    const talk = talks[0];
+    return this.sendMessage(talk.id ? String(talk.id) : null, text, talk.chat_id || null);
   }
 
   // ── Notas ─────────────────────────────────────────────────────
