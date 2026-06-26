@@ -16,7 +16,8 @@
 //       "talk_id":      "{{talk_id}}",
 //       "chat_id":      "{{chat_id}}",
 //       "message":      "{{last_message_text}}",
-//       "contact_name": "{{contact_name}}"
+//       "contact_name": "{{contact_name}}",
+//       "secret":       "MESMO_VALOR_DE_SALESBOT_SECRET"
 //     }
 //   Passo 2 : Condição
 //     Se {{response.text}} NÃO está vazio → Passo 3
@@ -24,12 +25,40 @@
 //   Passo 3 : Enviar mensagem
 //     Texto : {{response.text}}
 
+const crypto                           = require("crypto");
 const express                          = require("express");
 const router                           = express.Router();
 const { processMessage, flushResponses } = require("./bot/flowEngine");
 const SM                               = require("./bot/stateManager");
 
-router.post("/api/salesbot", async (req, res) => {
+function safeEqual(value, expected) {
+  const a = Buffer.from(String(value || ""));
+  const b = Buffer.from(String(expected || ""));
+  if (!a.length || a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+function salesbotSecret(req) {
+  const auth = String(req.headers.authorization || "");
+  if (auth.toLowerCase().startsWith("bearer ")) return auth.slice(7).trim();
+  return String(
+    req.headers["x-salesbot-secret"] ||
+    req.query.secret ||
+    req.body.secret ||
+    ""
+  ).trim();
+}
+
+function requireSalesbotSecret(req, res, next) {
+  const expected = process.env.SALESBOT_SECRET || process.env.KOMMO_SALESBOT_SECRET || "";
+  if (!expected) return res.status(503).json({ text: "", ok: false, message: "SALESBOT_SECRET nao configurado." });
+  if (!safeEqual(salesbotSecret(req), expected)) {
+    return res.status(401).json({ text: "", ok: false, message: "Salesbot nao autorizado." });
+  }
+  return next();
+}
+
+router.post("/api/salesbot", requireSalesbotSecret, async (req, res) => {
 
   const leadId  = String(req.body.lead_id  || "").trim();
   const talkId  = String(req.body.talk_id  || "").trim() || null;
@@ -71,6 +100,7 @@ router.get("/api/salesbot/health", (_req, res) => {
   res.json({
     ok:            true,
     salesbot_mode: process.env.KOMMO_USE_SALESBOT === "true",
+    secret_configured: !!(process.env.SALESBOT_SECRET || process.env.KOMMO_SALESBOT_SECRET),
     timestamp:     new Date().toISOString(),
   });
 });

@@ -1,5 +1,6 @@
 // Kommo Webhook Router — Sistema Óticas Target
 
+const crypto      = require("crypto");
 const express     = require("express");
 const router      = express.Router();
 const kommo       = require("./client");
@@ -7,6 +8,33 @@ const { processMessage, processNewLead } = require("./bot/flowEngine");
 
 const GAS_URL     = () => process.env.GAS_DEPLOY_URL || "";
 const GAS_API_KEY = () => process.env.GAS_API_KEY    || "";
+
+function safeEqual(value, expected) {
+  const a = Buffer.from(String(value || ""));
+  const b = Buffer.from(String(expected || ""));
+  if (!a.length || a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+function webhookSecret(req) {
+  const auth = String(req.headers.authorization || "");
+  if (auth.toLowerCase().startsWith("bearer ")) return auth.slice(7).trim();
+  return String(
+    req.headers["x-kommo-webhook-secret"] ||
+    req.query.secret ||
+    req.body.secret ||
+    ""
+  ).trim();
+}
+
+function requireWebhookSecret(req, res, next) {
+  const expected = process.env.KOMMO_WEBHOOK_SECRET || "";
+  if (!expected) return res.status(503).json({ ok: false, message: "KOMMO_WEBHOOK_SECRET nao configurado." });
+  if (!safeEqual(webhookSecret(req), expected)) {
+    return res.status(401).json({ ok: false, message: "Webhook Kommo nao autorizado." });
+  }
+  return next();
+}
 
 function normalizeLoja(loja = "") {
   if (/santos/i.test(loja) || /gonzaga/i.test(loja)) return "Gonzaga & Santos";
@@ -57,7 +85,7 @@ function extractMessageEntry(payload) {
 }
 
 // ── POST /webhook/kommo ──────────────────────────────────────────
-router.post("/webhook/kommo", async (req, res) => {
+router.post("/webhook/kommo", requireWebhookSecret, async (req, res) => {
   // Sempre responde 200 — Kommo para de reenviar se receber erro
   res.status(200).json({ received: true });
 
@@ -173,6 +201,8 @@ router.get("/kommo/health", (req, res) => {
     ok:          true,
     bot_enabled: process.env.BOT_ENABLED !== "false",
     kommo:       !!process.env.KOMMO_ACCESS_TOKEN,
+    salesbot:    process.env.KOMMO_USE_SALESBOT === "true",
+    webhook_secret_configured: !!process.env.KOMMO_WEBHOOK_SECRET,
     subdomain:   process.env.KOMMO_SUBDOMAIN || "não configurado",
     gas:         !!process.env.GAS_DEPLOY_URL,
     timestamp:   new Date().toISOString(),

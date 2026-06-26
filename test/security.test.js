@@ -6,6 +6,10 @@ const path = require("node:path");
 
 process.env.SESSION_SECRET = "test-session-secret-with-at-least-32-characters";
 process.env.SESSION_TTL_HOURS = "1";
+process.env.SALESBOT_SECRET = "test-salesbot-secret";
+process.env.KOMMO_WEBHOOK_SECRET = "test-webhook-secret";
+process.env.KOMMO_USE_SALESBOT = "true";
+process.env.BOT_ENABLED = "true";
 
 const { app, pool, signSession } = require("../server");
 
@@ -37,6 +41,41 @@ test("proxy GAS rejeita acesso anônimo", async () => {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ fn: "getUsuarios", args: [] })
+  });
+  assert.equal(response.status, 401);
+});
+
+test("health do Salesbot e Kommo ficam disponiveis sem sessao", async () => {
+  const salesbot = await fetch(baseUrl + "/api/salesbot/health");
+  assert.equal(salesbot.status, 200);
+  const salesbotBody = await salesbot.json();
+  assert.equal(salesbotBody.ok, true);
+  assert.equal(salesbotBody.secret_configured, true);
+
+  const kommo = await fetch(baseUrl + "/kommo/health");
+  assert.equal(kommo.status, 200);
+  const kommoBody = await kommo.json();
+  assert.equal(kommoBody.ok, true);
+  assert.equal(kommoBody.salesbot, true);
+  assert.equal(kommoBody.webhook_secret_configured, true);
+});
+
+test("Salesbot bloqueia chamada sem segredo proprio", async () => {
+  const response = await fetch(baseUrl + "/api/salesbot", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ lead_id: "123", message: "oi" })
+  });
+  assert.equal(response.status, 401);
+  const body = await response.json();
+  assert.equal(body.text, "");
+});
+
+test("webhook Kommo bloqueia chamada sem segredo proprio", async () => {
+  const response = await fetch(baseUrl + "/webhook/kommo", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ leads: { add: [{ id: 123 }] } })
   });
   assert.equal(response.status, 401);
 });
