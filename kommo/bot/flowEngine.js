@@ -365,7 +365,7 @@ async function handleAgendamentoData(leadId, state, text, talkId) {
 
   const loja = state.dados_agendamento?.loja || state.loja;
 
-  // Consulta horários disponíveis no GAS em tempo real
+  // Consulta horarios disponiveis no PostgreSQL em tempo real
   const horarios = await scheduling.getHorariosDisponiveis(loja, input);
 
   if (!horarios.length) {
@@ -428,8 +428,8 @@ async function handleAgendamentoConfirmar(leadId, state, text, talkId) {
     // Busca contato para pegar WhatsApp
     const contato = await scheduling.getContatoDoLead(kommo, leadId);
 
-    // Cria o agendamento no GAS
-    const gasResult = await scheduling.criarAgendamento({
+    // Cria o agendamento no banco do sistema
+    const dbResult = await scheduling.criarAgendamento({
       nome:     state.nome || contato.nome,
       whatsapp: contato.whatsapp,
       email:    contato.email,
@@ -438,9 +438,9 @@ async function handleAgendamentoConfirmar(leadId, state, text, talkId) {
       horario,
       leadId,
     });
-    const gasOk = gasResult?.ok;
+    const dbOk = dbResult?.ok;
 
-    if (gasOk) {
+    if (dbOk) {
       SM.setState(leadId, { etapa: "agendado" }, { persist: true });
       await labels.applyTrafficLight(leadId, "Agendado");
       await moveStage(leadId, "KOMMO_STAGE_AGENDADO");
@@ -448,7 +448,7 @@ async function handleAgendamentoConfirmar(leadId, state, text, talkId) {
       await send(talkId, leadId, MSG.agendamentoConfirmado(data, horario, loja));
     } else {
       await send(talkId, leadId, "⚠️ Ocorreu um erro ao criar o agendamento. Um atendente irá te ajudar!");
-      await transferToHuman(leadId, state, talkId, "Erro ao criar agendamento no GAS");
+      await transferToHuman(leadId, state, talkId, "Erro ao criar agendamento no banco");
     }
     return;
   }
