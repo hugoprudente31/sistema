@@ -2298,6 +2298,7 @@ app.get("/api/faturamentos", async (req, res) => {
     }
     const query = `SELECT id, id AS agendamento_id, nome AS cliente_nome, numero_os, status_os, loja,
         COALESCE(NULLIF(vendedor_nome, ''), NULLIF(consultor_responsavel, ''), NULLIF(vendedor_atendeu_nome, ''), proprietario_nome, responsavel, '') AS vendedor,
+        COALESCE(NULLIF(proprietario_nome, ''), NULLIF(agendado_por_nome, ''), NULLIF(responsavel, ''), '') AS proprietario_nome,
         COALESCE(valor_venda, 0)::numeric AS valor_total, COALESCE(desconto, 0)::numeric AS desconto,
         CASE WHEN COALESCE(valor_venda, 0) > 0 THEN 'Venda registrada' ELSE 'Sem venda' END AS status_pagamento,
         COALESCE(data_finalizacao_os, data_entrega_os, data_entrada_os, data_agendamento, criado_em::date) AS data_venda
