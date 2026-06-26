@@ -1723,6 +1723,7 @@ function executarAcaoAgenda(id, acao, selectEl) {
   else if (acao === 'excluir') result = excluirAgendamento(id);
   else if (acao === 'os') result = abrirPromptOS(id, row);
   else if (acao === 'editar') result = abrirModalEdicao(id);
+  else if (acao === 'negociacao') result = typeof window.abrirModalNegociacao === 'function' ? window.abrirModalNegociacao(id, row) : null;
 
   Promise.resolve(result).finally(function() {
     if (selectEl) setTimeout(function(){ selectEl.value = ''; }, 150);
@@ -1839,6 +1840,11 @@ function getActionHtml(r) {
   // OS — Admin, Central, Gerente, Comprador
   if (['admin', 'atendimento central', 'gerente de loja', 'comprador'].indexOf(role) > -1) {
     options += '<option value="os">Registrar/Atualizar OS</option>';
+  }
+
+  // Negociação — Admin, Central, Gerente, Comprador, Consultor
+  if (central || gerente || comprador || consultor) {
+    options += '<option value="negociacao">Negociação</option>';
   }
 
   return '<div class="actions">' + buttons + '<select onchange="executarAcaoAgenda(\'' + id + '\', this.value, this);">' + options + '</select></div>';
@@ -2457,6 +2463,6 @@ function executarDiagnostico() {
 })();
 </script>
 <!-- TGT_SISTEMA_REGRAS_DEFINITIVAS_FIM -->
-
+<script src="/negociacao.js"></script>
 </body>
 </html>

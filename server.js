@@ -43,6 +43,7 @@ const publicPath = path.join(__dirname, "public");
 if (fs.existsSync(publicPath)) app.use(express.static(publicPath));
 app.use(require("./kommo/salesbot"));
 app.use(require("./kommo/webhook"));
+const negociacaoRoutes = require("./negociacao-routes");
 // ===============================
 // SEGURANÇA DAS LANDING PAGES
 // ===============================
@@ -890,6 +891,7 @@ async function initDatabase() {
     FOR EACH ROW EXECUTE FUNCTION validar_agendamento_tgt();
   `);
 
+  await negociacaoRoutes.initNegociacaoTables(pool);
 }
 
 function buildGasPayload(body) {
@@ -2571,6 +2573,8 @@ app.get("/", (req, res) => {
     ]
   });
 });
+
+negociacaoRoutes.registerRoutes(app, pool, { requireSession, canViewAllStores });
 
 async function startServer() {
   await initDatabase();
