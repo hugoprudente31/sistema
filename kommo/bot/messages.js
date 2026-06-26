@@ -1,281 +1,179 @@
-// Bot Messages — Sistema Óticas Target
-// Todas as mensagens do bot em um único lugar.
-// Funções puras: recebem dados, retornam string ou string[].
+// Bot Messages - SalesBot Kommo Oticas TGT.
 
-// Endereços configuráveis via variáveis de ambiente
+const LINK_TESTE_VISAO = process.env.LINK_TESTE_VISAO || "https://testedevisao.oticastgt.com.br/home";
+
 const LOJAS_INFO = [
   {
-    nome:     "Gonzaga & Santos",
-    endereco: process.env.ENDERECO_GONZAGA     || "Av. Ana Costa, 267 — Gonzaga, Santos/SP",
-    horario:  process.env.HORARIO_GONZAGA      || "Seg a Sex: 9h–19h | Sáb: 10h–18h",
+    prefix: "gon",
+    nome: "Gonzaga & Santos",
+    titulo: "Óticas TGT - Gonzaga / Santos",
+    whatsapp: "(13) 99645-3111",
+    horario: "Segunda a Sexta: 09h às 19h | Sábado: 10h às 18h | Domingo: Fechado",
   },
   {
-    nome:     "Óticas TGT Enseada",
-    endereco: process.env.ENDERECO_ENSEADA     || "Consulte-nos para o endereço atualizado",
-    horario:  process.env.HORARIO_ENSEADA      || "Seg a Sex: 9h–19h | Sáb: 9h–15h",
+    prefix: "ens",
+    nome: "Óticas TGT Enseada",
+    titulo: "Óticas TGT - Enseada",
+    whatsapp: "(13) 99721-4862",
+    horario: "Segunda a Sexta: 09h às 19h | Sábado: 10h às 16h | Domingo: Fechado",
   },
   {
-    nome:     "Óticas TGT Pitangueiras",
-    endereco: process.env.ENDERECO_PITANGUEIRAS || "Consulte-nos para o endereço atualizado",
-    horario:  process.env.HORARIO_PITANGUEIRAS  || "Seg a Sex: 9h–19h | Sáb: 9h–15h",
+    prefix: "pit",
+    nome: "Óticas TGT Pitangueiras",
+    titulo: "Óticas TGT - Pitangueiras",
+    whatsapp: "(13) 99704-0234",
+    horario: "Segunda a Sexta: 09h às 19h | Sábado: 10h às 16h | Domingo: Fechado",
   },
   {
-    nome:     "Óticas Target - Ademar de Barros",
-    endereco: process.env.ENDERECO_ADEMAR      || "Consulte-nos para o endereço atualizado",
-    horario:  process.env.HORARIO_ADEMAR       || "Seg a Sex: 9h–19h | Sáb: 9h–15h",
+    prefix: "tgt",
+    nome: "Óticas Target - Ademar de Barros",
+    titulo: "Óticas TGT - Santo Antonio / Target",
+    whatsapp: "(13) 99785-6493",
+    horario: "Segunda a Sexta: 09h às 19h | Sábado: 09h às 15h | Domingo: Fechado",
   },
 ];
 
+function storeByPrefix(prefix) {
+  return LOJAS_INFO.find((loja) => loja.prefix === prefix) || LOJAS_INFO[0];
+}
+
+function menuPrincipal(loja = LOJAS_INFO[0]) {
+  return `Olá! Seja bem-vindo(a) à ${loja.titulo}! 😊\n\n` +
+    `É um prazer ter você aqui! Como podemos te ajudar hoje?\n\n` +
+    `Escolha uma das opções abaixo:\n\n` +
+    `1️⃣ Informações\n` +
+    `2️⃣ Teste de Visão Grátis\n` +
+    `3️⃣ Orçamento\n` +
+    `4️⃣ Trabalhe Conosco\n` +
+    `5️⃣ Pós Venda\n\n` +
+    `Digite o número da opção desejada. 👓`;
+}
+
 module.exports = {
-
+  LINK_TESTE_VISAO,
   LOJAS_INFO,
-
-  // ── Geral ────────────────────────────────────────────────────
-
-  foraDoHorario: (nome) =>
-    `Olá${nome ? `, ${nome}` : ""}! 🌙\n` +
-    `Sua mensagem foi registrada e responderemos em breve!`,
-
-  foraDoHorarioHumano: (loja = "") => {
-    const isGonzaga = /gonzaga|santos/i.test(loja);
-    const horarios  = isGonzaga
-      ? "Seg a Sex: 9h–19h | Sáb: 10h–18h"
-      : "Seg a Sex: 9h–19h | Sáb: 9h–15h";
-    return `👋 Sua mensagem foi registrada!\n\n` +
-      `Nosso atendimento humano está disponível:\n` +
-      `🕐 ${horarios}\n\n` +
-      `Um de nossos atendentes retornará assim que estiver disponível. 😊\n\n` +
-      `Enquanto isso, posso te ajudar com informações ou agendamentos pelo bot! 🤖`;
-  },
+  storeByPrefix,
 
   respostaInvalida: () =>
-    `Desculpe, não entendi sua resposta. 😅\nPor favor, responda com o *número* da opção desejada.`,
+    `Desculpe, não entendi sua resposta. 😅\nPor favor, responda com o número da opção desejada.`,
 
-  // ── Boas-vindas e menu principal ─────────────────────────────
-
-  boasVindas: (nome) =>
-    `Olá, *${nome || "visitante"}*! 👋 Seja bem-vindo(a) às *Óticas Target*! 👓\n\n` +
-    `Estou aqui para te ajudar. O que você deseja hoje?\n\n` +
-    `1️⃣ Informações\n` +
-    `2️⃣ Agendamento de Teste de Visão Grátis\n` +
-    `3️⃣ Orçamentos\n` +
-    `4️⃣ Falar com um Atendente\n\n` +
-    `Responda com o número da opção desejada. 😊`,
-
-  menuPrincipal: () =>
-    `O que você deseja? 😊\n\n` +
-    `1️⃣ Informações\n` +
-    `2️⃣ Agendamento de Teste de Visão Grátis\n` +
-    `3️⃣ Orçamentos\n` +
-    `4️⃣ Falar com um Atendente`,
-
-  // ── Opção 1 — Informações ────────────────────────────────────
+  menuPrincipal,
+  boasVindas: (_nome, loja) => menuPrincipal(loja),
 
   infoMenu: () =>
-    `Ótimo! Sobre o que você gostaria de saber? 📋\n\n` +
-    `1️⃣ Endereço e horários de atendimento\n` +
-    `2️⃣ Garantia e nota fiscal\n` +
-    `3️⃣ Óculos de sol\n` +
-    `4️⃣ Lentes e armações de grau\n` +
-    `5️⃣ Óculos de grau pronto em até 1 hora\n` +
-    `6️⃣ Promoções\n` +
-    `7️⃣ Falar com um atendente`,
-
-  infoEndereco: () => {
-    const linhas = LOJAS_INFO.map((l, i) =>
-      `🏪 *${l.nome}*\nEndereço: ${l.endereco}\nHorário: ${l.horario}`
-    ).join("\n\n");
-    return `📍 *Nossas lojas:*\n\n${linhas}\n\n` +
-      `Tem mais alguma dúvida?\n1️⃣ Voltar ao menu principal\n2️⃣ Falar com atendente`;
-  },
-
-  infoGarantia: () =>
-    `✅ *Garantia e Nota Fiscal nas Óticas Target:*\n\n` +
-    `🛡️ Garantia de 1 ano para defeitos de fabricação em armações e lentes.\n` +
-    `🧾 Nota fiscal emitida em todas as compras.\n` +
-    `🔧 Assistência técnica gratuita durante o período de garantia.\n\n` +
-    `Tem mais alguma dúvida?\n1️⃣ Voltar ao menu\n2️⃣ Falar com atendente`,
-
-  infoOculosSol: () =>
-    `😎 *Óculos de Sol nas Óticas Target:*\n\n` +
-    `Trabalhamos com as melhores marcas nacionais e importadas.\n` +
-    `Temos modelos para todos os estilos e faixas de preço.\n` +
-    `Lentes com proteção UV400 em todos os modelos.\n\n` +
-    `Venha experimentar! Que tal agendar uma visita?\n` +
-    `1️⃣ Agendar visita\n2️⃣ Voltar ao menu\n3️⃣ Falar com atendente`,
+    `Ótimo! Sobre o que você gostaria de saber mais? 😊\n\n` +
+    `1️⃣ Lentes e Armações\n` +
+    `2️⃣ Endereço e Horário de Funcionamento\n` +
+    `3️⃣ Promoções\n` +
+    `4️⃣ Falar com um Especialista\n\n` +
+    `Digite o número da sua escolha:`,
 
   infoLentes: () =>
-    `👓 *Lentes e Armações nas Óticas Target:*\n\n` +
-    `Centenas de modelos de armações para todos os gostos.\n` +
-    `Lentes simples, antirreflexo, fotossensíveis e de contato.\n` +
-    `Trabalhamos com os principais laboratórios do mercado.\n\n` +
-    `1️⃣ Solicitar orçamento\n2️⃣ Agendar teste de visão grátis\n3️⃣ Voltar ao menu\n4️⃣ Falar com atendente`,
+    `Temos uma linha completa de lentes e armações para todos os gostos e necessidades! 😊\n\n` +
+    `Nossas lentes incluem: lentes de grau simples, bifocais, progressivas, lentes de contato, anti-reflexo, fotossensíveis e muito mais!\n\n` +
+    `Nossas armações vão desde modelos clássicos até as últimas tendências de moda.\n\n` +
+    `Um de nossos especialistas vai adorar te ajudar a encontrar a combinação perfeita para você! 🤩\n\n` +
+    `Posso te conectar com um especialista agora? Responda SIM ou NÃO.`,
 
-  infoOculosRapido: () =>
-    `⚡ *Óculos de Grau Prontos em até 1 Hora!*\n\n` +
-    `Sim, isso mesmo! Para graus simples, entregamos na hora.\n` +
-    `Sem espera, sem demora. Saia da loja já enxergando melhor! 🎉\n\n` +
-    `Quer saber se seu grau se enquadra? Agende um teste agora!\n` +
-    `1️⃣ Agendar teste de visão grátis\n2️⃣ Voltar ao menu\n3️⃣ Falar com atendente`,
+  infoEndereco: (loja) =>
+    `📍 ${loja.titulo}\n\n` +
+    `⏰ Horário de Funcionamento:\n${loja.horario}\n\n` +
+    `📱 WhatsApp: ${loja.whatsapp}\n\n` +
+    `Precisa de mais alguma informação? Responda SIM para falar com um especialista ou NÃO para voltar ao menu.`,
 
   infoPromocoes: () =>
-    `🎁 *Promoções das Óticas Target:*\n\n` +
-    `Para saber as promoções atuais, nosso atendente vai te passar\n` +
-    `as melhores ofertas em tempo real! 💰\n\n` +
-    `1️⃣ Falar com atendente sobre promoções\n2️⃣ Voltar ao menu`,
+    `Temos promoções incríveis esperando por você! 🎉\n\n` +
+    `Para saber as promoções exclusivas e atuais da nossa loja, nosso especialista vai te passar todos os detalhes fresquinhos!\n\n` +
+    `Posso te conectar agora? Responda SIM ou NÃO.`,
 
-  // ── Opção 2 — Agendamento ────────────────────────────────────
+  transferindoParaHumano: () =>
+    `Perfeito! Vou te conectar agora com um de nossos especialistas. 😊\n\n` +
+    `Aguarde um momento, em breve alguém da nossa equipe estará com você!`,
 
-  agendamentoTipo: () =>
-    `📅 Ótimo! Vamos agendar seu teste de visão gratuito!\n\n` +
-    `Como prefere agendar?\n\n` +
-    `1️⃣ Agendamento para 1 pessoa\n` +
-    `2️⃣ Agendamento para grupo (3 ou mais pessoas)`,
+  testeVisao: (loja) =>
+    `Que ótima escolha! Nosso Teste de Visão é 100% Grátis e sem compromisso! 👁️✨\n\n` +
+    `Para agendar, é super simples:\n\n` +
+    `1️⃣ Clique no link abaixo\n` +
+    `2️⃣ Escolha a loja ${loja.nome}\n` +
+    `3️⃣ Selecione o dia e horário de sua preferência\n` +
+    `4️⃣ Confirme o agendamento\n\n` +
+    `🔗 ${LINK_TESTE_VISAO}\n\n` +
+    `Após agendar, responda aqui com CONFIRMADO para finalizarmos seu atendimento! 😊`,
 
-  agendamentoEscolhaLoja: (lojas) => {
-    const lista = lojas.map((l, i) => `${i + 1}️⃣ ${l}`).join("\n");
-    return `Em qual loja você prefere ser atendido(a)? 🏪\n\n${lista}`;
-  },
+  testeConfirmado: (loja) =>
+    `✅ Perfeito! Seu interesse no Teste de Visão Grátis foi registrado para ${loja.titulo}.\n\n` +
+    `Se já concluiu o agendamento pelo link, nossa equipe acompanhará pelo sistema. Qualquer dúvida, estamos por aqui.`,
 
-  agendamentoEscolhaData: (loja) =>
-    `Ótimo! Você escolheu *${loja}*. 👍\n\n` +
-    `Qual data você prefere? 📆\n` +
-    `_(informe no formato DD/MM/AAAA)_`,
+  orcamento: () =>
+    `Olá! Ficamos felizes em preparar um orçamento especial para você! 😊\n\n` +
+    `Para agilizar seu atendimento, por favor envie sua receita (foto ou arquivo) aqui mesmo pelo WhatsApp.\n\n` +
+    `📋 Estamos com uma grande demanda de atendimentos no momento, mas fique tranquilo(a)! Em menos de 5 minutos um de nossos especialistas estará com você. ⏱️\n\n` +
+    `Obrigado pela sua paciência! 🙏`,
 
-  agendamentoDataInvalida: () =>
-    `⚠️ Data inválida. Por favor, informe no formato *DD/MM/AAAA*.\nExemplo: 25/06/2026`,
+  trabalheConosco: () =>
+    `Que incrível! Adoramos receber talentos que queiram fazer parte da nossa família Óticas TGT! 😊🤝\n\n` +
+    `Para darmos continuidade ao seu processo, por favor nos envie:\n\n` +
+    `📄 Seu currículo (em PDF ou foto)\n` +
+    `💼 O cargo que você está buscando\n\n` +
+    `Nossa equipe vai analisar com carinho e entrar em contato em breve! 🌟`,
 
-  agendamentoDataPassada: () =>
-    `⚠️ Essa data já passou! Por favor, escolha uma data futura. 📆`,
+  posVendaMenu: () =>
+    `Olá! Como podemos te ajudar com seu pós-venda? 😊\n\n` +
+    `Escolha uma das opções abaixo:\n\n` +
+    `1️⃣ Nota Fiscal\n` +
+    `2️⃣ Garantia\n` +
+    `3️⃣ Reembolso\n` +
+    `4️⃣ Falar com um Especialista\n\n` +
+    `Digite o número da sua escolha:`,
 
-  agendamentoEscolhaHorario: (loja, data, horarios) => {
-    const lista = horarios.map((h, i) => `${i + 1}️⃣ ${h}`).join("\n");
-    return `Horários disponíveis em *${loja}* no dia *${data}*:\n\n${lista}\n\nQual você prefere?`;
-  },
+  posVendaNotaFiscal: () =>
+    `Entendido! Vamos resolver a questão da sua nota fiscal rapidinho! 🧾\n\n` +
+    `Um de nossos especialistas vai te atender agora para verificar e enviar sua nota fiscal. Aguarde um momento! 😊`,
 
-  agendamentoSemVagas: (data) =>
-    `😔 Não há vagas disponíveis no dia *${data}*.\n\n` +
-    `Por favor, escolha outra data.\n_(informe no formato DD/MM/AAAA)_`,
+  posVendaGarantia: () =>
+    `Entendido! Vamos verificar a garantia do seu produto! 🛡️\n\n` +
+    `Nosso especialista vai te atender agora com todas as informações sobre a garantia. Aguarde um momento! 😊`,
 
-  agendamentoConfirmar: (nome, loja, data, horario) =>
-    `Perfeito! Confirme seu agendamento:\n\n` +
-    `👤 Nome: *${nome}*\n` +
-    `🏪 Loja: *${loja}*\n` +
-    `📅 Data: *${data}*\n` +
-    `⏰ Horário: *${horario}*\n\n` +
-    `Confirmar? Responda *SIM* ou *NÃO*.`,
+  posVendaReembolso: () =>
+    `Entendido! Vamos tratar o seu reembolso com toda a atenção que você merece! 💙\n\n` +
+    `Um especialista vai te atender agora para resolver isso da melhor forma possível. Aguarde um momento! 😊`,
 
-  agendamentoConfirmado: (data, horario, loja) =>
-    `✅ *Agendamento confirmado!*\n\n` +
-    `Nos vemos em *${data}* às *${horario}* na loja *${loja}*! 🎉\n\n` +
-    `Qualquer dúvida, estamos aqui. ⚠️ Em caso de imprevisto, nos avise com antecedência.`,
+  posVendaEspecialista: () =>
+    `Perfeito! Vou te conectar agora com um de nossos especialistas de pós-venda. 😊\n\n` +
+    `Aguarde um momento, em breve alguém da nossa equipe estará com você!`,
 
-  agendamentoGrupo: () =>
-    `👥 *Agendamento em grupo!*\n\n` +
-    `Para grupos de 3 ou mais pessoas, precisamos verificar\n` +
-    `disponibilidade especial com nossa equipe.\n\n` +
-    `Por favor, informe:\n` +
-    `• Quantas pessoas?\n` +
-    `• Data e horário preferidos?\n` +
-    `• Qual loja?\n\n` +
-    `Um atendente entrará em contato para confirmar. 📞`,
+  foraDoHorario: (nome) =>
+    `Olá${nome ? `, ${nome}` : ""}! 🌙\nSua mensagem foi registrada e responderemos em breve!`,
 
-  // ── Opção 3 — Orçamentos ─────────────────────────────────────
-
-  orcamentoMenu: () =>
-    `💰 Que tipo de orçamento você precisa?\n\n` +
-    `1️⃣ Passagem de lentes (trocar lentes em armação existente)\n` +
-    `2️⃣ Lentes + armação (conjunto completo)\n` +
-    `3️⃣ Cobrir orçamento de outra ótica`,
-
-  orcamentoPassagem: () =>
-    `🔄 *Passagem de Lentes*\n\n` +
-    `Para te passar o melhor orçamento, preciso de alguns dados:\n\n` +
-    `1. Você tem a receita médica atualizada? _(SIM ou NÃO)_\n` +
-    `2. Qual é o tipo de lente desejado?\n` +
-    `   • Simples\n` +
-    `   • Antirreflexo\n` +
-    `   • Fotossensível (muda de cor)\n` +
-    `   • Não sei, preciso de orientação\n\n` +
-    `Por favor, responda as duas perguntas. 😊`,
-
-  orcamentoConjunto: () =>
-    `👓 *Orçamento Completo (Lentes + Armação)*\n\n` +
-    `Para te ajudar melhor:\n\n` +
-    `1. Você já tem receita médica? _(SIM ou NÃO)_\n` +
-    `2. Qual faixa de valor você tem em mente?\n` +
-    `   • Até R$200\n` +
-    `   • R$200 a R$500\n` +
-    `   • R$500 a R$1.000\n` +
-    `   • Acima de R$1.000\n` +
-    `   • Ainda não sei\n\n` +
-    `Responda e um atendente preparará as melhores opções! 😊`,
-
-  orcamentoCobertura: () =>
-    `🤝 *Cobrimos Orçamentos!*\n\n` +
-    `Manda a foto ou o valor do orçamento que você recebeu\n` +
-    `e vamos ver o que podemos fazer por você! 💪\n\n` +
-    `Envie a imagem ou o valor agora.`,
-
-  // ── Opção 4 — Transferência para humano ─────────────────────
-
-  transferindoParaHumano: (loja = "") => {
-    const isGonzaga = /gonzaga|santos/i.test(loja);
-    const horarios  = isGonzaga
-      ? "Seg a Sex: 9h–19h | Sáb: 10h–18h"
-      : "Seg a Sex: 9h–19h | Sáb: 9h–15h";
-    return `👋 Claro! Estou transferindo você para um de nossos atendentes.\n\n` +
-      `Em breve alguém da nossa equipe vai falar com você! 😊\n` +
-      `Horário de atendimento: ${horarios}`;
-  },
-
-  // Nota interna para o atendente (não enviada ao cliente)
-  notaParaAtendente: (state) => {
-    const partes = [
-      `📋 RESUMO DO ATENDIMENTO BOT`,
-      `Nome: ${state.nome || "Desconhecido"}`,
-      `Etapa em que estava: ${state.etapa}`,
-      state.loja ? `Loja de interesse: ${state.loja}` : null,
-      state.dados_agendamento?.data    ? `Data desejada: ${state.dados_agendamento.data}`    : null,
-      state.dados_agendamento?.horario ? `Horário desejado: ${state.dados_agendamento.horario}` : null,
-    ].filter(Boolean).join("\n");
-    return partes;
-  },
-
-  // ── Fechamento ───────────────────────────────────────────────
-
-  fechadoGanho: (nome) =>
-    `🎊 Parabéns pela sua escolha${nome ? `, *${nome}*` : ""}!\n\n` +
-    `Foi um prazer atender você nas Óticas Target! 😊\n` +
-    `Qualquer dúvida ou necessidade, estaremos sempre aqui.\n\n` +
-    `Não se esqueça: sua garantia está registrada conosco. ✅`,
-
-  // ── Lembrete de agendamento (24h antes) ─────────────────────
+  foraDoHorarioHumano: (loja = "") =>
+    `Sua mensagem foi registrada!\n\nNossa equipe retornará assim que estiver disponível.${loja ? `\nLoja: ${loja}` : ""}`,
 
   lembrete24h: (nome, data, horario, loja) =>
-    `⏰ Lembrete: *${nome || "Olá"}*, seu teste de visão está agendado para amanhã!\n\n` +
-    `📅 Data: *${data}*\n` +
-    `⏰ Horário: *${horario}*\n` +
-    `🏪 Loja: *${loja}*\n\n` +
-    `Confirma sua presença? Responda *SIM* ou *NÃO*.`,
+    `⏰ Lembrete: ${nome || "olá"}, seu teste de visão está agendado para amanhã!\n\n` +
+    `📅 Data: ${data}\n` +
+    `⏰ Horário: ${horario}\n` +
+    `🏪 Loja: ${loja}\n\n` +
+    `Confirma sua presença? Responda SIM ou NÃO.`,
 
   lembreteConfirmado: () =>
     `✅ Presença confirmada! Te esperamos amanhã. 😊`,
 
   lembreteCancelado: () =>
-    `😔 Tudo bem! Quer remarcar para outra data?\n\n` +
-    `1️⃣ Sim, quero remarcar\n2️⃣ Não, pode cancelar`,
-
-  // ── Recuperação de lead frio ─────────────────────────────────
+    `Tudo bem. Nossa equipe vai acompanhar seu retorno para remarcar, se necessário.`,
 
   recuperacao: (nome) =>
-    `Oi${nome ? `, *${nome}*` : ""}! 👋 Tudo bem?\n\n` +
-    `Notamos que você se interessou pelos serviços das *Óticas Target*\n` +
-    `mas ainda não finalizamos seu atendimento. 😊\n\n` +
-    `Sabia que muitos dos nossos clientes ficam surpresos com\n` +
-    `os preços e a qualidade que oferecemos?\n\n` +
-    `Que tal darmos uma segunda chance? Posso te ajudar agora! 💪\n\n` +
-    `1️⃣ Quero agendar meu teste de visão grátis\n` +
-    `2️⃣ Quero ver orçamentos\n` +
-    `3️⃣ Prefiro falar com atendente`,
+    `Oi${nome ? `, ${nome}` : ""}! Tudo bem?\n\n` +
+    `Notamos que você se interessou pelos serviços das Óticas TGT, mas ainda não finalizamos seu atendimento.\n\n` +
+    `Posso te ajudar agora?\n\n` +
+    `1️⃣ Teste de Visão Grátis\n` +
+    `2️⃣ Orçamento\n` +
+    `3️⃣ Falar com especialista`,
+
+  notaParaAtendente: (state) => [
+    "RESUMO DO ATENDIMENTO BOT",
+    `Nome: ${state.nome || "Desconhecido"}`,
+    `Loja de interesse: ${state.loja || "Não identificada"}`,
+    `Etapa: ${state.etapa}`,
+    state.ultimo_topico ? `Tópico: ${state.ultimo_topico}` : null,
+  ].filter(Boolean).join("\n"),
 };

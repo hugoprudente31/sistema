@@ -15,6 +15,8 @@
 //       "lead_id":      "{{lead_id}}",
 //       "talk_id":      "{{talk_id}}",
 //       "chat_id":      "{{chat_id}}",
+//       "pipeline_id":  "{{pipeline_id}}",
+//       "loja":         "{{lead.cf.LOJA}}",
 //       "message":      "{{last_message_text}}",
 //       "contact_name": "{{contact_name}}",
 //       "secret":       "MESMO_VALOR_DE_SALESBOT_SECRET"
@@ -64,6 +66,9 @@ router.post("/api/salesbot", requireSalesbotSecret, async (req, res) => {
   const talkId  = String(req.body.talk_id  || "").trim() || null;
   const chatId  = String(req.body.chat_id  || "").trim() || null;
   const message = String(req.body.message  || "").trim();
+  const loja = String(req.body.loja || req.body.store || req.body.store_name || "").trim();
+  const pipelineId = String(req.body.pipeline_id || req.body.pipelineId || "").trim();
+  const contactName = String(req.body.contact_name || req.body.nome || "").trim();
 
   console.log(`[Salesbot] lead=${leadId} talk=${talkId} chat=${chatId} msg="${message.slice(0, 60)}"`);
 
@@ -81,6 +86,9 @@ router.post("/api/salesbot", requireSalesbotSecret, async (req, res) => {
       chatId,
       text:       message,
       authorType: "contact",
+      loja,
+      pipeline_id: pipelineId,
+      contact_name: contactName,
     });
   } catch (e) {
     console.error(`[Salesbot] Erro ao processar lead ${leadId}:`, e.message);
