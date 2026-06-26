@@ -1,5 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const kommo = require("../kommo/client");
 
 process.env.SESSION_SECRET = "test-session-secret-with-at-least-32-characters";
 process.env.SESSION_TTL_HOURS = "1";
@@ -20,6 +21,41 @@ test.before(async () => {
       resolve();
     });
   });
+});
+
+test("SalesBot pode enviar resposta diretamente pelo Kommo sem duplicar retorno", async () => {
+  const originalDirectSend = process.env.SALESBOT_DIRECT_SEND;
+  const originalSendMessageToLead = kommo.sendMessageToLead;
+  const sent = [];
+
+  process.env.SALESBOT_DIRECT_SEND = "true";
+  kommo.sendMessageToLead = async (leadId, text) => {
+    sent.push({ leadId, text });
+    return { ok: true };
+  };
+
+  try {
+    const leadId = `doc-direct-${Date.now()}`;
+    const response = await salesbot({
+      lead_id: leadId,
+      loja: "Ã“ticas Target - Ademar de Barros",
+      contact_name: "Cliente Teste",
+      message: "oi"
+    });
+
+    assert.equal(response.text, "");
+    assert.equal(response.sent, true);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].leadId, leadId);
+    assert.match(sent[0].text, /Santo Antonio \/ Target/);
+  } finally {
+    kommo.sendMessageToLead = originalSendMessageToLead;
+    if (originalDirectSend === undefined) {
+      delete process.env.SALESBOT_DIRECT_SEND;
+    } else {
+      process.env.SALESBOT_DIRECT_SEND = originalDirectSend;
+    }
+  }
 });
 
 test.after(async () => {

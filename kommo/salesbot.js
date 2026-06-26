@@ -30,6 +30,7 @@
 const crypto                           = require("crypto");
 const express                          = require("express");
 const router                           = express.Router();
+const kommo                            = require("./client");
 const { processMessage, flushResponses } = require("./bot/flowEngine");
 const SM                               = require("./bot/stateManager");
 
@@ -100,6 +101,16 @@ router.post("/api/salesbot", requireSalesbotSecret, async (req, res) => {
   const text  = parts.join("\n\n");
 
   console.log(`[Salesbot] lead=${leadId} → ${parts.length} msg(s) — "${text.slice(0, 100)}"`);
+  if (text && process.env.SALESBOT_DIRECT_SEND === "true") {
+    try {
+      await kommo.sendMessageToLead(leadId, text);
+      console.log(`[Salesbot] lead=${leadId} mensagem enviada diretamente pelo Kommo`);
+      return res.json({ text: "", sent: true });
+    } catch (e) {
+      console.error(`[Salesbot] lead=${leadId} envio direto falhou:`, e.message);
+    }
+  }
+
   return res.json({ text });
 });
 
