@@ -42,12 +42,14 @@ function safeEqual(value, expected) {
 }
 
 function salesbotSecret(req) {
+  const data = req.body && typeof req.body.data === "object" ? req.body.data : {};
   const auth = String(req.headers.authorization || "");
   if (auth.toLowerCase().startsWith("bearer ")) return auth.slice(7).trim();
   return String(
     req.headers["x-salesbot-secret"] ||
     req.query.secret ||
     req.body.secret ||
+    data.secret ||
     ""
   ).trim();
 }
@@ -61,15 +63,49 @@ function requireSalesbotSecret(req, res, next) {
   return next();
 }
 
+function salesbotPayload(req) {
+  return req.body && typeof req.body.data === "object" ? req.body.data : req.body;
+}
+
+async function continueKommoSalesbot(returnUrl, text) {
+  if (!returnUrl || !text) return false;
+
+  const response = await fetch(returnUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      data: { text },
+      execute_handlers: [
+        {
+          handler: "show",
+          params: {
+            type: "text",
+            value: text,
+          },
+        },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`Kommo continue ${response.status}: ${body.slice(0, 200)}`);
+  }
+
+  return true;
+}
+
 router.post("/api/salesbot", requireSalesbotSecret, async (req, res) => {
 
-  const leadId  = String(req.body.lead_id  || "").trim();
-  const talkId  = String(req.body.talk_id  || "").trim() || null;
-  const chatId  = String(req.body.chat_id  || "").trim() || null;
-  const message = String(req.body.message  || "").trim();
-  const loja = String(req.body.loja || req.body.store || req.body.store_name || "").trim();
-  const pipelineId = String(req.body.pipeline_id || req.body.pipelineId || "").trim();
-  const contactName = String(req.body.contact_name || req.body.nome || "").trim();
+  const payload = salesbotPayload(req);
+  const returnUrl = String(req.body.return_url || "").trim();
+  const leadId  = String(payload.lead_id || payload.lead || "").trim();
+  const talkId  = String(payload.talk_id  || "").trim() || null;
+  const chatId  = String(payload.chat_id  || "").trim() || null;
+  const message = String(payload.message  || "").trim();
+  const loja = String(payload.loja || payload.store || payload.store_name || "").trim();
+  const pipelineId = String(payload.pipeline_id || payload.pipelineId || "").trim();
+  const contactName = String(payload.contact_name || payload.nome || "").trim();
 
   console.log(`[Salesbot] lead=${leadId} talk=${talkId} chat=${chatId} msg="${message.slice(0, 60)}"`);
 
@@ -101,6 +137,16 @@ router.post("/api/salesbot", requireSalesbotSecret, async (req, res) => {
   const text  = parts.join("\n\n");
 
   console.log(`[Salesbot] lead=${leadId} → ${parts.length} msg(s) — "${text.slice(0, 100)}"`);
+  if (returnUrl) {
+    try {
+      await continueKommoSalesbot(returnUrl, text);
+      return res.json({ text: "", sent: true, continued: true });
+    } catch (e) {
+      console.error(`[Salesbot] lead=${leadId} continue falhou:`, e.message);
+      return res.json({ text });
+    }
+  }
+
   if (text && process.env.SALESBOT_DIRECT_SEND === "true") {
     try {
       await kommo.sendMessageToLead(leadId, text);

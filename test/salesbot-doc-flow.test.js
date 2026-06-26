@@ -1,5 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const http = require("node:http");
 const kommo = require("../kommo/client");
 
 process.env.SESSION_SECRET = "test-session-secret-with-at-least-32-characters";
@@ -55,6 +56,51 @@ test("SalesBot pode enviar resposta diretamente pelo Kommo sem duplicar retorno"
     } else {
       process.env.SALESBOT_DIRECT_SEND = originalDirectSend;
     }
+  }
+});
+
+test("SalesBot continua fluxo oficial do Kommo via return_url", async () => {
+  const received = [];
+  const callbackServer = await new Promise((resolve) => {
+    const s = http.createServer((req, res) => {
+      let raw = "";
+      req.on("data", (chunk) => { raw += chunk; });
+      req.on("end", () => {
+        received.push(JSON.parse(raw || "{}"));
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end("{}");
+      });
+    });
+    s.listen(0, "127.0.0.1", () => resolve(s));
+  });
+
+  try {
+    const returnUrl = `http://127.0.0.1:${callbackServer.address().port}/continue`;
+    const response = await fetch(baseUrl + "/api/salesbot", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        return_url: returnUrl,
+        data: {
+          secret: "test-salesbot-secret",
+          lead_id: `doc-return-${Date.now()}`,
+          loja: "Óticas Target - Ademar de Barros",
+          contact_name: "Cliente Teste",
+          message: "oi",
+        },
+      }),
+    });
+
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.continued, true);
+    assert.equal(received.length, 1);
+    assert.equal(received[0].execute_handlers[0].handler, "show");
+    assert.equal(received[0].execute_handlers[0].params.type, "text");
+    assert.match(received[0].execute_handlers[0].params.value, /Santo Antonio \/ Target/);
+    assert.match(received[0].execute_handlers[0].params.value, /Informações/);
+  } finally {
+    await new Promise((resolve) => callbackServer.close(resolve));
   }
 });
 
