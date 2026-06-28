@@ -363,6 +363,7 @@
           <button class="btn-relatorio secondary hidden" id="btnSyncSistema" onclick="sincronizarSistema()">Sincronizar sistema</button>
           <button class="btn-relatorio hidden" id="btnKommoDiag" onclick="abrirKommoDiagnostico()" style="background:#6d28d9">Kommo: Diagnóstico</button>
           <button class="btn-relatorio hidden" id="btnGerarNotifRetro" onclick="gerarNotificacoesRetroativas()" style="background:#0369a1">Notificações retroativas</button>
+          <button class="btn-relatorio hidden" id="btnDispararLembretes" onclick="dispararLembretes24h()" style="background:#047857">Disparar lembretes 24h</button>
         </div>
       </div>
 
@@ -918,6 +919,7 @@ function aplicarPermissoesTela() {
   if (p.isAdmin) byId('cardUsuarios').classList.remove('hidden');
   if (p.isAdmin) byId('btnKommoDiag').classList.remove('hidden');
   if (p.isAdmin) byId('btnGerarNotifRetro').classList.remove('hidden');
+  if (p.isAdmin) byId('btnDispararLembretes').classList.remove('hidden');
   if (p.canCreateAgendamento) byId('cardAgendamento').classList.remove('hidden');
   if (p.canViewFinance) {
     byId('cardFinanceiro').classList.remove('hidden');
@@ -2281,6 +2283,20 @@ function rodarDiagnosticoKommo() {
   }).finally(function() {
     if (btn) btn.disabled = false;
   });
+}
+
+function dispararLembretes24h() {
+  var btn = byId('btnDispararLembretes');
+  if (!confirm('Disparar agora os lembretes de WhatsApp para todos os agendamentos de amanhã que ainda não receberam mensagem?')) return;
+  if (btn) { btn.disabled = true; btn.textContent = 'Enviando...'; }
+  fetch('/api/admin/lembretes/disparar', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      if (!res || !res.ok) throw new Error(res && res.message ? res.message : 'Erro');
+      toast('Lembretes: ' + (res.enviados || 0) + ' enviados, ' + (res.erros || 0) + ' erros.', 'ok');
+    })
+    .catch(function(err) { toast('Erro: ' + (err.message || String(err)), 'err'); })
+    .finally(function() { if (btn) { btn.disabled = false; btn.textContent = 'Disparar lembretes 24h'; } });
 }
 
 function gerarNotificacoesRetroativas() {

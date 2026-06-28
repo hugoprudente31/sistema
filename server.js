@@ -917,6 +917,7 @@ async function initDatabase() {
   `);
 
   await negociacaoRoutes.initNegociacaoTables(pool);
+  await pool.query(`ALTER TABLE agendamentos ADD COLUMN IF NOT EXISTS lembrete_24h_em TIMESTAMPTZ`);
 }
 
 function buildGasPayload(body) {
@@ -2955,6 +2956,125 @@ app.get("/", (req, res) => {
 
 negociacaoRoutes.registerRoutes(app, pool, { requireSession, canViewAllStores });
 
+// ── Lembretes automáticos 24h antes do agendamento ───────────────────────────
+const LOJAS_INFO = {
+  gonzaga: {
+    nome: 'Óticas TGT Santos',
+    endereco: 'Av. Marechal Floriano Peixoto, 27 (Ao lado da Kallan) - Santos/SP',
+    telefone: '(13) 99645-3111'
+  },
+  enseada: {
+    nome: 'Óticas TGT Enseada',
+    endereco: 'Av. Dom Pedro 1º, 1461 - Enseada (Em frente ao banco Itaú) - Guarujá/SP',
+    telefone: '(13) 99721-4862'
+  },
+  pitangueiras: {
+    nome: 'Óticas TGT Pitangueiras',
+    endereco: 'Rua Montenegro, 69 - Pitangueiras, Centro - Guarujá/SP',
+    telefone: '(13) 99704-0234'
+  },
+  ademar: {
+    nome: 'Óticas Target Ademar de Barros',
+    endereco: 'Av. Adhemar de Barros, 1450 (Ao lado da Sorridents) - Guarujá/SP',
+    telefone: '(13) 99785-6493'
+  }
+};
+
+function resolverInfoLoja(lojaStr) {
+  if (!lojaStr) return null;
+  const l = lojaStr.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  if (l.includes('gonzaga') || l.includes('santos')) return LOJAS_INFO.gonzaga;
+  if (l.includes('enseada'))                          return LOJAS_INFO.enseada;
+  if (l.includes('pitangueiras'))                     return LOJAS_INFO.pitangueiras;
+  if (l.includes('ademar') || l.includes('adhemar')) return LOJAS_INFO.ademar;
+  return null;
+}
+
+function dtBR(v) {
+  if (!v) return '';
+  const s = String(v).slice(0, 10).split('-');
+  return s.length === 3 ? `${s[2]}/${s[1]}/${s[0]}` : String(v).slice(0, 10);
+}
+
+async function disparadorLembretes24h() {
+  try {
+    // Amanhã no fuso de Brasília (UTC-3)
+    const brAmanha = new Date(Date.now() - 3 * 3600000);
+    brAmanha.setDate(brAmanha.getDate() + 1);
+    const amanhaStr = brAmanha.toISOString().slice(0, 10); // YYYY-MM-DD
+
+    const { rows } = await pool.query(`
+      SELECT id, nome, data_agendamento, horario, loja, kommo_lead_id
+      FROM agendamentos
+      WHERE data_agendamento::date = $1::date
+        AND kommo_lead_id IS NOT NULL AND kommo_lead_id <> ''
+        AND lembrete_24h_em IS NULL
+        AND excluido_em IS NULL
+        AND LOWER(COALESCE(status,'')) NOT ILIKE '%cancelad%'
+        AND LOWER(COALESCE(compareceu,'')) NOT IN ('sim','nao','não')
+    `, [amanhaStr]);
+
+    if (!rows.length) {
+      console.log(`[lembretes24h] Nenhum lembrete pendente para ${amanhaStr}.`);
+      return { enviados: 0, erros: 0 };
+    }
+
+    console.log(`[lembretes24h] ${rows.length} agendamento(s) para ${amanhaStr} — iniciando disparos.`);
+    const kommoClient = require('./kommo/client');
+    let enviados = 0, erros = 0;
+
+    for (const ag of rows) {
+      const loja = resolverInfoLoja(ag.loja);
+      const nome = (ag.nome || 'cliente').split(' ')[0]; // primeiro nome
+      const linhas = [
+        `Olá, *${nome}*! 😊`,
+        '',
+        `Passamos para lembrar do seu agendamento na *Óticas TGT* que está marcado para *amanhã*! ✅`,
+        '',
+        `📅 *Data:* ${dtBR(ag.data_agendamento)}`,
+        `⏰ *Horário:* ${ag.horario || ''}`,
+      ];
+      if (loja) {
+        linhas.push(`📍 *Endereço:* ${loja.endereco}`);
+        linhas.push(`📞 *Telefone:* ${loja.telefone}`);
+      }
+      linhas.push('');
+      linhas.push('Caso precise reagendar ou cancelar, é só nos chamar aqui pelo WhatsApp! 😊');
+      linhas.push('');
+      linhas.push('_Equipe Óticas TGT_ 🕶️');
+
+      const mensagem = linhas.join('\n');
+
+      try {
+        await kommoClient.sendMessageToLead(String(ag.kommo_lead_id), mensagem);
+        await pool.query(`UPDATE agendamentos SET lembrete_24h_em = NOW() WHERE id = $1`, [ag.id]);
+        console.log(`[lembretes24h] ✅ Enviado para ${ag.nome} (id=${ag.id})`);
+        enviados++;
+      } catch (e) {
+        console.error(`[lembretes24h] ❌ Erro no id=${ag.id} (${ag.nome}):`, e.message);
+        erros++;
+        // Marca mesmo com erro para não re-tentar em loop infinito
+        await pool.query(`UPDATE agendamentos SET lembrete_24h_em = NOW() WHERE id = $1`, [ag.id]).catch(() => null);
+      }
+
+      // Pequena pausa para não sobrecarregar a API do Kommo
+      await new Promise(r => setTimeout(r, 800));
+    }
+
+    console.log(`[lembretes24h] Concluído — ${enviados} enviados, ${erros} erros.`);
+    return { enviados, erros };
+  } catch (e) {
+    console.error('[lembretes24h] Erro geral:', e.message);
+    return { enviados: 0, erros: 1, mensagem: e.message };
+  }
+}
+
+// Endpoint para disparar manualmente (admin)
+app.post('/api/admin/lembretes/disparar', requireAdmin, async (req, res) => {
+  const resultado = await disparadorLembretes24h();
+  res.json({ ok: true, ...resultado });
+});
+
 async function startServer() {
   await initDatabase();
   return new Promise((resolve) => {
@@ -2968,10 +3088,18 @@ async function startServer() {
 }
 
 if (require.main === module) {
-  startServer().catch((error) => {
-    console.error("Erro ao iniciar banco:", error);
-    process.exit(1);
-  });
+  startServer()
+    .then(() => {
+      // Disparar lembretes 45s após o boot, depois a cada hora
+      setTimeout(() => {
+        disparadorLembretes24h();
+        setInterval(disparadorLembretes24h, 60 * 60 * 1000);
+      }, 45000);
+    })
+    .catch((error) => {
+      console.error("Erro ao iniciar banco:", error);
+      process.exit(1);
+    });
 }
 
 module.exports = {
