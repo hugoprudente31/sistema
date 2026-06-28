@@ -2185,6 +2185,32 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
       }
     });
 
+    // Auto-resolução de notificações quando situação é corrigida
+    setImmediate(async () => {
+      try {
+        const after = result.rows[0];
+        const nc3 = v => String(v||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim();
+        const aComp = nc3(after.compareceu);
+        const aSt   = nc3(after.status);
+
+        // "Não compareceu" resolvido → reagendou ou marcou compareceu=Sim
+        if (aComp === 'sim' || aComp === 'pendente' || ['agendado','confirmado'].includes(aSt)) {
+          await pool.query(
+            `DELETE FROM notificacoes WHERE agendamento_id = $1 AND tipo = 'nao_compareceu'`,
+            [after.id]
+          );
+        }
+
+        // "Compareceu sem compra" resolvido → OS aberta ou venda registrada
+        if (Number(after.valor_venda || 0) > 0 || (after.numero_os && after.numero_os !== '')) {
+          await pool.query(
+            `DELETE FROM notificacoes WHERE agendamento_id = $1 AND tipo = 'sem_compra'`,
+            [after.id]
+          );
+        }
+      } catch (_) {}
+    });
+
     // Nota no Kommo sobre mudanças relevantes
     setImmediate(async () => {
       try {
