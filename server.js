@@ -2126,9 +2126,127 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
       client.release();
     }
 
+    // ── Notificações automáticas de resultado de visita ──────────────────────
+    setImmediate(async () => {
+      try {
+        const before = current.rows[0];
+        const after  = result.rows[0];
+        const nc = v => String(v || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim();
+        const bComp = nc(before.compareceu);
+        const aComp = nc(after.compareceu);
+
+        const dtBR = v => {
+          if (!v) return '';
+          const s = String(v).slice(0, 10).split('-');
+          return s.length === 3 ? s[2]+'/'+s[1]+'/'+s[0] : String(v).slice(0,10);
+        };
+
+        // "Não compareceu" — transição para Não (evita duplicata por agendamento)
+        if (aComp === 'nao' && bComp !== 'nao') {
+          await pool.query(`
+            INSERT INTO notificacoes (tipo, titulo, mensagem, agendamento_id, destinatarios)
+            SELECT 'nao_compareceu', $1, $2, $3, $4
+            WHERE NOT EXISTS (
+              SELECT 1 FROM notificacoes WHERE agendamento_id = $3 AND tipo = 'nao_compareceu'
+            )
+          `, [
+            'Não compareceu — ' + after.nome,
+            (after.nome || '?') + ' não compareceu ao agendamento de ' + dtBR(after.data_agendamento) +
+              ' às ' + (after.horario || '') + ' | Loja: ' + (after.loja || '?') + '.',
+            after.id,
+            ['admin', 'atendimento central', 'gerente de loja', after.loja || ''].filter(Boolean)
+          ]);
+        }
+
+        // "Compareceu sem compra" — compareceu=Sim e sem OS/valor
+        if (aComp === 'sim' && bComp !== 'sim') {
+          const temVenda = Number(after.valor_venda || 0) > 0 || after.numero_os;
+          if (!temVenda) {
+            await pool.query(`
+              INSERT INTO notificacoes (tipo, titulo, mensagem, agendamento_id, destinatarios)
+              SELECT 'sem_compra', $1, $2, $3, $4
+              WHERE NOT EXISTS (
+                SELECT 1 FROM notificacoes WHERE agendamento_id = $3 AND tipo = 'sem_compra'
+              )
+            `, [
+              'Compareceu sem compra — ' + after.nome,
+              (after.nome || '?') + ' compareceu em ' + dtBR(after.data_agendamento) +
+                ' mas não houve venda registrada. | Loja: ' + (after.loja || '?') + '.',
+              after.id,
+              ['admin', 'atendimento central', 'gerente de loja', after.loja || ''].filter(Boolean)
+            ]);
+          }
+        }
+      } catch (nErr) {
+        console.error('[notif-visita]', nErr.message);
+      }
+    });
+
     res.json({ ok: true, agendamento: result.rows[0] });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+// Gera notificações retroativas para agendamentos existentes com resultado de visita
+app.post("/api/admin/notificacoes/gerar-retroativo", requireAdmin, async (req, res) => {
+  try {
+    const nc = v => String(v || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim();
+    const dtBR = v => {
+      if (!v) return '';
+      const s = String(v).slice(0,10).split('-');
+      return s.length === 3 ? s[2]+'/'+s[1]+'/'+s[0] : String(v).slice(0,10);
+    };
+
+    const trl = col => `TRANSLATE(LOWER(TRIM(COALESCE(${col},''))),'áàâãäéèêëíìîïóòôõöúùûüç','aaaaaeeeeiiiiooooouuuuc')`;
+
+    // Não compareceu — sem notificação ainda
+    const naoComp = await pool.query(`
+      SELECT a.id, a.nome, a.data_agendamento, a.horario, a.loja
+      FROM agendamentos a
+      WHERE a.excluido_em IS NULL
+        AND (${trl('a.compareceu')} = 'nao' OR LOWER(a.status) ILIKE '%nao comparec%')
+        AND NOT EXISTS (SELECT 1 FROM notificacoes n WHERE n.agendamento_id = a.id AND n.tipo = 'nao_compareceu')
+      ORDER BY a.data_agendamento DESC
+      LIMIT 500
+    `);
+
+    // Compareceu sem compra — sem notificação ainda
+    const semCompra = await pool.query(`
+      SELECT a.id, a.nome, a.data_agendamento, a.horario, a.loja
+      FROM agendamentos a
+      WHERE a.excluido_em IS NULL
+        AND ${trl('a.compareceu')} = 'sim'
+        AND COALESCE(a.valor_venda, 0) = 0
+        AND (a.numero_os IS NULL OR a.numero_os = '')
+        AND NOT EXISTS (SELECT 1 FROM notificacoes n WHERE n.agendamento_id = a.id AND n.tipo = 'sem_compra')
+      ORDER BY a.data_agendamento DESC
+      LIMIT 500
+    `);
+
+    let criadas = 0;
+    for (const r of naoComp.rows) {
+      await pool.query(
+        `INSERT INTO notificacoes (tipo, titulo, mensagem, agendamento_id, destinatarios) VALUES ($1,$2,$3,$4,$5)`,
+        ['nao_compareceu', 'Não compareceu — ' + r.nome,
+         (r.nome||'?') + ' não compareceu ao agendamento de ' + dtBR(r.data_agendamento) + ' às ' + (r.horario||'') + ' | Loja: ' + (r.loja||'?') + '.',
+         r.id, ['admin', 'atendimento central', 'gerente de loja', r.loja || ''].filter(Boolean)]
+      ).catch(() => null);
+      criadas++;
+    }
+    for (const r of semCompra.rows) {
+      await pool.query(
+        `INSERT INTO notificacoes (tipo, titulo, mensagem, agendamento_id, destinatarios) VALUES ($1,$2,$3,$4,$5)`,
+        ['sem_compra', 'Compareceu sem compra — ' + r.nome,
+         (r.nome||'?') + ' compareceu em ' + dtBR(r.data_agendamento) + ' mas não houve venda registrada. | Loja: ' + (r.loja||'?') + '.',
+         r.id, ['admin', 'atendimento central', 'gerente de loja', r.loja || ''].filter(Boolean)]
+      ).catch(() => null);
+      criadas++;
+    }
+
+    res.json({ ok: true, criadas, nao_compareceu: naoComp.rows.length, sem_compra: semCompra.rows.length });
+  } catch (e) {
+    res.status(500).json({ ok: false, message: e.message });
   }
 });
 

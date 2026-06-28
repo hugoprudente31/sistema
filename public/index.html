@@ -362,6 +362,7 @@
           <button class="btn-relatorio hidden" id="btnLixeira" onclick="carregarLixeira()" style="background:#7f1d1d">🗑 Lixeira</button>
           <button class="btn-relatorio secondary hidden" id="btnSyncSistema" onclick="sincronizarSistema()">Sincronizar sistema</button>
           <button class="btn-relatorio hidden" id="btnKommoDiag" onclick="abrirKommoDiagnostico()" style="background:#6d28d9">Kommo: Diagnóstico</button>
+          <button class="btn-relatorio hidden" id="btnGerarNotifRetro" onclick="gerarNotificacoesRetroativas()" style="background:#0369a1">Notificações retroativas</button>
         </div>
       </div>
 
@@ -916,6 +917,7 @@ function aplicarPermissoesTela() {
   if (p.isAdmin) byId('btnLixeira').classList.remove('hidden');
   if (p.isAdmin) byId('cardUsuarios').classList.remove('hidden');
   if (p.isAdmin) byId('btnKommoDiag').classList.remove('hidden');
+  if (p.isAdmin) byId('btnGerarNotifRetro').classList.remove('hidden');
   if (p.canCreateAgendamento) byId('cardAgendamento').classList.remove('hidden');
   if (p.canViewFinance) {
     byId('cardFinanceiro').classList.remove('hidden');
@@ -2279,6 +2281,20 @@ function rodarDiagnosticoKommo() {
   }).finally(function() {
     if (btn) btn.disabled = false;
   });
+}
+
+function gerarNotificacoesRetroativas() {
+  var btn = byId('btnGerarNotifRetro');
+  if (!confirm('Gerar notificações para todos os agendamentos passados com "Não Compareceu" e "Compareceu sem Compra"?\n\nIsso vai popular o sino com os registros que já existem no banco.')) return;
+  if (btn) { btn.disabled = true; btn.textContent = 'Gerando...'; }
+  fetch('/api/admin/notificacoes/gerar-retroativo', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      if (!res || !res.ok) throw new Error(res && res.message ? res.message : 'Erro');
+      toast('Criadas ' + res.criadas + ' notificações (' + res.nao_compareceu + ' não compareceu, ' + res.sem_compra + ' sem compra).', 'ok');
+    })
+    .catch(function(err) { toast('Erro: ' + (err.message || String(err)), 'err'); })
+    .finally(function() { if (btn) { btn.disabled = false; btn.textContent = 'Notificações retroativas'; } });
 }
 
 function executarDedupKommo() {
