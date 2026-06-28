@@ -2579,6 +2579,188 @@ app.get("/api/dashboard/kommo", requireSession, async (req, res) => {
   }
 });
 
+// ── Helpers Kommo ──────────────────────────────────────────────────────────────
+function normalizarTelefoneKommo(phone) {
+  if (!phone) return '';
+  const digits = String(phone).replace(/\D/g, '');
+  let num = digits.startsWith('55') ? digits.slice(2) : digits;
+  // Normaliza 11→10 dígitos (remove o 9 após DDD para unificar duplicatas de WhatsApp Cloud/Lite)
+  if (num.length === 11 && num[2] === '9') num = num.slice(0, 2) + num.slice(3);
+  return num.length >= 8 ? num : '';
+}
+
+async function obterTodosContatosKommo(kommoClient) {
+  const todos = [];
+  let page = 1;
+  while (true) {
+    const data = await kommoClient.request('GET', `/contacts?limit=250&page=${page}&with=leads`).catch(() => null);
+    const lista = data?._embedded?.contacts || [];
+    todos.push(...lista);
+    if (lista.length < 250 || page >= 20) break;
+    page++;
+  }
+  return todos;
+}
+
+// ── GET /api/admin/kommo/diagnostico ─────────────────────────────────────────
+// Mostra: duplicatas, leads novos com mensagem, tempo médio de resposta
+app.get("/api/admin/kommo/diagnostico", requireAdmin, async (req, res) => {
+  try {
+    const kommoClient = require('./kommo/client');
+    const agora = Math.floor(Date.now() / 1000);
+    const inicio7d = agora - 7 * 86400;
+    const inicio30d = agora - 30 * 86400;
+
+    // 1. Buscar contatos e detectar duplicatas por telefone
+    const contatos = await obterTodosKommo(kommoClient);
+    const mapaFone = {};
+    for (const c of contatos) {
+      const phones = (c.custom_fields_values || [])
+        .find(f => f.field_code === 'PHONE')?.values?.map(v => normalizarTelefoneKommo(v.value)) || [];
+      for (const ph of phones) {
+        if (!ph) continue;
+        if (!mapaFone[ph]) mapaFone[ph] = [];
+        mapaFone[ph].push({ id: c.id, nome: c.name || '(sem nome)', leads: c._embedded?.leads?.length || 0, criado_em: c.created_at });
+      }
+    }
+    const duplicatas = Object.entries(mapaFone)
+      .filter(([, cs]) => cs.length > 1)
+      .map(([fone, cs]) => ({ fone, contatos: cs.sort((a, b) => b.leads - a.leads) }));
+
+    // 2. Leads novos com mensagem (7 e 30 dias)
+    const [leadsNovos7d, leadsNovos30d, talksRecentes] = await Promise.all([
+      kommoClient.request('GET', `/leads?filter[created_at][from]=${inicio7d}&filter[created_at][to]=${agora}&limit=500`).catch(() => null),
+      kommoClient.request('GET', `/leads?filter[created_at][from]=${inicio30d}&filter[created_at][to]=${agora}&limit=500`).catch(() => null),
+      kommoClient.request('GET', `/talks?limit=250&order[id]=desc`).catch(() => null)
+    ]);
+
+    const ids7d  = new Set((leadsNovos7d?._embedded?.leads  || []).map(l => String(l.id)));
+    const ids30d = new Set((leadsNovos30d?._embedded?.leads || []).map(l => String(l.id)));
+    const idsComTalk = new Set((talksRecentes?._embedded?.talks || [])
+      .map(t => String(t.entity_id || t.lead_id || '')).filter(Boolean));
+
+    const leadsComMensagem7d  = [...ids7d ].filter(id => idsComTalk.has(id)).length;
+    const leadsComMensagem30d = [...ids30d].filter(id => idsComTalk.has(id)).length;
+
+    // 3. Tempo médio de primeira resposta (amostra das últimas 10 talks)
+    const talks = talksRecentes?._embedded?.talks || [];
+    let totalMin = 0, countResp = 0;
+    for (const talk of talks.slice(0, 10)) {
+      try {
+        const resMsgs = await kommoClient.request('GET', `/talks/${talk.id}/messages?limit=50`).catch(() => null);
+        const msgs = (resMsgs?._embedded?.messages || [])
+          .slice().sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
+        let firstIn = null, firstOut = null;
+        for (const m of msgs) {
+          const tp = (m.type || '').toLowerCase();
+          const atp = ((m.author || {}).type || '').toLowerCase();
+          const isIn  = tp === 'incoming' || tp === 'inbound'  || atp === 'contact';
+          const isOut = tp === 'outgoing' || tp === 'outbound' || atp === 'user';
+          if (!firstIn && isIn) firstIn = m;
+          if (firstIn && !firstOut && isOut && m.created_at > firstIn.created_at) firstOut = m;
+        }
+        if (firstIn && firstOut) {
+          const diff = Math.round((firstOut.created_at - firstIn.created_at) / 60);
+          if (diff >= 0 && diff < 1440) { totalMin += diff; countResp++; }
+        }
+      } catch (_) {}
+    }
+    const tempo_medio_resposta_min = countResp > 0 ? Math.round(totalMin / countResp) : null;
+
+    res.json({
+      ok: true,
+      total_contatos: contatos.length,
+      duplicatas: {
+        total_grupos: duplicatas.length,
+        total_extras: duplicatas.reduce((s, d) => s + d.contatos.length - 1, 0),
+        grupos: duplicatas.slice(0, 50)
+      },
+      leads_com_mensagem: {
+        '7d':  leadsComMensagem7d,
+        '30d': leadsComMensagem30d,
+        total_novos_7d:  ids7d.size,
+        total_novos_30d: ids30d.size
+      },
+      tempo_medio_resposta_min
+    });
+  } catch (e) {
+    console.error('[kommo/diagnostico]', e.message);
+    res.status(500).json({ ok: false, message: e.message });
+  }
+});
+
+async function obterTodosKommo(kommoClient) {
+  const todos = [];
+  let page = 1;
+  while (true) {
+    const data = await kommoClient.request('GET', `/contacts?limit=250&page=${page}&with=leads`).catch(() => null);
+    const lista = data?._embedded?.contacts || [];
+    todos.push(...lista);
+    if (lista.length < 250 || page >= 20) break;
+    page++;
+  }
+  return todos;
+}
+
+// ── POST /api/admin/kommo/dedup ───────────────────────────────────────────────
+// Mescla contatos duplicados: move leads para o contato principal e exclui os extras
+app.post("/api/admin/kommo/dedup", requireAdmin, async (req, res) => {
+  try {
+    const kommoClient = require('./kommo/client');
+    const contatos = await obterTodosKommo(kommoClient);
+    const mapaFone = {};
+    for (const c of contatos) {
+      const phones = (c.custom_fields_values || [])
+        .find(f => f.field_code === 'PHONE')?.values?.map(v => normalizarTelefoneKommo(v.value)) || [];
+      for (const ph of phones) {
+        if (!ph) continue;
+        if (!mapaFone[ph]) mapaFone[ph] = [];
+        mapaFone[ph].push(c);
+      }
+    }
+    const grupos = Object.values(mapaFone).filter(cs => cs.length > 1);
+
+    let mesclados = 0, erros = 0;
+    const log = [];
+
+    for (const grupo of grupos) {
+      // Principal = quem tem mais leads; empate = criado antes
+      const ordenado = grupo.slice().sort((a, b) => {
+        const la = a._embedded?.leads?.length || 0;
+        const lb = b._embedded?.leads?.length || 0;
+        if (lb !== la) return lb - la;
+        return (a.created_at || 0) - (b.created_at || 0);
+      });
+      const principal = ordenado[0];
+      const extras = ordenado.slice(1);
+
+      for (const dup of extras) {
+        try {
+          // Mover leads do duplicado para o principal
+          const leadsDosDup = dup._embedded?.leads || [];
+          for (const lead of leadsDosDup) {
+            await kommoClient.request('PATCH', `/leads/${lead.id}`, {
+              _embedded: { contacts: [{ id: principal.id, is_main: true }] }
+            }).catch(() => null);
+          }
+          // Excluir contato duplicado (só funciona se ficar vazio)
+          await kommoClient.request('DELETE', `/contacts`, [{ id: dup.id }]).catch(() => null);
+          log.push({ acao: 'mesclado', duplicata_id: dup.id, duplicata_nome: dup.name, principal_id: principal.id, leads_movidos: leadsDosDup.length });
+          mesclados++;
+        } catch (e) {
+          erros++;
+          log.push({ acao: 'erro', duplicata_id: dup.id, erro: e.message });
+        }
+      }
+    }
+
+    res.json({ ok: true, grupos_processados: grupos.length, contatos_mesclados: mesclados, erros, log: log.slice(0, 100) });
+  } catch (e) {
+    console.error('[kommo/dedup]', e.message);
+    res.status(500).json({ ok: false, message: e.message });
+  }
+});
+
 app.get("/api/dashboard", async (req, res) => {
   try {
     const scoped = !canViewAllStores(req.session);

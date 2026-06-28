@@ -361,6 +361,7 @@
           <button class="btn-relatorio hidden" id="btnUsuarios" onclick="carregarUsuarios()">Usuários</button>
           <button class="btn-relatorio hidden" id="btnLixeira" onclick="carregarLixeira()" style="background:#7f1d1d">🗑 Lixeira</button>
           <button class="btn-relatorio secondary hidden" id="btnSyncSistema" onclick="sincronizarSistema()">Sincronizar sistema</button>
+          <button class="btn-relatorio hidden" id="btnKommoDiag" onclick="abrirKommoDiagnostico()" style="background:#6d28d9">Kommo: Diagnóstico</button>
         </div>
       </div>
 
@@ -491,6 +492,19 @@
     </div>
 
     <div class="card hidden" id="cardDiagnostico"><h3>Diagnóstico Admin</h3><button onclick="executarDiagnostico()">Testar backend</button><div style="height:12px"></div><pre id="diagnosticoOut">Aguardando...</pre></div>
+
+    <div class="card hidden" id="cardKommoDiag">
+      <div class="topbar" style="flex-wrap:wrap;gap:10px;">
+        <h3 style="margin:0">Kommo — Diagnóstico &amp; Limpeza</h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button onclick="rodarDiagnosticoKommo()" id="btnKommoDiagRodar">Analisar agora</button>
+          <button class="secondary" onclick="byId('cardKommoDiag').classList.add('hidden')">Fechar</button>
+        </div>
+      </div>
+      <div id="kommoDiagOut" style="margin-top:14px;">
+        <p style="color:#888;font-size:14px;">Clique em <strong>Analisar agora</strong> para verificar duplicatas, leads com mensagem e tempo de resposta no Kommo.</p>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -901,6 +915,7 @@ function aplicarPermissoesTela() {
   if (p.isAdmin) byId('btnUsuarios').classList.remove('hidden');
   if (p.isAdmin) byId('btnLixeira').classList.remove('hidden');
   if (p.isAdmin) byId('cardUsuarios').classList.remove('hidden');
+  if (p.isAdmin) byId('btnKommoDiag').classList.remove('hidden');
   if (p.canCreateAgendamento) byId('cardAgendamento').classList.remove('hidden');
   if (p.canViewFinance) {
     byId('cardFinanceiro').classList.remove('hidden');
@@ -2185,6 +2200,103 @@ function executarDiagnostico() {
   }).catch(function(err) {
     byId('diagnosticoOut').textContent = err.message || String(err);
   });
+}
+
+function abrirKommoDiagnostico() {
+  byId('cardKommoDiag').classList.remove('hidden');
+  byId('cardKommoDiag').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function rodarDiagnosticoKommo() {
+  var out = byId('kommoDiagOut');
+  var btn = byId('btnKommoDiagRodar');
+  out.innerHTML = '<p style="color:#888;font-size:14px;">Analisando Kommo... aguarde (pode levar 20–30 segundos).</p>';
+  if (btn) btn.disabled = true;
+
+  apiGet('/api/admin/kommo/diagnostico').then(function(res) {
+    if (!res || !res.ok) throw new Error(res && res.message ? res.message : 'Erro desconhecido');
+
+    var dup = res.duplicatas || {};
+    var lcm = res.leads_com_mensagem || {};
+    var trMin = res.tempo_medio_resposta_min;
+    var trTxt = trMin != null
+      ? (trMin < 60 ? trMin + ' min' : Math.floor(trMin/60) + 'h ' + (trMin%60) + 'min')
+      : '—';
+
+    var html = '<div style="display:flex;flex-direction:column;gap:16px;">';
+
+    // Bloco 1 — duplicatas
+    html += '<div class="card" style="background:#fef3c7;border:1px solid #f59e0b;padding:14px;border-radius:10px;">';
+    html += '<b style="font-size:15px;">Contatos Duplicados no Kommo</b>';
+    html += '<div class="row-3" style="margin-top:10px;">';
+    html += '<div class="kpi"><div class="label">Total de contatos</div><div class="value">' + (res.total_contatos || 0) + '</div></div>';
+    html += '<div class="kpi"><div class="label">Grupos duplicados</div><div class="value" style="color:#d97706">' + (dup.total_grupos || 0) + '</div></div>';
+    html += '<div class="kpi"><div class="label">Contatos extras</div><div class="value" style="color:#dc2626">' + (dup.total_extras || 0) + '</div></div>';
+    html += '</div>';
+    if (dup.total_grupos > 0) {
+      html += '<div style="margin-top:12px;">';
+      html += '<p style="font-size:13px;color:#92400e;margin-bottom:8px;">Exemplos de duplicatas detectadas:</p>';
+      html += '<table style="width:100%;font-size:12px;border-collapse:collapse;">';
+      html += '<tr style="background:#fde68a"><th style="padding:4px 6px;text-align:left">Telefone</th><th>Nº contatos</th><th>Total leads</th></tr>';
+      (dup.grupos || []).slice(0, 10).forEach(function(g) {
+        var totalLeads = g.contatos.reduce(function(s,c){ return s + (c.leads||0); }, 0);
+        html += '<tr style="border-bottom:1px solid #fcd34d"><td style="padding:4px 6px">' + escapeHtml(g.fone) + '</td>';
+        html += '<td style="text-align:center">' + g.contatos.length + '</td>';
+        html += '<td style="text-align:center">' + totalLeads + '</td></tr>';
+      });
+      html += '</table>';
+      html += '<div style="margin-top:12px;display:flex;gap:8px;">';
+      html += '<button onclick="executarDedupKommo()" id="btnExecutarDedup" style="background:#d97706;color:#fff;">Mesclar duplicatas agora</button>';
+      html += '<span style="font-size:12px;color:#92400e;align-self:center;">Move leads para o contato principal e remove os extras.</span>';
+      html += '</div>';
+    } else {
+      html += '<p style="margin-top:8px;color:#065f46;font-size:13px;">Nenhuma duplicata encontrada.</p>';
+    }
+    html += '</div>';
+
+    // Bloco 2 — leads com mensagem
+    html += '<div class="card" style="background:#ecfdf5;border:1px solid #10b981;padding:14px;border-radius:10px;">';
+    html += '<b style="font-size:15px;">Leads Novos que Enviaram Mensagem</b>';
+    html += '<div class="row-4" style="margin-top:10px;">';
+    html += '<div class="kpi"><div class="label">Novos últimos 7d</div><div class="value">' + (lcm.total_novos_7d || 0) + '</div></div>';
+    html += '<div class="kpi"><div class="label">Com mensagem 7d</div><div class="value" style="color:#059669">' + (lcm['7d'] || 0) + '</div></div>';
+    html += '<div class="kpi"><div class="label">Novos últimos 30d</div><div class="value">' + (lcm.total_novos_30d || 0) + '</div></div>';
+    html += '<div class="kpi"><div class="label">Com mensagem 30d</div><div class="value" style="color:#059669">' + (lcm['30d'] || 0) + '</div></div>';
+    html += '</div></div>';
+
+    // Bloco 3 — tempo de resposta
+    html += '<div class="card" style="background:#eff6ff;border:1px solid #3b82f6;padding:14px;border-radius:10px;">';
+    html += '<b style="font-size:15px;">Tempo Médio de Primeira Resposta</b>';
+    html += '<div style="margin-top:10px;"><div class="kpi" style="max-width:200px;"><div class="label">Média (amostra 10 chats)</div>';
+    html += '<div class="value" style="color:#1d4ed8">' + trTxt + '</div></div></div>';
+    html += '<p style="font-size:12px;color:#93c5fd;margin-top:8px;">Calculado da 1ª mensagem do cliente até a 1ª resposta da equipe.</p>';
+    html += '</div>';
+
+    html += '</div>';
+    out.innerHTML = html;
+  }).catch(function(err) {
+    out.innerHTML = '<p style="color:#dc2626">Erro: ' + escapeHtml(err.message || String(err)) + '</p>';
+  }).finally(function() {
+    if (btn) btn.disabled = false;
+  });
+}
+
+function executarDedupKommo() {
+  var btn = byId('btnExecutarDedup');
+  if (!confirm('Confirma a mesclagem dos contatos duplicados no Kommo?\n\nEssa ação move os leads para o contato principal e remove os duplicados. Não pode ser desfeita.')) return;
+  if (btn) { btn.disabled = true; btn.textContent = 'Mesclando...'; }
+
+  fetch('/api/admin/kommo/dedup', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      if (!res || !res.ok) throw new Error(res && res.message ? res.message : 'Erro');
+      toast('Mesclagem concluída: ' + res.contatos_mesclados + ' contatos removidos, ' + res.erros + ' erros.', 'ok');
+      setTimeout(function() { rodarDiagnosticoKommo(); }, 800);
+    })
+    .catch(function(err) {
+      toast('Erro ao mesclar: ' + (err.message || String(err)), 'err');
+      if (btn) { btn.disabled = false; btn.textContent = 'Mesclar duplicatas agora'; }
+    });
 }
 </script>
 
