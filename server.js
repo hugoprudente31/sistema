@@ -2933,6 +2933,50 @@ app.post("/api/admin/kommo/dedup", requireAdmin, async (req, res) => {
   }
 });
 
+// ── GET /api/admin/kommo/inspect ─────────────────────────────────────────────
+// Inspeciona a configuração real do Kommo: pipelines, estágios, webhooks, leads recentes
+app.get("/api/admin/kommo/inspect", requireAdmin, async (req, res) => {
+  try {
+    const kommoClient = require('./kommo/client');
+    const PIPELINE_TARGET = 9511355;
+
+    const [pipelinesData, webhooksData, leadsData] = await Promise.all([
+      kommoClient.request('GET', '/leads/pipelines?with=statuses').catch(() => null),
+      kommoClient.request('GET', '/webhooks').catch(() => null),
+      kommoClient.request('GET', `/leads?filter[pipeline_id]=${PIPELINE_TARGET}&limit=5&order[id]=desc&with=contacts,tags,notes`).catch(() => null),
+    ]);
+
+    const pipelines = (pipelinesData?._embedded?.pipelines || [])
+      .filter(p => [9907903, 12931092, 12931096, 9511355].includes(p.id))
+      .map(p => ({
+        id: p.id, nome: p.name,
+        estagios: (p._embedded?.statuses || [])
+          .map(s => ({ id: s.id, nome: s.name, sort: s.sort, tipo: s.type }))
+          .sort((a, b) => a.sort - b.sort)
+      }));
+
+    const webhooks = (webhooksData?._embedded?.hooks || []).map(h => ({
+      id: h.id, url: h.destination, eventos: h.settings
+    }));
+
+    const leadsRecentes = (leadsData?._embedded?.leads || []).map(l => ({
+      id: l.id,
+      nome: l.name,
+      status_id: l.status_id,
+      pipeline_id: l.pipeline_id,
+      tags: (l._embedded?.tags || []).map(t => t.name),
+      ultima_nota: (l._embedded?.notes || [])
+        .filter(n => n.note_type === 'service_message')
+        .sort((a, b) => b.id - a.id)[0]?.params?.text?.slice(0, 200) || null
+    }));
+
+    res.json({ ok: true, pipelines, webhooks, leads_recentes_target: leadsRecentes });
+  } catch (e) {
+    console.error('[kommo/inspect]', e.message);
+    res.status(500).json({ ok: false, message: e.message });
+  }
+});
+
 // ── GET /api/admin/kommo/pipelines ────────────────────────────────────────────
 // Retorna todos os pipelines do Kommo com seus estágios atuais
 app.get("/api/admin/kommo/pipelines", requireAdmin, async (req, res) => {
