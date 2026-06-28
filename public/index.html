@@ -331,6 +331,11 @@
         <div class="kpi"><div class="label">OS 15 dias</div><div class="value" id="kOs15">0 / 0</div></div>
         <div class="kpi"><div class="label">OS 30 dias</div><div class="value" id="kOs30">0 / 0</div></div>
       </div>
+      <div class="row-3 hidden" id="dashboardKommo" style="margin-top:14px;">
+        <div class="kpi"><div class="label">Leads Hoje (Kommo)</div><div class="value" id="kLeadsHoje">—</div></div>
+        <div class="kpi"><div class="label">Leads 7 Dias (Kommo)</div><div class="value" id="kLeads7d">—</div></div>
+        <div class="kpi"><div class="label">Tempo Médio Resposta</div><div class="value" id="kTempoResposta">—</div></div>
+      </div>
     </div>
 
     <div class="card hidden" id="cardAgendamento">
@@ -640,7 +645,8 @@ function mapAgendamentoDb(r) {
     UltimaAlteracaoPorNome: r.ultima_alteracao_por_nome || '',
     UltimaAlteracaoEm: r.ultima_alteracao_em || r.atualizado_em || '',
     AtendimentoSemaforo: semaforo,
-    AtendimentoSemaforoLabel: semaforoLabel
+    AtendimentoSemaforoLabel: semaforoLabel,
+    GasId: r.gas_id || ''
   };
 }
 
@@ -670,6 +676,33 @@ function getDashboardPostgres() {
   });
 }
 
+function getDashboardKommo() {
+  return apiGet('/api/dashboard/kommo').then(function(res) {
+    return (res && res.kommo) ? res.kommo : null;
+  }).catch(function() { return null; });
+}
+
+function preencherDashboardKommo(kommo) {
+  var roles = ['admin', 'atendimento central'];
+  if (roles.indexOf(roleName()) === -1) return;
+  var el = byId('dashboardKommo');
+  if (el) el.classList.remove('hidden');
+  if (!kommo) return;
+  var elHoje = byId('kLeadsHoje');
+  var el7d   = byId('kLeads7d');
+  var elResp = byId('kTempoResposta');
+  if (elHoje) elHoje.textContent = kommo.leads_hoje != null ? String(kommo.leads_hoje) : '—';
+  if (el7d)   el7d.textContent   = kommo.leads_7d   != null ? String(kommo.leads_7d)   : '—';
+  if (elResp) {
+    if (kommo.tempo_medio_resposta_min != null) {
+      var min = Number(kommo.tempo_medio_resposta_min);
+      elResp.textContent = min < 60 ? min + 'min' : Math.floor(min / 60) + 'h ' + (min % 60) + 'min';
+    } else {
+      elResp.textContent = '—';
+    }
+  }
+}
+
 function aplicarFiltrosInteligentes(rows) {
   rows = Array.isArray(rows) ? rows : [];
   if (!window.TGTFilterEngine) return rows;
@@ -693,6 +726,16 @@ function dashboardFiltrado(rows) {
 function buildDashboardLocal(rows, db) {
   rows = Array.isArray(rows) ? rows : [];
   db = db || {};
+
+  // Deduplicar por GasId — evita contagem dupla de registros sincronizados
+  var seenGasId = {};
+  rows = rows.filter(function(r) {
+    var gid = r.GasId;
+    if (!gid) return true;
+    if (seenGasId[gid]) return false;
+    seenGasId[gid] = true;
+    return true;
+  });
 
   var agendados = 0, compareceram = 0, naoCompareceram = 0, concluidos = 0, osAtivas = 0, atrasadas = 0;
   var origemCount = {};
@@ -1011,6 +1054,8 @@ function carregarAgendaEDashboard() {
     renderAgenda(state.agendamentos);
     preencherDashboard();
     atualizarResumoFiltros(state.agendamentos.length, state.agendamentosTodos.length);
+    // Carrega KPIs do Kommo de forma não-bloqueante
+    getDashboardKommo().then(function(kommo) { preencherDashboardKommo(kommo); });
   }).catch(function(err) {
     byId('agendaBody').innerHTML = '<tr><td colspan="18">Erro ao carregar agendamentos.</td></tr>';
     setMsg('msgForm', 'Erro ao carregar agenda: ' + (err.message || err), 'err');

@@ -2525,6 +2525,60 @@ app.get("/api/historico-agendamentos", async (req, res) => {
 });
 
 
+app.get("/api/dashboard/kommo", requireSession, async (req, res) => {
+  if (!canViewAllStores(req.session)) {
+    return res.json({ ok: true, kommo: { leads_hoje: 0, leads_7d: 0, tempo_medio_resposta_min: null } });
+  }
+  try {
+    const kommoClient = require('./kommo/client');
+    const agora = Math.floor(Date.now() / 1000);
+    const meiaNoit = new Date(); meiaNoit.setHours(0, 0, 0, 0);
+    const inicioHoje = Math.floor(meiaNoit.getTime() / 1000);
+    const inicio7d = agora - 7 * 86400;
+
+    const [resHoje, res7d, resTalks] = await Promise.all([
+      kommoClient.request('GET', `/leads?filter[created_at][from]=${inicioHoje}&filter[created_at][to]=${agora}&limit=500`).catch(() => null),
+      kommoClient.request('GET', `/leads?filter[created_at][from]=${inicio7d}&filter[created_at][to]=${agora}&limit=500`).catch(() => null),
+      kommoClient.request('GET', `/talks?limit=15&order[id]=desc`).catch(() => null)
+    ]);
+
+    const leads_hoje = resHoje?._total_items ?? (resHoje?._embedded?.leads?.length ?? 0);
+    const leads_7d   = res7d?._total_items  ?? (res7d?._embedded?.leads?.length  ?? 0);
+
+    let tempo_medio_resposta_min = null;
+    const talks = resTalks?._embedded?.talks || [];
+    if (talks.length > 0) {
+      let totalMin = 0, count = 0;
+      for (const talk of talks.slice(0, 8)) {
+        try {
+          const resMsgs = await kommoClient.request('GET', `/talks/${talk.id}/messages?limit=50`).catch(() => null);
+          const msgs = (resMsgs?._embedded?.messages || [])
+            .slice().sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
+          let firstIn = null, firstOut = null;
+          for (const m of msgs) {
+            const tp = (m.type || '').toLowerCase();
+            const authorType = ((m.author || {}).type || '').toLowerCase();
+            const isIn  = tp === 'incoming' || tp === 'inbound'  || authorType === 'contact';
+            const isOut = tp === 'outgoing' || tp === 'outbound' || authorType === 'user';
+            if (!firstIn && isIn) firstIn = m;
+            if (firstIn && !firstOut && isOut && m.created_at > firstIn.created_at) firstOut = m;
+          }
+          if (firstIn && firstOut) {
+            const diff = Math.round((firstOut.created_at - firstIn.created_at) / 60);
+            if (diff >= 0 && diff < 1440) { totalMin += diff; count++; }
+          }
+        } catch (_) { /* pula esta talk */ }
+      }
+      if (count > 0) tempo_medio_resposta_min = Math.round(totalMin / count);
+    }
+
+    res.json({ ok: true, kommo: { leads_hoje, leads_7d, tempo_medio_resposta_min } });
+  } catch (e) {
+    console.error('[dashboard/kommo]', e.message);
+    res.json({ ok: true, kommo: null, warning: e.message });
+  }
+});
+
 app.get("/api/dashboard", async (req, res) => {
   try {
     const scoped = !canViewAllStores(req.session);
@@ -2537,7 +2591,7 @@ app.get("/api/dashboard", async (req, res) => {
     const params = scoped ? [req.session.loja] : [];
     const clientes = await pool.query(
       `SELECT COUNT(*)::int AS total FROM clientes
-       WHERE nome NOT ILIKE '%teste%'
+       WHERE nome NOT ILIKE '%teste%' AND excluido_em IS NULL
        ${scoped ? `AND ${storeSql("loja_origem")}` : ""}`,
       params
     );
@@ -2548,7 +2602,7 @@ app.get("/api/dashboard", async (req, res) => {
         COALESCE(SUM(valor_venda),0)::numeric AS faturamento_total,
         COALESCE(SUM(desconto),0)::numeric AS desconto_total
       FROM agendamentos
-      WHERE nome NOT ILIKE '%teste%' AND COALESCE(loja,'') NOT ILIKE '%teste%'
+      WHERE nome NOT ILIKE '%teste%' AND COALESCE(loja,'') NOT ILIKE '%teste%' AND excluido_em IS NULL
       ${scoped ? `AND ${storeSql("loja")}` : ""}
     `, params);
     const showFinance = canViewFinanceSession(req.session);
