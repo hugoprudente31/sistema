@@ -16,19 +16,20 @@ function defaultState(leadId) {
     lead_id:           String(leadId),
     nome:              null,
     loja:              null,
-    talk_id:           null,   // ID numérico da conversa Kommo
-    chat_id:           null,   // UUID do canal de chat (para envio de mensagens)
+    loja_prefix:       null,
+    talk_id:           null,
+    chat_id:           null,
     etapa:             "boas_vindas",
     sub_etapa:         null,
-    aguardando:        null,   // campo que o bot está esperando o lead responder
-    invalid_count:     0,      // respostas fora do menu esperado
+    aguardando:        null,
+    invalid_count:     0,
     dados_agendamento: {
       loja:    null,
       data:    null,
       horario: null,
     },
-    last_human_at:  null,      // timestamp da última mensagem de humano (atendente)
-    last_client_at: null,      // timestamp da última mensagem do cliente
+    last_human_at:  null,
+    last_client_at: null,
     bot_active:     false,
     updated_at:     Date.now(),
   };
@@ -74,16 +75,17 @@ function setState(leadId, updates, { persist = false } = {}) {
 // ── Persistência no Kommo ────────────────────────────────────────
 
 async function persistToKommo(leadId, state) {
-  // Salva apenas campos essenciais para recuperação (não timestamps voláteis)
   const toSave = {
     lead_id:           state.lead_id,
     nome:              state.nome,
     loja:              state.loja,
+    loja_prefix:       state.loja_prefix,
     talk_id:           state.talk_id,
     etapa:             state.etapa,
     sub_etapa:         state.sub_etapa,
     aguardando:        state.aguardando,
     dados_agendamento: state.dados_agendamento,
+    bot_active:        state.bot_active,
     updated_at:        state.updated_at,
   };
   const text = `${STATE_NOTE_PREFIX} ${JSON.stringify(toSave)}`;

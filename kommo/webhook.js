@@ -5,6 +5,7 @@ const express     = require("express");
 const router      = express.Router();
 const kommo       = require("./client");
 const scheduling  = require("./scheduling");
+const SM          = require("./bot/stateManager");
 const { processMessage, processNewLead } = require("./bot/flowEngine");
 
 function safeEqual(value, expected) {
@@ -80,13 +81,20 @@ router.post("/webhook/kommo", requireWebhookSecret, async (req, res) => {
 
     // ── Evento: nova mensagem no inbox ─────────────────────────
     if (payload?.message?.add) {
-      // No modo Salesbot o Kommo mesmo chama /api/salesbot — não reprocessamos aqui
+      const entry = extractMessageEntry(payload);
+
+      // No modo Salesbot, o Kommo chama /api/salesbot para mensagens do cliente.
+      // Mas ainda precisamos rastrear mensagens de ATENDENTES para o handoff bot↔humano.
       if (process.env.KOMMO_USE_SALESBOT === "true") {
-        console.log("[Webhook/Kommo] Modo Salesbot — message.add ignorado (Salesbot processa)");
+        if (entry?.leadId && entry.authorType === "user") {
+          SM.markHumanActivity(String(entry.leadId));
+          console.log(`[Webhook/Kommo] 👤 Atendente registrado — lead ${entry.leadId}`);
+        } else {
+          console.log("[Webhook/Kommo] Modo Salesbot — message.add do cliente ignorado (Salesbot processa)");
+        }
         return;
       }
 
-      const entry = extractMessageEntry(payload);
       if (!entry?.leadId) {
         console.log("[Webhook/Kommo] message.add sem lead_id — ignorando");
         return;

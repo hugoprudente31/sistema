@@ -405,8 +405,21 @@ async function processMessage({ leadId, talkId, chatId, text, authorType, loja, 
   await ensureStoreState(leadId, state, { loja, pipeline_id, pipelineId });
 
   if (!SM.shouldBotActivate(state)) return;
-  if (!state.bot_active) {
+
+  // Só ativa o bot (e troca a label) se o lead não está em controle humano
+  const emTransferencia = state.etapa === "transferido";
+  if (!state.bot_active && !emTransferencia) {
     SM.setState(leadId, { bot_active: true });
+    await labels.setBotControl(leadId).catch(() => {});
+  }
+
+  // Após transferência, verifica timeout de retomada pelo bot
+  if (emTransferencia) {
+    if (!SM.shouldBotResume(state)) return;
+    // Humano ficou inativo por tempo suficiente — bot retoma do menu principal
+    SM.setState(leadId, { etapa: "menu_principal", bot_active: true }, { persist: true });
+    state.etapa = "menu_principal";
+    state.bot_active = true;
     await labels.setBotControl(leadId).catch(() => {});
   }
 
