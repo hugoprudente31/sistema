@@ -14,6 +14,26 @@ const PIPELINE_TO_PREFIX = {
   "12931096": "pit",
 };
 
+const PREFIX_TO_PIPELINE = {
+  tgt: "9511355",
+  gon: "9907903",
+  ens: "12931092",
+  pit: "12931096",
+};
+
+// Mapa de estágios por pipeline. Populado via env var KOMMO_STAGES_MAP (JSON).
+// Fallback individual: KOMMO_STAGE_BOT_ATIVO, KOMMO_STAGE_ATENDENTE, etc.
+let _stagesMap = null;
+function getStagesMap() {
+  if (_stagesMap) return _stagesMap;
+  try {
+    _stagesMap = JSON.parse(process.env.KOMMO_STAGES_MAP || "{}");
+  } catch {
+    _stagesMap = {};
+  }
+  return _stagesMap;
+}
+
 const STORE_ALIASES = {
   gon: ["gon", "gonzaga", "santos", "gonzaga & santos"],
   ens: ["ens", "enseada"],
@@ -95,11 +115,16 @@ async function send(_talkId, leadId, text) {
   }
 }
 
-async function moveStage(leadId, envKey) {
-  const stageId = process.env[envKey];
+async function moveStage(leadId, stageKey, lojaPrefix) {
+  // Prioridade 1: mapa por pipeline (via KOMMO_STAGES_MAP)
+  const pipelineId = PREFIX_TO_PIPELINE[lojaPrefix || ""] || "";
+  const mapEntry = getStagesMap()[pipelineId] || {};
+  const stageId = mapEntry[stageKey]
+    // Prioridade 2: env var individual (retrocompatibilidade)
+    || process.env[`KOMMO_STAGE_${stageKey.toUpperCase()}`];
   if (!stageId) return;
   await kommo.moveToStage(leadId, stageId).catch((e) =>
-    console.error(`[BOT][${leadId}] Erro ao mover estágio (${envKey}):`, e.message)
+    console.error(`[BOT][${leadId}] Erro ao mover estágio (${stageKey}):`, e.message)
   );
 }
 
@@ -158,7 +183,7 @@ async function transferToHuman(leadId, state, talkId, motivo = "solicitação do
   await kommo.addNote(leadId, `${MSG.notaParaAtendente(state)}\nMotivo: ${motivo}`);
   await labels.setHumanControl(leadId);
   await labels.applyLabel(leadId, labels.LABELS.ATENDIMENTO_HUMANO);
-  await moveStage(leadId, "KOMMO_STAGE_ATENDENTE");
+  await moveStage(leadId, "atendente", loja.prefix);
   SM.setState(leadId, { etapa: "transferido", bot_active: false }, { persist: true });
 }
 
@@ -187,7 +212,7 @@ async function handleBoasVindas(leadId, state, talkId, context) {
   await addFlowLabel(leadId, loja.prefix, "novo-lead");
   await addFlowLabel(leadId, loja.prefix, "menu-enviado");
   await applyFlowLabel(leadId, loja.prefix, "principal", "aguardando-escolha");
-  await moveStage(leadId, "KOMMO_STAGE_BOT_ATIVO");
+  await moveStage(leadId, "bot_ativo", loja.prefix);
   await send(talkId, leadId, MSG.boasVindas(nome, loja));
 }
 
@@ -202,7 +227,7 @@ async function handleMenuPrincipal(leadId, state, text, talkId) {
     await addFlowLabel(leadId, loja.prefix, "info-novo");
     await addFlowLabel(leadId, loja.prefix, "info-submenu");
     await applyFlowLabel(leadId, loja.prefix, "info", "info-aguardando");
-    await moveStage(leadId, "KOMMO_STAGE_INFORMACOES");
+    await moveStage(leadId, "informacoes", loja.prefix);
     await send(talkId, leadId, MSG.infoMenu());
     return;
   }
@@ -213,7 +238,7 @@ async function handleMenuPrincipal(leadId, state, text, talkId) {
     await addFlowLabel(leadId, loja.prefix, "tv-novo");
     await addFlowLabel(leadId, loja.prefix, "tv-link-enviado");
     await applyFlowLabel(leadId, loja.prefix, "tv", "tv-aguardando-confirm");
-    await moveStage(leadId, "KOMMO_STAGE_AGENDAMENTO");
+    await moveStage(leadId, "agendamento", loja.prefix);
     await send(talkId, leadId, MSG.testeVisao(loja));
     return;
   }
@@ -223,7 +248,7 @@ async function handleMenuPrincipal(leadId, state, text, talkId) {
     await applyFlowLabel(leadId, loja.prefix, "principal", "redirecionado");
     await addFlowLabel(leadId, loja.prefix, "orc-novo");
     await applyFlowLabel(leadId, loja.prefix, "orc", "orc-aguardando-receita");
-    await moveStage(leadId, "KOMMO_STAGE_ORCAMENTO");
+    await moveStage(leadId, "orcamento", loja.prefix);
     await send(talkId, leadId, MSG.orcamento());
     return;
   }
@@ -315,7 +340,7 @@ async function handleTesteVisao(leadId, state, text, talkId) {
     SM.setState(leadId, { etapa: "tv_agendado" }, { persist: true });
     await applyFlowLabel(leadId, loja.prefix, "tv", "tv-agendado");
     await labels.applyTrafficLight(leadId, "Agendado");
-    await moveStage(leadId, "KOMMO_STAGE_AGENDADO");
+    await moveStage(leadId, "agendado", loja.prefix);
     await kommo.addNote(leadId, `Teste de Visão confirmado via SalesBot - ${loja.nome}`);
     await send(talkId, leadId, MSG.testeConfirmado(loja));
     return;

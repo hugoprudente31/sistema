@@ -2933,6 +2933,111 @@ app.post("/api/admin/kommo/dedup", requireAdmin, async (req, res) => {
   }
 });
 
+// ── GET /api/admin/kommo/pipelines ────────────────────────────────────────────
+// Retorna todos os pipelines do Kommo com seus estágios atuais
+app.get("/api/admin/kommo/pipelines", requireAdmin, async (req, res) => {
+  try {
+    const kommoClient = require('./kommo/client');
+    const data = await kommoClient.request('GET', '/leads/pipelines?with=statuses');
+    const pipelines = data?._embedded?.pipelines || [];
+
+    const PIPELINE_IDS = [9907903, 12931092, 12931096, 9511355];
+    const resultado = pipelines
+      .filter(p => PIPELINE_IDS.includes(p.id))
+      .map(p => ({
+        id: p.id,
+        nome: p.name,
+        estagios: (p._embedded?.statuses || [])
+          .filter(s => s.type !== 'win' && s.type !== 'lose')
+          .map(s => ({ id: s.id, nome: s.name, sort: s.sort, cor: s.color }))
+          .sort((a, b) => a.sort - b.sort)
+      }));
+
+    res.json({ ok: true, pipelines: resultado });
+  } catch (e) {
+    console.error('[kommo/pipelines]', e.message);
+    res.status(500).json({ ok: false, message: e.message });
+  }
+});
+
+// ── POST /api/admin/kommo/setup-stages ───────────────────────────────────────
+// Cria os estágios padrão do bot em todos os 4 pipelines e retorna o mapa de IDs
+app.post("/api/admin/kommo/setup-stages", requireAdmin, async (req, res) => {
+  try {
+    const kommoClient = require('./kommo/client');
+
+    const PIPELINES = {
+      9907903:  'Gonzaga',
+      12931092: 'Enseada',
+      12931096: 'Pitangueiras',
+      9511355:  'Ademar'
+    };
+
+    const ESTAGIOS_PADRAO = [
+      { key: 'bot_ativo',    nome: '🤖 Bot Ativo',    sort: 10, cor: '#66BEB3' },
+      { key: 'informacoes',  nome: 'ℹ️ Informações',  sort: 20, cor: '#FFCC33' },
+      { key: 'agendamento',  nome: '📅 Agendamento',  sort: 30, cor: '#FF7E07' },
+      { key: 'orcamento',    nome: '💰 Orçamento',    sort: 40, cor: '#4EB7ED' },
+      { key: 'atendente',    nome: '👥 Atendente',    sort: 50, cor: '#9166FF' },
+      { key: 'agendado',     nome: '✅ Agendado',     sort: 60, cor: '#FDCA55' },
+      { key: 'recuperacao',  nome: '📞 Recuperação',  sort: 70, cor: '#832EB5' },
+    ];
+
+    const stagesMap = {};
+    const log = [];
+
+    for (const [pipelineId, nomeLoja] of Object.entries(PIPELINES)) {
+      stagesMap[pipelineId] = {};
+
+      // Busca estágios existentes
+      let existentes = [];
+      try {
+        const d = await kommoClient.request('GET', `/leads/pipelines/${pipelineId}/statuses`);
+        existentes = d?._embedded?.statuses || [];
+      } catch (e) {
+        log.push({ loja: nomeLoja, erro: `Não conseguiu buscar estágios: ${e.message}` });
+        continue;
+      }
+
+      for (const estagio of ESTAGIOS_PADRAO) {
+        // Verifica se já existe pelo nome
+        const existente = existentes.find(s => s.name === estagio.nome);
+        if (existente) {
+          stagesMap[pipelineId][estagio.key] = existente.id;
+          log.push({ loja: nomeLoja, estagio: estagio.key, acao: 'existente', id: existente.id });
+          continue;
+        }
+
+        // Cria o estágio
+        try {
+          const criado = await kommoClient.request('POST', `/leads/pipelines/${pipelineId}/statuses`, [{
+            name: estagio.nome,
+            sort: estagio.sort,
+            color: estagio.cor
+          }]);
+          const novo = criado?._embedded?.statuses?.[0];
+          if (novo?.id) {
+            stagesMap[pipelineId][estagio.key] = novo.id;
+            log.push({ loja: nomeLoja, estagio: estagio.key, acao: 'criado', id: novo.id });
+          }
+        } catch (e) {
+          log.push({ loja: nomeLoja, estagio: estagio.key, acao: 'erro', erro: e.message });
+        }
+
+        await new Promise(r => setTimeout(r, 300));
+      }
+    }
+
+    // Gera o env var KOMMO_STAGES_MAP pronto para copiar
+    const envVar = `KOMMO_STAGES_MAP=${JSON.stringify(stagesMap)}`;
+
+    res.json({ ok: true, stages_map: stagesMap, env_var: envVar, log });
+  } catch (e) {
+    console.error('[kommo/setup-stages]', e.message);
+    res.status(500).json({ ok: false, message: e.message });
+  }
+});
+
 app.get("/api/dashboard", async (req, res) => {
   try {
     const scoped = !canViewAllStores(req.session);
