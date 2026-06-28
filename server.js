@@ -1935,6 +1935,8 @@ app.post("/api/agendamentos", async (req, res) => {
         session: req.session
       });
       await client.query("COMMIT");
+      // Sync não-bloqueante para o Kommo
+      setImmediate(() => sincronizarAgendamentoKommo(result.rows[0]));
       res.json({ ok: true, message: "Agendamento salvo no PostgreSQL.", agendamento: result.rows[0] });
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
@@ -2181,6 +2183,31 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
       } catch (nErr) {
         console.error('[notif-visita]', nErr.message);
       }
+    });
+
+    // Nota no Kommo sobre mudanças relevantes
+    setImmediate(async () => {
+      try {
+        const before = current.rows[0];
+        const after  = result.rows[0];
+        const leadId = after.kommo_lead_id;
+
+        // Se não tem lead vinculado e tem WhatsApp, tenta vincular agora
+        if (!leadId && after.whatsapp) { await sincronizarAgendamentoKommo(after); return; }
+        if (!leadId) return;
+
+        const mudancas = [];
+        if (before.status !== after.status) mudancas.push(`Status: ${before.status || '—'} → ${after.status || '—'}`);
+        const nc2 = v => String(v||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim();
+        if (nc2(before.compareceu) !== nc2(after.compareceu)) mudancas.push(`Compareceu: ${before.compareceu || '—'} → ${after.compareceu || '—'}`);
+        if (!before.numero_os && after.numero_os) mudancas.push(`OS aberta: ${after.numero_os}`);
+        if (before.status_os !== after.status_os && after.status_os) mudancas.push(`Status OS: ${after.status_os}`);
+        if (before.data_agendamento !== after.data_agendamento || before.horario !== after.horario)
+          mudancas.push(`Reagendado: ${dtBR(after.data_agendamento)} às ${after.horario || ''}`);
+
+        if (!mudancas.length) return;
+        await adicionarNotaKommo(leadId, `📋 Atualização — ${after.nome || ''}:\n` + mudancas.map(m => `• ${m}`).join('\n'));
+      } catch (_) {}
     });
 
     res.json({ ok: true, agendamento: result.rows[0] });
@@ -2955,6 +2982,118 @@ app.get("/", (req, res) => {
 });
 
 negociacaoRoutes.registerRoutes(app, pool, { requireSession, canViewAllStores });
+
+// ── Sincronização Sistema → Kommo ─────────────────────────────────────────────
+const PIPELINE_POR_LOJA = {
+  gonzaga:     9907903,
+  enseada:     12931092,
+  pitangueiras:12931096,
+  ademar:      9511355
+};
+
+function resolverPipelineId(lojaStr) {
+  if (!lojaStr) return null;
+  const l = lojaStr.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  if (l.includes('gonzaga') || l.includes('santos')) return PIPELINE_POR_LOJA.gonzaga;
+  if (l.includes('enseada'))                          return PIPELINE_POR_LOJA.enseada;
+  if (l.includes('pitangueiras'))                     return PIPELINE_POR_LOJA.pitangueiras;
+  if (l.includes('ademar') || l.includes('adhemar')) return PIPELINE_POR_LOJA.ademar;
+  return null;
+}
+
+async function sincronizarAgendamentoKommo(ag) {
+  try {
+    const kommoClient = require('./kommo/client');
+    if (!ag.whatsapp) return null;
+
+    // 1. Buscar contato existente pelo WhatsApp
+    let contact = await kommoClient.findContact(ag.whatsapp).catch(() => null);
+
+    // 2. Se não existe, criar
+    if (!contact?.id) {
+      contact = await kommoClient.createContact({
+        nome: ag.nome,
+        whatsapp: ag.whatsapp,
+        email: ag.email || ''
+      }).catch(() => null);
+    }
+    if (!contact?.id) return null;
+
+    // 3. Verificar se já tem lead ativo para não duplicar
+    const contDetalhado = await kommoClient.request('GET', `/contacts/${contact.id}?with=leads`).catch(() => null);
+    const leadsExistentes = contDetalhado?._embedded?.leads || [];
+
+    let leadId = leadsExistentes.length > 0
+      ? leadsExistentes[leadsExistentes.length - 1]?.id
+      : null;
+
+    // 4. Só cria lead novo se não havia nenhum
+    if (!leadId) {
+      const pipelineId = resolverPipelineId(ag.loja);
+      const body = [{ name: `Agendamento — ${ag.nome}`, _embedded: { contacts: [{ id: contact.id }] }, ...(pipelineId ? { pipeline_id: pipelineId } : {}) }];
+      const leadData = await kommoClient.request('POST', '/leads', body).catch(() => null);
+      leadId = leadData?._embedded?.leads?.[0]?.id;
+    }
+
+    if (!leadId) return null;
+
+    // 5. Nota com detalhes do agendamento
+    const nota = [
+      `📅 Agendamento registrado no sistema Óticas TGT:`,
+      `• Cliente: ${ag.nome || ''}`,
+      `• Data: ${dtBR(ag.data_agendamento)} às ${ag.horario || ''}`,
+      `• Loja: ${ag.loja || ''}`,
+      ag.optometrista ? `• Optometrista: ${ag.optometrista}` : '',
+      `• Origem: ${ag.origem || 'Sistema'}`,
+      ag.agendado_por_nome ? `• Agendado por: ${ag.agendado_por_nome}` : ''
+    ].filter(Boolean).join('\n');
+    await kommoClient.addNote(leadId, nota).catch(() => null);
+
+    // 6. Gravar kommo_lead_id no agendamento
+    await pool.query(`UPDATE agendamentos SET kommo_lead_id = $1 WHERE id = $2 AND (kommo_lead_id IS NULL OR kommo_lead_id = '')`,
+      [String(leadId), ag.id]);
+
+    console.log(`[kommo-sync] ✅ ag.id=${ag.id} → lead=${leadId} (contato=${contact.id})`);
+    return leadId;
+  } catch (e) {
+    console.error(`[kommo-sync] ❌ ag.id=${ag && ag.id}:`, e.message);
+    return null;
+  }
+}
+
+async function adicionarNotaKommo(leadId, texto) {
+  if (!leadId) return;
+  try {
+    const kommoClient = require('./kommo/client');
+    await kommoClient.addNote(String(leadId), texto);
+  } catch (e) {
+    console.error('[kommo-nota]', e.message);
+  }
+}
+
+// Sync retroativo: vincula agendamentos existentes sem kommo_lead_id ao Kommo
+app.post('/api/admin/sync/agendamentos-para-kommo', requireAdmin, async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT id, nome, whatsapp, email, loja, optometrista, origem, data_agendamento, horario, agendado_por_nome
+      FROM agendamentos
+      WHERE (kommo_lead_id IS NULL OR kommo_lead_id = '')
+        AND whatsapp IS NOT NULL AND whatsapp <> ''
+        AND excluido_em IS NULL
+      ORDER BY id DESC
+      LIMIT 200
+    `);
+    let vinculados = 0, erros = 0;
+    for (const ag of rows) {
+      const leadId = await sincronizarAgendamentoKommo(ag);
+      if (leadId) vinculados++; else erros++;
+      await new Promise(r => setTimeout(r, 500)); // respeitar rate limit Kommo
+    }
+    res.json({ ok: true, total: rows.length, vinculados, erros });
+  } catch (e) {
+    res.status(500).json({ ok: false, message: e.message });
+  }
+});
 
 // ── Lembretes automáticos 24h antes do agendamento ───────────────────────────
 const LOJAS_INFO = {

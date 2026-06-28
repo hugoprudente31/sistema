@@ -362,6 +362,7 @@
           <button class="btn-relatorio hidden" id="btnLixeira" onclick="carregarLixeira()" style="background:#7f1d1d">🗑 Lixeira</button>
           <button class="btn-relatorio secondary hidden" id="btnSyncSistema" onclick="sincronizarSistema()">Sincronizar sistema</button>
           <button class="btn-relatorio hidden" id="btnKommoDiag" onclick="abrirKommoDiagnostico()" style="background:#6d28d9">Kommo: Diagnóstico</button>
+          <button class="btn-relatorio hidden" id="btnSyncKommo" onclick="syncRetroativoKommo()" style="background:#b45309">Sincronizar → Kommo</button>
           <button class="btn-relatorio hidden" id="btnGerarNotifRetro" onclick="gerarNotificacoesRetroativas()" style="background:#0369a1">Notificações retroativas</button>
           <button class="btn-relatorio hidden" id="btnDispararLembretes" onclick="dispararLembretes24h()" style="background:#047857">Disparar lembretes 24h</button>
         </div>
@@ -920,6 +921,7 @@ function aplicarPermissoesTela() {
   if (p.isAdmin) byId('btnKommoDiag').classList.remove('hidden');
   if (p.isAdmin) byId('btnGerarNotifRetro').classList.remove('hidden');
   if (p.isAdmin) byId('btnDispararLembretes').classList.remove('hidden');
+  if (p.isAdmin) byId('btnSyncKommo').classList.remove('hidden');
   if (p.canCreateAgendamento) byId('cardAgendamento').classList.remove('hidden');
   if (p.canViewFinance) {
     byId('cardFinanceiro').classList.remove('hidden');
@@ -2283,6 +2285,20 @@ function rodarDiagnosticoKommo() {
   }).finally(function() {
     if (btn) btn.disabled = false;
   });
+}
+
+function syncRetroativoKommo() {
+  var btn = byId('btnSyncKommo');
+  if (!confirm('Vincular os últimos 200 agendamentos (sem kommo_lead_id) ao Kommo?\n\nO sistema vai buscar o contato pelo WhatsApp — se já existir no Kommo, adiciona nota; se não, cria lead novo.\n\nPode levar 2-3 minutos.')) return;
+  if (btn) { btn.disabled = true; btn.textContent = 'Sincronizando...'; }
+  fetch('/api/admin/sync/agendamentos-para-kommo', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      if (!res || !res.ok) throw new Error(res && res.message ? res.message : 'Erro');
+      toast('Sync concluído: ' + res.vinculados + ' vinculados de ' + res.total + ' (' + res.erros + ' erros).', 'ok');
+    })
+    .catch(function(err) { toast('Erro: ' + (err.message || String(err)), 'err'); })
+    .finally(function() { if (btn) { btn.disabled = false; btn.textContent = 'Sincronizar → Kommo'; } });
 }
 
 function dispararLembretes24h() {
