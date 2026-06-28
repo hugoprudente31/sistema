@@ -388,6 +388,12 @@ function horarioValidoPorRegra(data, horario) {
     return { ok: false, message: "Horário de almoço não disponível. Escolha um horário fora do intervalo 13:00–13:30." };
   }
 
+  // Datas com encerramento antecipado — todas as lojas
+  const ENCERRAMENTO_ANTECIPADO = { "2026-06-29": 12 * 60 + 30 };
+  if (ENCERRAMENTO_ANTECIPADO[dt] !== undefined && minutos > ENCERRAMENTO_ANTECIPADO[dt]) {
+    return { ok: false, message: "Neste dia o atendimento encerra às 13:00. Escolha um horário até 12:30." };
+  }
+
   return { ok: true };
 }
 
@@ -409,6 +415,16 @@ function gerarHorariosBase(data) {
     const mm = String(m % 60).padStart(2, "0");
     const h = `${hh}:${mm}`;
     if (h !== "13:00" && h !== "13:30") horarios.push(h);
+  }
+
+  // Encerramento antecipado em datas especiais — todas as lojas
+  const ENCERRAMENTO_ANTECIPADO = { "2026-06-29": 12 * 60 + 30 }; // último slot: 12:30
+  if (ENCERRAMENTO_ANTECIPADO[dt] !== undefined) {
+    const corte = ENCERRAMENTO_ANTECIPADO[dt];
+    return horarios.filter(h => {
+      const [hh2, mm2] = h.split(":").map(Number);
+      return hh2 * 60 + mm2 <= corte;
+    });
   }
 
   return horarios;
