@@ -2,11 +2,17 @@
 
 const crypto      = require("crypto");
 const express     = require("express");
+const { Pool }    = require("pg");
 const router      = express.Router();
 const kommo       = require("./client");
 const scheduling  = require("./scheduling");
 const SM          = require("./bot/stateManager");
 const { processMessage, processNewLead } = require("./bot/flowEngine");
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_SSL === "false" ? false : { rejectUnauthorized: false },
+});
 
 function safeEqual(value, expected) {
   const a = Buffer.from(String(value || ""));
@@ -48,11 +54,9 @@ function getCampo(campos = [], code) {
 // ── Extrai entrada de mensagem do payload do Kommo ───────────────
 // O Kommo pode enviar o evento em formatos ligeiramente diferentes
 function extractMessageEntry(payload) {
-  // Formato 1: payload.message.add[0]
   const msg = payload?.message?.add?.[0] || payload?.message?.[0];
   if (!msg) return null;
 
-  // Tenta múltiplos caminhos para campos críticos
   // element_type "2" = lead no Kommo
   const leadId =
     msg.lead_id ||
@@ -66,7 +70,16 @@ function extractMessageEntry(payload) {
   const text       = msg.text     || msg.content?.text    || "";
   const authorType = msg.author?.type || msg.author_type  || "contact";
 
-  return { leadId, talkId, chatId, text, authorType };
+  // Nome do contato — presente em contacts.update no payload add_message
+  const contact_name = payload?.contacts?.update?.[0]?.name || null;
+
+  // Pipeline ID — presente em leads.update ou leads.add quando Kommo inclui no payload
+  const pipeline_id =
+    payload?.leads?.update?.[0]?.pipeline_id ||
+    payload?.leads?.add?.[0]?.pipeline_id    ||
+    null;
+
+  return { leadId, talkId, chatId, text, authorType, contact_name, pipeline_id };
 }
 
 // ── POST /webhook/kommo ──────────────────────────────────────────
@@ -223,11 +236,13 @@ router.post("/api/kommo/message", async (req, res) => {
     console.log(`[Kommo/Message] 💬 Contato — lead ${entry.leadId} — "${entry.text.slice(0, 60)}"`);
 
     await processMessage({
-      leadId:     String(entry.leadId),
-      talkId:     entry.talkId ? String(entry.talkId) : null,
-      chatId:     entry.chatId ? String(entry.chatId) : null,
-      text:       entry.text,
-      authorType: entry.authorType || "contact",
+      leadId:       String(entry.leadId),
+      talkId:       entry.talkId      ? String(entry.talkId)      : null,
+      chatId:       entry.chatId      ? String(entry.chatId)      : null,
+      text:         entry.text,
+      authorType:   entry.authorType  || "contact",
+      contact_name: entry.contact_name || null,
+      pipeline_id:  entry.pipeline_id  ? String(entry.pipeline_id) : null,
     });
 
   } catch (err) {
@@ -236,16 +251,24 @@ router.post("/api/kommo/message", async (req, res) => {
 });
 
 // ── GET /kommo/health ────────────────────────────────────────────
-router.get("/kommo/health", (req, res) => {
+router.get("/kommo/health", async (req, res) => {
+  let db_bot_states = null;
+  try {
+    const r = await pool.query("SELECT COUNT(*)::int AS total FROM kommo_bot_states");
+    db_bot_states = r.rows[0].total;
+  } catch {}
+
   res.json({
-    ok:          true,
-    bot_enabled: process.env.BOT_ENABLED !== "false",
-    kommo:       !!process.env.KOMMO_ACCESS_TOKEN,
-    salesbot:    process.env.KOMMO_USE_SALESBOT === "true",
+    ok:                        true,
+    bot_enabled:               process.env.BOT_ENABLED !== "false",
+    kommo:                     !!process.env.KOMMO_ACCESS_TOKEN,
+    salesbot_mode:             process.env.KOMMO_USE_SALESBOT === "true",
+    stages_map_configured:     !!process.env.KOMMO_STAGES_MAP,
     webhook_secret_configured: !!process.env.KOMMO_WEBHOOK_SECRET,
-    subdomain:   process.env.KOMMO_SUBDOMAIN || "não configurado",
-    database:    !!process.env.DATABASE_URL,
-    timestamp:   new Date().toISOString(),
+    subdomain:                 process.env.KOMMO_SUBDOMAIN || "não configurado",
+    database:                  !!process.env.DATABASE_URL,
+    db_bot_states,
+    timestamp:                 new Date().toISOString(),
   });
 });
 

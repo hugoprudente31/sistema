@@ -2993,6 +2993,54 @@ app.get("/api/admin/kommo/inspect", requireAdmin, async (req, res) => {
   }
 });
 
+// ── GET /api/admin/kommo/bot-states ──────────────────────────────────────────
+// Lista os estados do bot salvos no PostgreSQL — útil para debug
+app.get("/api/admin/kommo/bot-states", requireAdmin, async (req, res) => {
+  try {
+    const limit  = Math.min(Number(req.query.limit  || 50), 200);
+    const etapa  = clean(req.query.etapa  || "");
+    const loja   = clean(req.query.loja   || "");
+    const leadId = clean(req.query.lead_id || "");
+
+    const conditions = [];
+    const params = [];
+
+    if (leadId) { conditions.push(`lead_id = $${params.length + 1}`); params.push(leadId); }
+    if (etapa)  { conditions.push(`etapa   = $${params.length + 1}`); params.push(etapa); }
+    if (loja)   { conditions.push(`loja ILIKE $${params.length + 1}`); params.push(`%${loja}%`); }
+
+    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+
+    const r = await pool.query(
+      `SELECT lead_id, etapa, loja, bot_active, updated_at,
+              state->>'nome'       AS nome,
+              state->>'talk_id'    AS talk_id,
+              state->>'aguardando' AS aguardando
+       FROM kommo_bot_states
+       ${where}
+       ORDER BY updated_at DESC
+       LIMIT $${params.length + 1}`,
+      [...params, limit]
+    );
+
+    const totais = await pool.query(`
+      SELECT etapa, COUNT(*)::int AS total
+      FROM kommo_bot_states
+      GROUP BY etapa ORDER BY total DESC
+    `);
+
+    res.json({
+      ok: true,
+      total: r.rowCount,
+      por_etapa: totais.rows,
+      states: r.rows,
+    });
+  } catch (e) {
+    console.error("[admin/kommo/bot-states]", e.message);
+    res.status(500).json({ ok: false, message: e.message });
+  }
+});
+
 // ── GET /api/admin/kommo/pipelines ────────────────────────────────────────────
 // Retorna todos os pipelines do Kommo com seus estágios atuais
 app.get("/api/admin/kommo/pipelines", requireAdmin, async (req, res) => {
