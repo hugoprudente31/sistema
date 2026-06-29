@@ -921,6 +921,19 @@ async function initDatabase() {
 
   await negociacaoRoutes.initNegociacaoTables(pool);
   await pool.query(`ALTER TABLE agendamentos ADD COLUMN IF NOT EXISTS lembrete_24h_em TIMESTAMPTZ`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS kommo_bot_states (
+      lead_id    TEXT PRIMARY KEY,
+      state      JSONB        NOT NULL,
+      etapa      TEXT,
+      loja       TEXT,
+      bot_active BOOLEAN      DEFAULT false,
+      updated_at TIMESTAMPTZ  DEFAULT NOW()
+    );
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_kommo_bot_states_updated ON kommo_bot_states(updated_at DESC);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_kommo_bot_states_etapa   ON kommo_bot_states(etapa);`);
 }
 
 function buildGasPayload(body) {

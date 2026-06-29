@@ -1,8 +1,13 @@
 // Bot State Manager — Sistema Óticas Target
-// Mantém o estado da conversa de cada lead em memória
-// e persiste no Kommo como nota para sobreviver a restarts
+// Persiste estado de conversa no PostgreSQL (primário) e Kommo notas (fallback).
 
+const { Pool } = require("pg");
 const kommo = require("../client");
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_SSL === "false" ? false : { rejectUnauthorized: false },
+});
 
 const STATE_NOTE_PREFIX = "[BOT_STATE_V1]";
 
@@ -35,44 +40,48 @@ function defaultState(leadId) {
   };
 }
 
-// ── Leitura / escrita de estado ──────────────────────────────────
+// ── Persistência no PostgreSQL ───────────────────────────────────
 
-async function getState(leadId) {
-  const key = String(leadId);
-
-  if (states.has(key)) return states.get(key);
-
-  // Tenta recuperar do Kommo após restart
-  const recovered = await loadFromKommo(leadId);
-  if (recovered) {
-    states.set(key, recovered);
-    console.log(`[State] 🔄 Estado recuperado do Kommo — lead ${leadId}, etapa: ${recovered.etapa}`);
-    return recovered;
-  }
-
-  const fresh = defaultState(leadId);
-  states.set(key, fresh);
-  return fresh;
-}
-
-function setState(leadId, updates, { persist = false } = {}) {
-  const key     = String(leadId);
-  const current = states.get(key) || defaultState(leadId);
-  const next    = { ...current, ...updates, updated_at: Date.now() };
-  states.set(key, next);
-
-  // Persiste quando a etapa muda ou quando explicitamente solicitado
-  const etapaChanged = updates.etapa && updates.etapa !== current.etapa;
-  if (persist || etapaChanged) {
-    persistToKommo(leadId, next).catch(e =>
-      console.error(`[State] Erro ao persistir lead ${leadId}:`, e.message)
+async function persistToDb(leadId, state) {
+  try {
+    await pool.query(
+      `INSERT INTO kommo_bot_states (lead_id, state, etapa, loja, bot_active, updated_at)
+       VALUES ($1, $2::jsonb, $3, $4, $5, NOW())
+       ON CONFLICT (lead_id) DO UPDATE SET
+         state      = EXCLUDED.state,
+         etapa      = EXCLUDED.etapa,
+         loja       = EXCLUDED.loja,
+         bot_active = EXCLUDED.bot_active,
+         updated_at = NOW()`,
+      [
+        String(leadId),
+        JSON.stringify(state),
+        state.etapa  || null,
+        state.loja   || null,
+        Boolean(state.bot_active),
+      ]
     );
+  } catch (e) {
+    console.error(`[State] Erro ao persistir no DB — lead ${leadId}:`, e.message);
   }
-
-  return next;
 }
 
-// ── Persistência no Kommo ────────────────────────────────────────
+async function loadFromDb(leadId) {
+  try {
+    const r = await pool.query(
+      `SELECT state FROM kommo_bot_states WHERE lead_id = $1 LIMIT 1`,
+      [String(leadId)]
+    );
+    if (!r.rows.length) return null;
+    const saved = r.rows[0].state;
+    return { ...defaultState(leadId), ...saved };
+  } catch (e) {
+    console.error(`[State] Erro ao carregar do DB — lead ${leadId}:`, e.message);
+    return null;
+  }
+}
+
+// ── Persistência no Kommo (fallback / redundância) ───────────────
 
 async function persistToKommo(leadId, state) {
   const toSave = {
@@ -94,45 +103,87 @@ async function persistToKommo(leadId, state) {
 
 async function loadFromKommo(leadId) {
   const notes = await kommo.getLeadNotes(leadId);
-
   const stateNote = notes.find(n => n.params?.text?.startsWith(STATE_NOTE_PREFIX));
   if (!stateNote) return null;
-
   try {
-    const json = stateNote.params.text.replace(STATE_NOTE_PREFIX, "").trim();
-    const saved = JSON.parse(json);
-    // Mescla com defaultState para garantir campos novos que possam ter sido adicionados
+    const json   = stateNote.params.text.replace(STATE_NOTE_PREFIX, "").trim();
+    const saved  = JSON.parse(json);
     return { ...defaultState(leadId), ...saved };
   } catch {
     return null;
   }
 }
 
+// ── Leitura / escrita de estado ──────────────────────────────────
+
+async function getState(leadId) {
+  const key = String(leadId);
+
+  // 1. Memória RAM
+  if (states.has(key)) return states.get(key);
+
+  // 2. PostgreSQL (primário)
+  const fromDb = await loadFromDb(leadId);
+  if (fromDb) {
+    states.set(key, fromDb);
+    console.log(`[State] 🗄️  Estado recuperado do DB — lead ${leadId}, etapa: ${fromDb.etapa}`);
+    return fromDb;
+  }
+
+  // 3. Kommo notas (fallback para leads anteriores à migração)
+  const fromKommo = await loadFromKommo(leadId);
+  if (fromKommo) {
+    states.set(key, fromKommo);
+    // Migra para o banco imediatamente
+    await persistToDb(leadId, fromKommo);
+    console.log(`[State] 🔄 Estado migrado do Kommo → DB — lead ${leadId}, etapa: ${fromKommo.etapa}`);
+    return fromKommo;
+  }
+
+  const fresh = defaultState(leadId);
+  states.set(key, fresh);
+  return fresh;
+}
+
+function setState(leadId, updates, { persist = false } = {}) {
+  const key     = String(leadId);
+  const current = states.get(key) || defaultState(leadId);
+  const next    = { ...current, ...updates, updated_at: Date.now() };
+  states.set(key, next);
+
+  const etapaChanged = updates.etapa && updates.etapa !== current.etapa;
+  if (persist || etapaChanged) {
+    // PostgreSQL (primário, assíncrono)
+    persistToDb(leadId, next).catch(() => {});
+    // Kommo nota (fallback, só em mudanças de etapa para não sobrecarregar)
+    if (etapaChanged) {
+      persistToKommo(leadId, next).catch(e =>
+        console.error(`[State] Erro ao persistir nota Kommo — lead ${leadId}:`, e.message)
+      );
+    }
+  }
+
+  return next;
+}
+
 // ── Controle humano × bot ────────────────────────────────────────
 
-// Registra que um atendente humano enviou uma mensagem neste lead
 function markHumanActivity(leadId) {
-  const key = String(leadId);
+  const key     = String(leadId);
   const current = states.get(key) || defaultState(leadId);
-  states.set(key, {
-    ...current,
-    last_human_at: Date.now(),
-    bot_active:    false,
-    updated_at:    Date.now(),
-  });
+  const next    = { ...current, last_human_at: Date.now(), bot_active: false, updated_at: Date.now() };
+  states.set(key, next);
+  persistToDb(leadId, next).catch(() => {});
   console.log(`[State] 👤 Atividade humana registrada — lead ${leadId}`);
 }
 
-// Registra mensagem do cliente
 function markClientActivity(leadId) {
-  const key = String(leadId);
+  const key     = String(leadId);
   const current = states.get(key) || defaultState(leadId);
   states.set(key, { ...current, last_client_at: Date.now(), updated_at: Date.now() });
 }
 
 // Deve o bot ativar agora?
-// Regra 1: nenhum humano respondeu ainda
-// Regra 2: último humano foi há mais de BOT_HUMAN_TIMEOUT_MIN minutos
 function shouldBotActivate(state) {
   if (!state) return false;
   const timeoutMs = (parseInt(process.env.BOT_HUMAN_TIMEOUT_MIN) || 5) * 60 * 1000;
@@ -141,7 +192,6 @@ function shouldBotActivate(state) {
 }
 
 // Deve o bot retomar de onde o humano parou?
-// Regra: humano estava ativo mas ficou sem responder por BOT_HUMAN_RESUME_MIN minutos
 function shouldBotResume(state) {
   if (!state) return false;
   const resumeMs = (parseInt(process.env.BOT_HUMAN_RESUME_MIN) || 15) * 60 * 1000;
@@ -149,32 +199,26 @@ function shouldBotResume(state) {
   return Date.now() - state.last_human_at > resumeMs;
 }
 
-// Sempre disponível — bot funciona 24h
 function isDuringBusinessHours() {
   return true;
 }
 
-// Horário de atendimento humano por loja
-// Gonzaga & Santos: Seg-Sex 9h-19h | Sáb 10h-18h | Dom fechado
-// Demais lojas:     Seg-Sex 9h-19h | Sáb 9h-15h  | Dom fechado
 function isDuringHumanHours(loja = "") {
   const now      = new Date();
-  const day      = now.getDay(); // 0=Dom, 6=Sáb
+  const day      = now.getDay();
   const timeMin  = now.getHours() * 60 + now.getMinutes();
   const isGonzaga = /gonzaga|santos/i.test(loja);
 
-  if (day === 0) return false; // Domingo fechado
+  if (day === 0) return false;
 
-  if (day === 6) { // Sábado
+  if (day === 6) {
     if (isGonzaga) return timeMin >= 10 * 60 && timeMin < 18 * 60;
     return timeMin >= 9 * 60 && timeMin < 15 * 60;
   }
 
-  // Seg–Sex: 9h–19h
   return timeMin >= 9 * 60 && timeMin < 19 * 60;
 }
 
-// Incrementa contador de respostas inválidas e retorna o novo valor
 function incrementInvalidCount(leadId) {
   const key     = String(leadId);
   const current = states.get(key) || defaultState(leadId);
