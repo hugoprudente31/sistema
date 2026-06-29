@@ -7,6 +7,9 @@ const bcrypt = require("bcryptjs");
 const { Pool } = require("pg");
 require("dotenv").config();
 
+const { startRecoveryCron } = require("./kommo/recovery");
+const { startReminderCron } = require("./kommo/reminder");
+
 const app = express();
 const PORT = process.env.PORT || 8080;
 const SESSION_SECRET = process.env.SESSION_SECRET || "";
@@ -3391,6 +3394,8 @@ app.post('/api/admin/lembretes/disparar', requireAdmin, async (req, res) => {
 
 async function startServer() {
   await initDatabase();
+  startReminderCron();
+  startRecoveryCron();
   return new Promise((resolve) => {
     const server = app.listen(PORT, "0.0.0.0", () => {
       console.log(`Sistema rodando na porta ${PORT}`);
