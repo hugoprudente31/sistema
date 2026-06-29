@@ -1,6 +1,7 @@
 // Kommo Reminder — Sistema Óticas Target
 // Cron diário: envia lembrete 24h antes do agendamento
 
+const { Pool } = require("pg");
 const kommo   = require("./client");
 const MSG     = require("./bot/messages");
 const SM      = require("./bot/stateManager");
@@ -8,18 +9,27 @@ const SM      = require("./bot/stateManager");
 const GAS_URL     = () => process.env.GAS_DEPLOY_URL || "";
 const GAS_API_KEY = () => process.env.GAS_API_KEY    || "";
 
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_SSL === "false" ? false : { rejectUnauthorized: false },
+});
+
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// Amanhã no formato DD/MM/YYYY
-function dataAmanha() {
+// Amanhã em dois formatos: DD/MM/YYYY (GAS) e YYYY-MM-DD (PostgreSQL)
+function datasAmanha() {
   const d = new Date();
   d.setDate(d.getDate() + 1);
   const dd   = String(d.getDate()).padStart(2, "0");
   const mm   = String(d.getMonth() + 1).padStart(2, "0");
   const yyyy = d.getFullYear();
-  return `${dd}/${mm}/${yyyy}`;
+  return {
+    br: `${dd}/${mm}/${yyyy}`,   // formato GAS
+    pg: `${yyyy}-${mm}-${dd}`,   // formato PostgreSQL
+  };
 }
 
+// ── Fonte 1: Google Apps Script (agendamentos via site/formulário) ──
 async function getAgendamentosGAS() {
   if (!GAS_URL()) return [];
   try {
@@ -36,6 +46,46 @@ async function getAgendamentosGAS() {
     console.error("[Reminder] Erro ao buscar GAS:", e.message);
     return [];
   }
+}
+
+// ── Fonte 2: PostgreSQL (agendamentos via Kommo bot/atendente) ──
+async function getAgendamentosDB(dataPg) {
+  try {
+    const { rows } = await pool.query(
+      `SELECT kommo_lead_id, nome, horario, loja,
+              TO_CHAR(data_agendamento, 'DD/MM/YYYY') AS data_agendamento,
+              status
+       FROM agendamentos
+       WHERE data_agendamento = $1
+         AND status IN ('Agendado', 'Confirmado')
+         AND kommo_lead_id IS NOT NULL
+         AND excluido_em IS NULL`,
+      [dataPg]
+    );
+    console.log(`[Reminder] PostgreSQL: ${rows.length} agendamento(s) encontrado(s)`);
+    return rows;
+  } catch (e) {
+    console.error("[Reminder] Erro ao buscar PostgreSQL:", e.message);
+    return [];
+  }
+}
+
+// ── Mescla GAS + DB sem duplicatas (chave: kommo_lead_id) ──
+function mesclarAgendamentos(gasLista, dbLista) {
+  const mapa = new Map();
+
+  // DB tem prioridade — dados mais recentes e confiáveis
+  for (const ag of dbLista) {
+    mapa.set(String(ag.kommo_lead_id), ag);
+  }
+
+  // GAS complementa apenas o que não está no banco
+  for (const ag of gasLista) {
+    const id = String(ag.kommo_lead_id);
+    if (!mapa.has(id)) mapa.set(id, ag);
+  }
+
+  return [...mapa.values()];
 }
 
 // ── Envia lembrete para um agendamento ──────────────────────────
@@ -75,17 +125,25 @@ async function enviarLembrete(ag) {
 async function runReminders() {
   if (process.env.BOT_ENABLED === "false") return;
 
-  const alvo = dataAmanha();
-  console.log(`[Reminder] Buscando agendamentos para amanhã: ${alvo}`);
+  const { br: alvoBR, pg: alvoPG } = datasAmanha();
+  console.log(`[Reminder] Buscando agendamentos para amanhã: ${alvoBR}`);
 
-  const todos = await getAgendamentosGAS();
-  const paraLembrar = todos.filter(a =>
-    a.data_agendamento === alvo &&
+  // Consulta as duas fontes em paralelo
+  const [gasLista, dbLista] = await Promise.all([
+    getAgendamentosGAS(),
+    getAgendamentosDB(alvoPG),
+  ]);
+
+  // Filtra GAS pela data e status (banco já vem filtrado pela query)
+  const gasFiltrados = gasLista.filter(a =>
+    a.data_agendamento === alvoBR &&
     ["Agendado", "Confirmado"].includes(a.status) &&
     a.kommo_lead_id
   );
 
-  console.log(`[Reminder] ${paraLembrar.length} agendamento(s) amanhã`);
+  const paraLembrar = mesclarAgendamentos(gasFiltrados, dbLista);
+
+  console.log(`[Reminder] GAS: ${gasFiltrados.length} | Banco: ${dbLista.length} | Total único: ${paraLembrar.length}`);
 
   for (const ag of paraLembrar) {
     await enviarLembrete(ag).catch(e =>
