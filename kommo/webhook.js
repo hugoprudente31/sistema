@@ -196,15 +196,13 @@ router.post("/webhook/kommo", requireWebhookSecret, async (req, res) => {
 });
 
 // ── POST /api/kommo/message ──────────────────────────────────────
-// Webhook criado via /api/v4/webhooks para eventos add_message.
-// Kommo não envia secret neste endpoint — verifica pelo subdomain no payload.
+// Webhook para eventos: add_message, add_talk, add_lead.
+// Kommo não envia secret — verifica pelo subdomain no payload.
 router.post("/api/kommo/message", async (req, res) => {
-  // Responde 200 imediatamente para o Kommo não reenviar
   res.status(200).json({ received: true });
 
   const payload = req.body;
 
-  // Rejeita payloads que claramente não são do nosso Kommo
   const incomingSubdomain = payload?.account?.subdomain || "";
   const expectedSubdomain = process.env.KOMMO_SUBDOMAIN || "";
   if (expectedSubdomain && incomingSubdomain && incomingSubdomain !== expectedSubdomain) {
@@ -215,8 +213,37 @@ router.post("/api/kommo/message", async (req, res) => {
   console.log("[Kommo/Message] Payload:", JSON.stringify(payload).slice(0, 400));
 
   try {
+    // ── Evento: nova conversa WhatsApp (add_talk) ────────────────
+    // Dispara imediatamente ao cliente abrir o chat — antes mesmo de enviar mensagem.
+    if (payload?.talk?.add) {
+      const talk = payload.talk.add[0];
+      const leadId = talk?.lead_id || null;
+      if (leadId) {
+        console.log(`[Kommo/Message] 📱 Nova conversa — lead ${leadId}, talk ${talk.id}`);
+        await processNewLead(String(leadId), {
+          talkId:      talk.id      ? String(talk.id)      : null,
+          pipeline_id: talk.pipeline_id ? String(talk.pipeline_id) : null,
+        });
+      }
+      return;
+    }
+
+    // ── Evento: novo lead criado (add_lead) ──────────────────────
+    // Fallback para casos onde add_talk não chega a tempo.
+    if (payload?.leads?.add && !payload?.message?.add) {
+      const lead = payload.leads.add[0];
+      if (lead?.id) {
+        console.log(`[Kommo/Message] 🆕 Novo lead — lead ${lead.id}`);
+        await processNewLead(String(lead.id), {
+          pipeline_id: lead.pipeline_id ? String(lead.pipeline_id) : null,
+        });
+      }
+      return;
+    }
+
+    // ── Evento: nova mensagem (add_message) ─────────────────────
     if (!payload?.message?.add) {
-      console.log("[Kommo/Message] Payload sem message.add — ignorando");
+      console.log("[Kommo/Message] Payload sem evento mapeado — ignorando");
       return;
     }
 
@@ -226,7 +253,6 @@ router.post("/api/kommo/message", async (req, res) => {
       return;
     }
 
-    // Registra atividade humana e para — o bot não responde enquanto atendente está ativo
     if (entry.authorType === "user") {
       SM.markHumanActivity(String(entry.leadId));
       console.log(`[Kommo/Message] 👤 Atendente — lead ${entry.leadId}`);

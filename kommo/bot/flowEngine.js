@@ -216,9 +216,26 @@ async function handleBoasVindas(leadId, state, talkId, context) {
   await send(talkId, leadId, MSG.boasVindas(nome, loja));
 }
 
+// Palavras que indicam saudação genérica — reenvia menu sem penalizar
+const SAUDACOES = ["oi", "ola", "bom", "boa", "hello", "hi", "tudo", "menu", "inicio", "ajuda", "alo", "ola", "hey"];
+function ehSaudacao(text) {
+  if (!text || text.trim().length === 0) return true;
+  const n = normalize(text);
+  if (n.length <= 3) return true;
+  return SAUDACOES.some((s) => n.startsWith(s));
+}
+
 async function handleMenuPrincipal(leadId, state, text, talkId) {
   const loja = lojaByPrefix(state.loja_prefix);
   const op = parseOption(text);
+
+  // Saudação ou texto vazio — reenvia o menu sem incrementar inválidos
+  if (ehSaudacao(text) && !op) {
+    console.log(`[BOT][${leadId}] Saudação detectada — reapresenta menu`);
+    await send(talkId, leadId, MSG.menuPrincipal(loja));
+    return;
+  }
+
   SM.resetInvalidCount(leadId);
 
   if (op === "1") {
@@ -451,11 +468,16 @@ async function processMessage({ leadId, talkId, chatId, text, authorType, loja, 
   await route(leadId, state, clean(text), state.talk_id || talkId, { loja, pipeline_id, pipelineId, contact_name });
 }
 
-async function processNewLead(leadId) {
+async function processNewLead(leadId, context = {}) {
   if (process.env.BOT_ENABLED === "false") return;
   const state = await SM.getState(leadId);
-  if (state.etapa !== "boas_vindas" || state.bot_active) return;
-  console.log(`[BOT][${leadId}] Novo lead - aguardando primeira mensagem`);
+  // Se o bot já está ativo ou a conversa já avançou, não faz nada
+  if (state.etapa !== "boas_vindas" || state.bot_active) {
+    console.log(`[BOT][${leadId}] Novo lead/talk — já processado (etapa: ${state.etapa})`);
+    return;
+  }
+  console.log(`[BOT][${leadId}] 📱 Novo lead — enviando boas-vindas imediatamente`);
+  await handleBoasVindas(leadId, state, context.talkId || null, context);
 }
 
 module.exports = { processMessage, processNewLead, flushResponses };
