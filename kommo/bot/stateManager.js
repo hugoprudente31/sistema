@@ -184,19 +184,11 @@ function markClientActivity(leadId) {
 }
 
 // Deve o bot ativar agora?
+// Bot permanece bloqueado enquanto lead estiver em atendimento humano (etapa "transferido").
+// Só reativa quando cliente abrir uma nova conversa — evento add_talk → processNewLead().
 function shouldBotActivate(state) {
   if (!state) return false;
-  const timeoutMs = (parseInt(process.env.BOT_HUMAN_TIMEOUT_MIN) || 5) * 60 * 1000;
-  if (!state.last_human_at) return true;
-  return Date.now() - state.last_human_at > timeoutMs;
-}
-
-// Deve o bot retomar de onde o humano parou?
-function shouldBotResume(state) {
-  if (!state) return false;
-  const resumeMs = (parseInt(process.env.BOT_HUMAN_RESUME_MIN) || 15) * 60 * 1000;
-  if (!state.last_human_at) return true;
-  return Date.now() - state.last_human_at > resumeMs;
+  return state.etapa !== "transferido";
 }
 
 function isDuringBusinessHours() {
@@ -241,7 +233,6 @@ module.exports = {
   markHumanActivity,
   markClientActivity,
   shouldBotActivate,
-  shouldBotResume,
   isDuringBusinessHours,
   isDuringHumanHours,
   getChatId,

@@ -446,22 +446,11 @@ async function processMessage({ leadId, talkId, chatId, text, authorType, loja, 
 
   await ensureStoreState(leadId, state, { loja, pipeline_id, pipelineId });
 
+  // Bot bloqueado em atendimento humano — só reativa via nova conversa (add_talk)
   if (!SM.shouldBotActivate(state)) return;
 
-  // Só ativa o bot (e troca a label) se o lead não está em controle humano
-  const emTransferencia = state.etapa === "transferido";
-  if (!state.bot_active && !emTransferencia) {
+  if (!state.bot_active) {
     SM.setState(leadId, { bot_active: true });
-    await labels.setBotControl(leadId).catch(() => {});
-  }
-
-  // Após transferência, verifica timeout de retomada pelo bot
-  if (emTransferencia) {
-    if (!SM.shouldBotResume(state)) return;
-    // Humano ficou inativo por tempo suficiente — bot retoma do menu principal
-    SM.setState(leadId, { etapa: "menu_principal", bot_active: true }, { persist: true });
-    state.etapa = "menu_principal";
-    state.bot_active = true;
     await labels.setBotControl(leadId).catch(() => {});
   }
 
@@ -471,6 +460,17 @@ async function processMessage({ leadId, talkId, chatId, text, authorType, loja, 
 async function processNewLead(leadId, context = {}) {
   if (process.env.BOT_ENABLED === "false") return;
   const state = await SM.getState(leadId);
+
+  // Nova conversa após atendimento humano — atendente fechou, cliente voltou a contatar
+  if (state.etapa === "transferido") {
+    console.log(`[BOT][${leadId}] 📱 Nova conversa — reativando bot após atendimento humano`);
+    SM.setState(leadId, { etapa: "boas_vindas", bot_active: false, last_human_at: null }, { persist: true });
+    state.etapa = "boas_vindas";
+    state.bot_active = false;
+    await handleBoasVindas(leadId, state, context.talkId || null, context);
+    return;
+  }
+
   // Se o bot já está ativo ou a conversa já avançou, não faz nada
   if (state.etapa !== "boas_vindas" || state.bot_active) {
     console.log(`[BOT][${leadId}] Novo lead/talk — já processado (etapa: ${state.etapa})`);
