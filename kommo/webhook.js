@@ -182,6 +182,59 @@ router.post("/webhook/kommo", requireWebhookSecret, async (req, res) => {
   }
 });
 
+// ── POST /api/kommo/message ──────────────────────────────────────
+// Webhook criado via /api/v4/webhooks para eventos add_message.
+// Kommo não envia secret neste endpoint — verifica pelo subdomain no payload.
+router.post("/api/kommo/message", async (req, res) => {
+  // Responde 200 imediatamente para o Kommo não reenviar
+  res.status(200).json({ received: true });
+
+  const payload = req.body;
+
+  // Rejeita payloads que claramente não são do nosso Kommo
+  const incomingSubdomain = payload?.account?.subdomain || "";
+  const expectedSubdomain = process.env.KOMMO_SUBDOMAIN || "";
+  if (expectedSubdomain && incomingSubdomain && incomingSubdomain !== expectedSubdomain) {
+    console.log(`[Kommo/Message] Subdomínio inesperado: ${incomingSubdomain} — ignorando`);
+    return;
+  }
+
+  console.log("[Kommo/Message] Payload:", JSON.stringify(payload).slice(0, 400));
+
+  try {
+    if (!payload?.message?.add) {
+      console.log("[Kommo/Message] Payload sem message.add — ignorando");
+      return;
+    }
+
+    const entry = extractMessageEntry(payload);
+    if (!entry?.leadId) {
+      console.log("[Kommo/Message] message.add sem lead_id — ignorando");
+      return;
+    }
+
+    // Registra atividade humana e para — o bot não responde enquanto atendente está ativo
+    if (entry.authorType === "user") {
+      SM.markHumanActivity(String(entry.leadId));
+      console.log(`[Kommo/Message] 👤 Atendente — lead ${entry.leadId}`);
+      return;
+    }
+
+    console.log(`[Kommo/Message] 💬 Contato — lead ${entry.leadId} — "${entry.text.slice(0, 60)}"`);
+
+    await processMessage({
+      leadId:     String(entry.leadId),
+      talkId:     entry.talkId ? String(entry.talkId) : null,
+      chatId:     entry.chatId ? String(entry.chatId) : null,
+      text:       entry.text,
+      authorType: entry.authorType || "contact",
+    });
+
+  } catch (err) {
+    console.error("[ERRO][Kommo/Message]", err.message);
+  }
+});
+
 // ── GET /kommo/health ────────────────────────────────────────────
 router.get("/kommo/health", (req, res) => {
   res.json({
