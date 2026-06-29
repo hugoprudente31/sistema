@@ -33,7 +33,7 @@ async function enviarRecuperacao(leadId) {
   await kommo.sendMessage(talkId, MSG.recuperacao(nome));
   await labels.applyLabel(leadId, labels.LABELS.EM_RECUPERACAO);
   await labels.removeLabel(leadId, labels.LABELS.LEAD_FRIO);
-  await moveStage(leadId, "KOMMO_STAGE_RECUPERACAO");
+  await moveStage(leadId, "recuperacao");
 
   SM.setState(leadId, {
     etapa:      "menu_principal",
@@ -44,9 +44,19 @@ async function enviarRecuperacao(leadId) {
   await kommo.addNote(leadId, "♻️ Mensagem de recuperação enviada pelo bot");
 }
 
-// Move de estágio (só se env var configurada)
-async function moveStage(leadId, envKey) {
-  const stageId = process.env[envKey];
+// Move de estágio — lookup por pipeline via KOMMO_STAGES_MAP, fallback env var genérica
+async function moveStage(leadId, stageKey) {
+  let stagesMap = {};
+  try { stagesMap = JSON.parse(process.env.KOMMO_STAGES_MAP || "{}"); } catch {}
+
+  let stageId = null;
+  try {
+    const lead = await kommo.getLead(leadId);
+    const pipelineId = String(lead?.pipeline_id || "");
+    stageId = stagesMap[pipelineId]?.[stageKey];
+  } catch {}
+
+  if (!stageId) stageId = process.env[`KOMMO_STAGE_${stageKey.toUpperCase()}`];
   if (!stageId) return;
   await kommo.moveToStage(leadId, stageId).catch(() => {});
 }
@@ -60,7 +70,7 @@ async function fecharComoPerdido(leadId) {
     [labels.LABELS.EM_RECUPERACAO, labels.LABELS.LEAD_FRIO, labels.LABELS.LEAD_MORNO],
     labels.LABELS.FECHADO_PERDIDO
   );
-  await moveStage(leadId, "KOMMO_STAGE_FECHADO_PERDIDO");
+  await moveStage(leadId, "fechado_perdido");
   await kommo.addNote(leadId, "🔴 Lead fechado como perdido — sem resposta após recuperação");
   SM.setState(leadId, { etapa: "transferido", bot_active: false }, { persist: true });
 }
