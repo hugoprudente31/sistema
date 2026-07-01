@@ -224,21 +224,40 @@ router.post("/api/kommo/message", async (req, res) => {
     // ── Evento: nova conversa WhatsApp (add_talk) ────────────────
     if (payload?.talk?.add) {
       const talk = payload.talk.add[0];
-      // Kommo pode usar lead_id OU entity_id (quando entity_type = "lead")
+      // Log completo do primeiro add_talk para mapear estrutura real do Kommo
+      console.log("[Kommo/Message] add_talk payload completo:", JSON.stringify(talk).slice(0, 500));
+
+      // Kommo usa entity_id (entity_type=lead) OU lead_id
       const leadId =
         talk?.lead_id ||
         (talk?.entity_type === "lead" || talk?.entity_type === 2 ? talk?.entity_id : null) ||
         null;
-      trackEvent("add_talk", `lead=${leadId} talk=${talk?.id} pipeline=${talk?.pipeline_id} entity_id=${talk?.entity_id}`);
+
+      // talkId pode estar em id, talk_id, conversation_id, ou source_uid
+      const talkId =
+        talk?.id ||
+        talk?.talk_id ||
+        talk?.conversation_id ||
+        null;
+
+      // chatId pode estar em chat_id, source_uid, ou uuid
+      const chatId =
+        talk?.chat_id ||
+        talk?.source_uid ||
+        talk?.uuid ||
+        null;
+
+      trackEvent("add_talk", `lead=${leadId} talk=${talkId} chat=${chatId} entity_id=${talk?.entity_id}`);
+
       if (leadId) {
-        console.log(`[Kommo/Message] 📱 Nova conversa — lead ${leadId}, talk ${talk.id}`);
+        console.log(`[Kommo/Message] 📱 Nova conversa — lead ${leadId}, talk ${talkId}, chat ${chatId}`);
         await processNewLead(String(leadId), {
-          talkId:      talk.id           ? String(talk.id)           : null,
-          chatId:      talk.chat_id      ? String(talk.chat_id)      : null,
-          pipeline_id: talk.pipeline_id  ? String(talk.pipeline_id)  : null,
+          talkId:      talkId      ? String(talkId)            : null,
+          chatId:      chatId      ? String(chatId)            : null,
+          pipeline_id: talk.pipeline_id ? String(talk.pipeline_id) : null,
         });
       } else {
-        console.log("[Kommo/Message] add_talk sem lead_id/entity_id:", JSON.stringify(talk).slice(0, 200));
+        console.log("[Kommo/Message] add_talk sem lead_id/entity_id:", JSON.stringify(talk).slice(0, 300));
       }
       return;
     }
