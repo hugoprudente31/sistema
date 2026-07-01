@@ -487,6 +487,25 @@ async function handlePosVendaMenu(leadId, state, text, talkId) {
   await send(talkId, leadId, MSG.posVendaMenu());
 }
 
+async function handleLembreteResposta(leadId, state, text, talkId) {
+  if (isYes(text)) {
+    SM.setState(leadId, { etapa: "menu_principal" }, { persist: true });
+    await send(talkId, leadId, MSG.lembreteConfirmado());
+    return;
+  }
+  if (isNo(text)) {
+    SM.setState(leadId, { etapa: "transferido", bot_active: false }, { persist: true });
+    await send(talkId, leadId, MSG.lembreteCancelado());
+    const loja = lojaByPrefix(state.loja_prefix);
+    await kommo.addNote(leadId, "❌ Cliente cancelou o agendamento pelo bot (resposta ao lembrete 24h).");
+    await labels.setHumanControl(leadId);
+    await moveStage(leadId, "recuperacao", loja.prefix);
+    return;
+  }
+  // Resposta não reconhecida — repete a pergunta
+  await send(talkId, leadId, `Não entendi. Por favor, responda *SIM* para confirmar ou *NÃO* para cancelar.`);
+}
+
 async function route(leadId, state, text, talkId, context) {
   if (state.etapa === "boas_vindas") return handleBoasVindas(leadId, state, talkId, context);
   if (state.etapa === "menu_principal") return handleMenuPrincipal(leadId, state, text, talkId);
@@ -496,6 +515,7 @@ async function route(leadId, state, text, talkId, context) {
   if (state.etapa === "orcamento_aguardando_receita") return handleOrcamentoReceita(leadId, state, text, talkId);
   if (state.etapa === "rh_aguardando_curriculo") return handleRhCurriculo(leadId, state, text, talkId);
   if (state.etapa === "pv_menu") return handlePosVendaMenu(leadId, state, text, talkId);
+  if (state.etapa === "lembrete_resposta") return handleLembreteResposta(leadId, state, text, talkId);
   if (state.etapa === "transferido") return;
 
   SM.setState(leadId, { etapa: "menu_principal" }, { persist: true });

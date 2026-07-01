@@ -26,7 +26,7 @@ function dataAmanhaPG() {
 // ── Busca agendamentos de amanhã direto do banco ──────────────────
 async function getAgendamentosDB(dataPg) {
   const { rows } = await pool.query(
-    `SELECT kommo_lead_id, nome, horario, loja,
+    `SELECT id, kommo_lead_id, nome, horario, loja,
             TO_CHAR(data_agendamento, 'DD/MM/YYYY') AS data_agendamento,
             status
      FROM agendamentos
@@ -34,6 +34,7 @@ async function getAgendamentosDB(dataPg) {
        AND status IN ('Agendado', 'Confirmado')
        AND kommo_lead_id IS NOT NULL
        AND excluido_em IS NULL
+       AND lembrete_24h_em IS NULL
      ORDER BY horario ASC`,
     [dataPg]
   );
@@ -63,11 +64,20 @@ async function enviarLembrete(ag) {
   const horario = ag.horario;
   const loja    = ag.loja;
 
+  const chatId = state.chat_id || null;
   console.log(`[Reminder] Enviando lembrete — ${nome} / lead ${leadId} / ${data} ${horario}`);
 
-  await kommo.sendMessage(talkId, MSG.lembrete24h(nome, data, horario, loja));
+  await kommo.sendMessage(talkId, MSG.lembrete24h(nome, data, horario, loja), chatId);
   SM.setState(leadId, { etapa: "lembrete_resposta" }, { persist: true });
   await kommo.addNote(leadId, `⏰ Lembrete 24h enviado — ${data} às ${horario}`);
+
+  // Marca no DB para evitar reenvio se Railway reiniciar
+  if (ag.id) {
+    await pool.query(
+      `UPDATE agendamentos SET lembrete_24h_em = NOW() WHERE id = $1`,
+      [ag.id]
+    ).catch(e => console.error("[Reminder] Erro ao marcar lembrete_24h_em:", e.message));
+  }
 }
 
 // ── Job principal ─────────────────────────────────────────────────
