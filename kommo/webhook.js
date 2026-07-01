@@ -196,6 +196,13 @@ router.post("/webhook/kommo", requireWebhookSecret, async (req, res) => {
   }
 });
 
+// Rastreador em memória dos últimos 20 eventos recebidos (para diagnóstico)
+const _recentEvents = [];
+function trackEvent(tipo, resumo) {
+  _recentEvents.unshift({ tipo, resumo, ts: new Date().toISOString() });
+  if (_recentEvents.length > 20) _recentEvents.pop();
+}
+
 // ── POST /api/kommo/message ──────────────────────────────────────
 // Webhook para eventos: add_message, add_talk, add_lead.
 // Kommo não envia secret — verifica pelo subdomain no payload.
@@ -215,24 +222,24 @@ router.post("/api/kommo/message", async (req, res) => {
 
   try {
     // ── Evento: nova conversa WhatsApp (add_talk) ────────────────
-    // Dispara imediatamente ao cliente abrir o chat — antes mesmo de enviar mensagem.
     if (payload?.talk?.add) {
       const talk = payload.talk.add[0];
       const leadId = talk?.lead_id || null;
+      trackEvent("add_talk", `lead=${leadId} talk=${talk?.id} pipeline=${talk?.pipeline_id}`);
       if (leadId) {
         console.log(`[Kommo/Message] 📱 Nova conversa — lead ${leadId}, talk ${talk.id}`);
         await processNewLead(String(leadId), {
-          talkId:      talk.id      ? String(talk.id)      : null,
-          pipeline_id: talk.pipeline_id ? String(talk.pipeline_id) : null,
+          talkId:      talk.id           ? String(talk.id)           : null,
+          pipeline_id: talk.pipeline_id  ? String(talk.pipeline_id)  : null,
         });
       }
       return;
     }
 
     // ── Evento: novo lead criado (add_lead) ──────────────────────
-    // Fallback para casos onde add_talk não chega a tempo.
     if (payload?.leads?.add && !payload?.message?.add) {
       const lead = payload.leads.add[0];
+      trackEvent("add_lead", `lead=${lead?.id} pipeline=${lead?.pipeline_id}`);
       if (lead?.id) {
         console.log(`[Kommo/Message] 🆕 Novo lead — lead ${lead.id}`);
         await processNewLead(String(lead.id), {
@@ -244,32 +251,36 @@ router.post("/api/kommo/message", async (req, res) => {
 
     // ── Evento: nova mensagem (add_message) ─────────────────────
     if (!payload?.message?.add) {
+      trackEvent("unknown", JSON.stringify(payload).slice(0, 80));
       console.log("[Kommo/Message] Payload sem evento mapeado — ignorando");
       return;
     }
 
     const entry = extractMessageEntry(payload);
     if (!entry?.leadId) {
+      trackEvent("add_message_sem_lead", JSON.stringify(payload?.message?.add?.[0]).slice(0, 80));
       console.log("[Kommo/Message] message.add sem lead_id — ignorando");
       return;
     }
 
     if (entry.authorType === "user") {
+      trackEvent("add_message_atendente", `lead=${entry.leadId}`);
       SM.markHumanActivity(String(entry.leadId));
       console.log(`[Kommo/Message] 👤 Atendente — lead ${entry.leadId}`);
       return;
     }
 
+    trackEvent("add_message_cliente", `lead=${entry.leadId} text="${entry.text.slice(0,40)}"`);
     console.log(`[Kommo/Message] 💬 Contato — lead ${entry.leadId} — "${entry.text.slice(0, 60)}"`);
 
     await processMessage({
       leadId:       String(entry.leadId),
-      talkId:       entry.talkId      ? String(entry.talkId)      : null,
-      chatId:       entry.chatId      ? String(entry.chatId)      : null,
+      talkId:       entry.talkId       ? String(entry.talkId)       : null,
+      chatId:       entry.chatId       ? String(entry.chatId)       : null,
       text:         entry.text,
-      authorType:   entry.authorType  || "contact",
+      authorType:   entry.authorType   || "contact",
       contact_name: entry.contact_name || null,
-      pipeline_id:  entry.pipeline_id  ? String(entry.pipeline_id) : null,
+      pipeline_id:  entry.pipeline_id  ? String(entry.pipeline_id)  : null,
     });
 
   } catch (err) {
@@ -463,6 +474,56 @@ router.get("/api/admin/all-pipelines-stages", requireWebhookSecret, async (req, 
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
+});
+
+// ── GET /api/admin/diagnostico ───────────────────────────────────
+// Diagnóstico completo do bot: env vars, estados no DB, eventos recentes.
+router.get("/api/admin/diagnostico", requireWebhookSecret, async (req, res) => {
+  const diag = {
+    timestamp: new Date().toISOString(),
+    env: {
+      BOT_ENABLED:               process.env.BOT_ENABLED ?? "(não definido — padrão: ativo)",
+      KOMMO_USE_SALESBOT:        process.env.KOMMO_USE_SALESBOT ?? "(não definido — padrão: false)",
+      KOMMO_SUBDOMAIN:           process.env.KOMMO_SUBDOMAIN   ? "✅ " + process.env.KOMMO_SUBDOMAIN : "❌ ausente",
+      KOMMO_ACCESS_TOKEN:        process.env.KOMMO_ACCESS_TOKEN ? "✅ configurado" : "❌ ausente",
+      KOMMO_WEBHOOK_SECRET:      process.env.KOMMO_WEBHOOK_SECRET ? "✅ configurado" : "❌ ausente",
+      DATABASE_URL:              process.env.DATABASE_URL ? "✅ configurado" : "❌ ausente",
+      KOMMO_STAGES_MAP:          process.env.KOMMO_STAGES_MAP ? "✅ configurado" : "(não definido — usando DEFAULT_STAGES_MAP hardcoded)",
+      LINK_TESTE_VISAO:          process.env.LINK_TESTE_VISAO ?? "(não definido — usando padrão)",
+    },
+    webhook_url_ativo:     "POST https://sistema.oticastgt.com.br/api/kommo/message",
+    webhook_url_legado:    "POST https://sistema.oticastgt.com.br/webhook/kommo (requer KOMMO_WEBHOOK_SECRET no header)",
+    modo_bot:              process.env.KOMMO_USE_SALESBOT === "true" ? "SALESBOT (/api/salesbot)" : "WEBHOOK DIRETO (/api/kommo/message)",
+    ultimos_eventos_recebidos: _recentEvents,
+    db: {},
+    pipelines: {
+      "9511355":  { loja: "Target/Ademar",  bot_ativo: 108252660, agendamento_tv: 103341012, atendente: 108252664 },
+      "9907903":  { loja: "Gonzaga",        bot_ativo: 108252672, agendamento_tv: 103341100, atendente: 108252676 },
+      "12931092": { loja: "Enseada",        bot_ativo: 108252684, agendamento_tv: 103341140, atendente: 108252688 },
+      "12931096": { loja: "Pitangueiras",   bot_ativo: 108252696, agendamento_tv: 103340708, atendente: 108252700 },
+    },
+  };
+
+  try {
+    const r = await pool.query(`
+      SELECT etapa, loja_prefix, COUNT(*)::int AS total
+      FROM kommo_bot_states
+      GROUP BY etapa, loja_prefix
+      ORDER BY total DESC
+    `);
+    diag.db.estados_por_etapa = r.rows;
+  } catch (e) { diag.db.estados_erro = e.message; }
+
+  try {
+    const r = await pool.query(`
+      SELECT lead_id, etapa, loja_prefix, bot_active, updated_at
+      FROM kommo_bot_states
+      ORDER BY updated_at DESC LIMIT 10
+    `);
+    diag.db.ultimos_leads_ativos = r.rows;
+  } catch {}
+
+  res.json(diag);
 });
 
 // ── GET /kommo/health ────────────────────────────────────────────
