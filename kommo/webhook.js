@@ -316,6 +316,20 @@ router.delete("/api/admin/bloqueios", requireWebhookSecret, async (req, res) => 
   }
 });
 
+// ── GET /api/admin/pipeline-stages/:pipelineId ──────────────────
+// Lista todos os estágios de um pipeline Kommo com seus IDs e nomes.
+router.get("/api/admin/pipeline-stages/:pipelineId", requireWebhookSecret, async (req, res) => {
+  try {
+    const data = await kommo.request("GET", `/leads/pipelines/${req.params.pipelineId}`);
+    const statuses = data?._embedded?.statuses || data?.statuses || [];
+    const stages = statuses.map(s => ({ id: s.id, nome: s.name, sort: s.sort }))
+      .sort((a, b) => a.sort - b.sort);
+    res.json({ ok: true, pipeline_id: req.params.pipelineId, nome: data.name, stages });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // ── GET /kommo/health ────────────────────────────────────────────
 router.get("/kommo/health", async (req, res) => {
   let db_bot_states = null;
