@@ -21,15 +21,55 @@ const PREFIX_TO_PIPELINE = {
   pit: "12931096",
 };
 
-// Mapa de estágios por pipeline. Populado via env var KOMMO_STAGES_MAP (JSON).
-// Fallback individual: KOMMO_STAGE_BOT_ATIVO, KOMMO_STAGE_ATENDENTE, etc.
+// Mapa de estágios por pipeline — IDs confirmados em 2026-07-01.
+// Sobrescrito por KOMMO_STAGES_MAP (env var JSON) se configurado.
+const DEFAULT_STAGES_MAP = {
+  "9511355": {  // Target / Ademar
+    bot_ativo:    108252660,
+    informacoes:  103056032,
+    agendamento:  103341012,
+    agendado:     103341012,
+    orcamento:    106146176,
+    atendente:    108252664,
+    recuperacao:  108252668,
+  },
+  "9907903": {  // Gonzaga
+    bot_ativo:    108252672,
+    informacoes:  103056180,
+    agendamento:  103341100,
+    agendado:     103341100,
+    orcamento:    106135040,
+    atendente:    108252676,
+    recuperacao:  108252680,
+  },
+  "12931092": { // Enseada
+    bot_ativo:    108252684,
+    informacoes:  103056212,
+    agendamento:  103341140,
+    agendado:     103341140,
+    orcamento:    106163000,
+    atendente:    108252688,
+    recuperacao:  108252692,
+  },
+  "12931096": { // Pitangueiras
+    bot_ativo:    108252696,
+    informacoes:  103056236,
+    agendamento:  103340708,
+    agendado:     103340708,
+    orcamento:    106137140,
+    atendente:    108252700,
+    recuperacao:  108252704,
+  },
+};
+
 let _stagesMap = null;
 function getStagesMap() {
   if (_stagesMap) return _stagesMap;
   try {
-    _stagesMap = JSON.parse(process.env.KOMMO_STAGES_MAP || "{}");
+    const fromEnv = process.env.KOMMO_STAGES_MAP ? JSON.parse(process.env.KOMMO_STAGES_MAP) : null;
+    _stagesMap = fromEnv && Object.keys(fromEnv).length > 0 ? fromEnv : DEFAULT_STAGES_MAP;
   } catch {
-    _stagesMap = {};
+    _stagesMap = DEFAULT_STAGES_MAP;
   }
   return _stagesMap;
 }

@@ -330,6 +330,110 @@ router.get("/api/admin/pipeline-stages/:pipelineId", requireWebhookSecret, async
   }
 });
 
+// ── POST /api/admin/migrate-tv-leads ────────────────────────────
+// Busca todos os leads com Teste de Visão agendado pelo bot no banco,
+// move para o estágio "Agendamento (Teste de Visão)" em cada pipeline
+// e aplica a etiqueta "Agendado pelo Bot".
+const STAGES_TV = {
+  "9511355":  103341012,
+  "9907903":  103341100,
+  "12931092": 103341140,
+  "12931096": 103340708,
+};
+const PREFIX_TO_PIPELINE_MAP = {
+  tgt: "9511355",
+  gon: "9907903",
+  ens: "12931092",
+  pit: "12931096",
+};
+
+router.post("/api/admin/migrate-tv-leads", requireWebhookSecret, async (req, res) => {
+  const dryRun = req.body?.dry_run === true;
+  const TAG = req.body?.etiqueta || "Agendado pelo Bot";
+
+  let dbLeads = [];
+  try {
+    const { rows } = await pool.query(
+      `SELECT lead_id, etapa, loja_prefix, loja, nome, state
+       FROM kommo_bot_states
+       WHERE etapa IN ('tv_aguardando_confirm','tv_agendado','lembrete_resposta')
+         AND loja_prefix IS NOT NULL`
+    );
+    dbLeads = rows;
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: "Erro DB: " + e.message });
+  }
+
+  // Também inclui leads com agendamento confirmado no PostgreSQL mas com etapa diferente
+  try {
+    const { rows: agRows } = await pool.query(
+      `SELECT DISTINCT kommo_lead_id AS lead_id
+       FROM agendamentos
+       WHERE kommo_lead_id IS NOT NULL
+         AND status IN ('Agendado','Confirmado')
+         AND excluido_em IS NULL`
+    );
+    const existing = new Set(dbLeads.map(r => String(r.lead_id)));
+    for (const r of agRows) {
+      if (!existing.has(String(r.lead_id))) {
+        dbLeads.push({ lead_id: r.lead_id, etapa: "tv_agendado_db", loja_prefix: null });
+      }
+    }
+  } catch {}
+
+  const results = [];
+  for (const row of dbLeads) {
+    const leadId = String(row.lead_id);
+    let prefix = row.loja_prefix;
+
+    // Tenta descobrir pipeline via API do Kommo se prefix desconhecido
+    if (!prefix || !PREFIX_TO_PIPELINE_MAP[prefix]) {
+      try {
+        const lead = await kommo.getLead(leadId);
+        const pid = String(lead?.pipeline_id || "");
+        prefix = Object.entries(PREFIX_TO_PIPELINE_MAP).find(([, v]) => v === pid)?.[0] || null;
+      } catch {}
+    }
+
+    const pipelineId = PREFIX_TO_PIPELINE_MAP[prefix] || null;
+    const stageId    = pipelineId ? STAGES_TV[pipelineId] : null;
+
+    if (!stageId) {
+      results.push({ lead_id: leadId, status: "sem_pipeline", etapa: row.etapa });
+      continue;
+    }
+
+    if (dryRun) {
+      results.push({ lead_id: leadId, status: "dry_run", pipeline: pipelineId, stage: stageId, etiqueta: TAG });
+      continue;
+    }
+
+    try {
+      // Busca tags atuais e adiciona a nova sem remover as existentes
+      const lead = await kommo.getLead(leadId);
+      const tagsAtuais = (lead?._embedded?.tags || []).map(t => t.name);
+      const novasTags  = tagsAtuais.includes(TAG) ? tagsAtuais : [...tagsAtuais, TAG];
+
+      await kommo.moveToStage(leadId, stageId);
+      await kommo.setLeadTags(leadId, novasTags);
+
+      results.push({ lead_id: leadId, status: "ok", pipeline: pipelineId, stage: stageId, tags: novasTags });
+    } catch (e) {
+      results.push({ lead_id: leadId, status: "erro", erro: e.message });
+    }
+
+    // Respeita rate limit do Kommo
+    await new Promise(r => setTimeout(r, 300));
+  }
+
+  const ok  = results.filter(r => r.status === "ok").length;
+  const err = results.filter(r => r.status === "erro").length;
+  const sem = results.filter(r => r.status === "sem_pipeline").length;
+
+  console.log(`[Admin] Migrate TV leads — ok:${ok} erro:${err} sem_pipeline:${sem} dry:${dryRun}`);
+  res.json({ ok: true, dry_run: dryRun, total: results.length, processados: ok, erros: err, sem_pipeline: sem, detalhe: results });
+});
+
 // ── GET /api/admin/all-pipelines-stages ──────────────────────────
 // Lista estágios das 4 lojas de uma vez.
 router.get("/api/admin/all-pipelines-stages", requireWebhookSecret, async (req, res) => {
