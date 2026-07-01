@@ -224,14 +224,21 @@ router.post("/api/kommo/message", async (req, res) => {
     // ── Evento: nova conversa WhatsApp (add_talk) ────────────────
     if (payload?.talk?.add) {
       const talk = payload.talk.add[0];
-      const leadId = talk?.lead_id || null;
-      trackEvent("add_talk", `lead=${leadId} talk=${talk?.id} pipeline=${talk?.pipeline_id}`);
+      // Kommo pode usar lead_id OU entity_id (quando entity_type = "lead")
+      const leadId =
+        talk?.lead_id ||
+        (talk?.entity_type === "lead" || talk?.entity_type === 2 ? talk?.entity_id : null) ||
+        null;
+      trackEvent("add_talk", `lead=${leadId} talk=${talk?.id} pipeline=${talk?.pipeline_id} entity_id=${talk?.entity_id}`);
       if (leadId) {
         console.log(`[Kommo/Message] 📱 Nova conversa — lead ${leadId}, talk ${talk.id}`);
         await processNewLead(String(leadId), {
           talkId:      talk.id           ? String(talk.id)           : null,
+          chatId:      talk.chat_id      ? String(talk.chat_id)      : null,
           pipeline_id: talk.pipeline_id  ? String(talk.pipeline_id)  : null,
         });
+      } else {
+        console.log("[Kommo/Message] add_talk sem lead_id/entity_id:", JSON.stringify(talk).slice(0, 200));
       }
       return;
     }
