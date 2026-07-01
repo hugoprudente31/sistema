@@ -47,25 +47,26 @@ async function adicionarBloqueio({ loja, data, motivo, criadoPor }) {
   await ensureBloqueiosTable();
   const dataPg = toPgDate(data);
   if (!dataPg) throw new Error("Data inválida.");
+  const lojaNorm = normalizeLoja(loja);
   await pool.query(
     `INSERT INTO bloqueios_disponibilidade (loja, data, motivo, criado_por)
      VALUES ($1, $2, $3, $4)
      ON CONFLICT (loja, data) DO UPDATE SET motivo = EXCLUDED.motivo, criado_por = EXCLUDED.criado_por, criado_em = NOW()`,
-    [loja, dataPg, motivo || null, criadoPor || null]
+    [lojaNorm, dataPg, motivo || null, criadoPor || null]
   );
-  // Invalida cache para esta loja/data
-  _cache.delete(`disponibilidade|${normalizeLoja(loja)}|${dataPg}`);
+  _cache.delete(`disponibilidade|${lojaNorm}|${dataPg}`);
 }
 
 async function removerBloqueio({ loja, data }) {
   await ensureBloqueiosTable();
   const dataPg = toPgDate(data);
   if (!dataPg) throw new Error("Data inválida.");
+  const lojaNorm = normalizeLoja(loja);
   const { rowCount } = await pool.query(
     `DELETE FROM bloqueios_disponibilidade WHERE LOWER(loja) = LOWER($1) AND data = $2`,
-    [loja, dataPg]
+    [lojaNorm, dataPg]
   );
-  _cache.delete(`disponibilidade|${normalizeLoja(loja)}|${dataPg}`);
+  _cache.delete(`disponibilidade|${lojaNorm}|${dataPg}`);
   return rowCount;
 }
 
