@@ -9,6 +9,76 @@ const pool = new Pool({
   ssl: process.env.DATABASE_SSL === "false" ? false : { rejectUnauthorized: false },
 });
 
+// ── Bloqueios de disponibilidade ─────────────────────────────────
+// Garante que a tabela existe na primeira chamada (idempotente).
+let _bloqueiosTableReady = false;
+async function ensureBloqueiosTable() {
+  if (_bloqueiosTableReady) return;
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS bloqueios_disponibilidade (
+      id        SERIAL PRIMARY KEY,
+      loja      TEXT NOT NULL,
+      data      DATE NOT NULL,
+      motivo    TEXT,
+      criado_por TEXT,
+      criado_em TIMESTAMP DEFAULT NOW(),
+      UNIQUE (loja, data)
+    )
+  `);
+  _bloqueiosTableReady = true;
+}
+
+async function estaLojaBloqueada(loja, dataPg) {
+  try {
+    await ensureBloqueiosTable();
+    const { rows } = await pool.query(
+      `SELECT 1 FROM bloqueios_disponibilidade
+       WHERE LOWER(loja) = LOWER($1) AND data = $2
+       LIMIT 1`,
+      [loja, dataPg]
+    );
+    return rows.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+async function adicionarBloqueio({ loja, data, motivo, criadoPor }) {
+  await ensureBloqueiosTable();
+  const dataPg = toPgDate(data);
+  if (!dataPg) throw new Error("Data inválida.");
+  await pool.query(
+    `INSERT INTO bloqueios_disponibilidade (loja, data, motivo, criado_por)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (loja, data) DO UPDATE SET motivo = EXCLUDED.motivo, criado_por = EXCLUDED.criado_por, criado_em = NOW()`,
+    [loja, dataPg, motivo || null, criadoPor || null]
+  );
+  // Invalida cache para esta loja/data
+  _cache.delete(`disponibilidade|${normalizeLoja(loja)}|${dataPg}`);
+}
+
+async function removerBloqueio({ loja, data }) {
+  await ensureBloqueiosTable();
+  const dataPg = toPgDate(data);
+  if (!dataPg) throw new Error("Data inválida.");
+  const { rowCount } = await pool.query(
+    `DELETE FROM bloqueios_disponibilidade WHERE LOWER(loja) = LOWER($1) AND data = $2`,
+    [loja, dataPg]
+  );
+  _cache.delete(`disponibilidade|${normalizeLoja(loja)}|${dataPg}`);
+  return rowCount;
+}
+
+async function listarBloqueios() {
+  await ensureBloqueiosTable();
+  const { rows } = await pool.query(
+    `SELECT loja, TO_CHAR(data,'DD/MM/YYYY') AS data, motivo, criado_por, criado_em
+     FROM bloqueios_disponibilidade
+     ORDER BY data DESC, loja`
+  );
+  return rows;
+}
+
 const PUBLIC_BLOCKING_STATUSES = [
   "Agendado",
   "Confirmado",
@@ -207,6 +277,13 @@ async function getHorariosDisponiveis(loja, data) {
 
   if (!lojaNormalizada || !dataPg) return getHorariosLoja(lojaNormalizada, data);
 
+  // Dia bloqueado por falta de optometrista ou outro motivo
+  if (await estaLojaBloqueada(lojaNormalizada, dataPg)) {
+    console.log(`[Scheduling] ⛔ ${lojaNormalizada} bloqueada em ${dataPg}`);
+    cacheSet(cacheKey, []);
+    return [];
+  }
+
   const client = await pool.connect();
   try {
     const horarios = [];
@@ -385,4 +462,7 @@ module.exports = {
   getHorariosDisponiveis,
   criarAgendamento,
   getContatoDoLead,
+  adicionarBloqueio,
+  removerBloqueio,
+  listarBloqueios,
 };

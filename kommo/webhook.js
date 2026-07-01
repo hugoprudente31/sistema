@@ -8,6 +8,7 @@ const kommo       = require("./client");
 const scheduling  = require("./scheduling");
 const SM          = require("./bot/stateManager");
 const { processMessage, processNewLead } = require("./bot/flowEngine");
+const { adicionarBloqueio, removerBloqueio, listarBloqueios } = require("./scheduling");
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -273,6 +274,45 @@ router.post("/api/kommo/message", async (req, res) => {
 
   } catch (err) {
     console.error("[ERRO][Kommo/Message]", err.message);
+  }
+});
+
+// ── Admin: bloqueios de disponibilidade ─────────────────────────
+// GET  /api/admin/bloqueios           — lista bloqueios ativos
+// POST /api/admin/bloqueios           — adiciona bloqueio { loja, data, motivo }
+// DELETE /api/admin/bloqueios         — remove bloqueio   { loja, data }
+// Acesso protegido por KOMMO_WEBHOOK_SECRET no header Authorization.
+
+router.get("/api/admin/bloqueios", requireWebhookSecret, async (req, res) => {
+  try {
+    const lista = await listarBloqueios();
+    res.json({ ok: true, bloqueios: lista });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.post("/api/admin/bloqueios", requireWebhookSecret, async (req, res) => {
+  const { loja, data, motivo } = req.body || {};
+  if (!loja || !data) return res.status(400).json({ ok: false, error: "Campos obrigatórios: loja, data." });
+  try {
+    await adicionarBloqueio({ loja, data, motivo, criadoPor: "admin" });
+    console.log(`[Admin] ⛔ Bloqueio adicionado — ${loja} em ${data}`);
+    res.json({ ok: true, mensagem: `Loja "${loja}" bloqueada em ${data}.` });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.delete("/api/admin/bloqueios", requireWebhookSecret, async (req, res) => {
+  const { loja, data } = req.body || {};
+  if (!loja || !data) return res.status(400).json({ ok: false, error: "Campos obrigatórios: loja, data." });
+  try {
+    const removed = await removerBloqueio({ loja, data });
+    console.log(`[Admin] ✅ Bloqueio removido — ${loja} em ${data}`);
+    res.json({ ok: true, mensagem: removed ? `Bloqueio removido para "${loja}" em ${data}.` : "Nenhum bloqueio encontrado." });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
   }
 });
 
