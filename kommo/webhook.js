@@ -371,11 +371,14 @@ router.post("/api/admin/migrate-tv-leads", requireWebhookSecret, async (req, res
 
   let dbLeads = [];
   try {
+    // loja e nome vivem dentro do JSONB state — loja_prefix é coluna indexada
     const { rows } = await pool.query(
-      `SELECT lead_id, etapa, loja_prefix, loja, nome, state
+      `SELECT lead_id, etapa, loja_prefix,
+              state->>'loja'  AS loja,
+              state->>'nome'  AS nome,
+              state
        FROM kommo_bot_states
-       WHERE etapa IN ('tv_aguardando_confirm','tv_agendado','lembrete_resposta')
-         AND loja_prefix IS NOT NULL`
+       WHERE etapa IN ('tv_aguardando_confirm','tv_agendado','lembrete_resposta')`
     );
     dbLeads = rows;
   } catch (e) {
@@ -399,12 +402,23 @@ router.post("/api/admin/migrate-tv-leads", requireWebhookSecret, async (req, res
     }
   } catch {}
 
+  // Normaliza loja_prefix que pode conter nome completo ("Gonzaga & Santos") ou prefixo ("gon")
+  function resolvePrefix(raw) {
+    if (!raw) return null;
+    const r = String(raw).toLowerCase();
+    if (r.includes("gonzaga") || r.includes("santos")) return "gon";
+    if (r.includes("target") || r.includes("ademar") || r === "tgt") return "tgt";
+    if (r.includes("enseada") || r === "ens") return "ens";
+    if (r.includes("pitangueiras") || r === "pit") return "pit";
+    return PREFIX_TO_PIPELINE_MAP[raw] ? raw : null;
+  }
+
   const results = [];
   for (const row of dbLeads) {
     const leadId = String(row.lead_id);
-    let prefix = row.loja_prefix;
+    let prefix = resolvePrefix(row.loja_prefix) || resolvePrefix(row.loja);
 
-    // Tenta descobrir pipeline via API do Kommo se prefix desconhecido
+    // Tenta descobrir pipeline via API do Kommo se prefix ainda desconhecido
     if (!prefix || !PREFIX_TO_PIPELINE_MAP[prefix]) {
       try {
         const lead = await kommo.getLead(leadId);
