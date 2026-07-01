@@ -229,16 +229,17 @@ async function handleMenuPrincipal(leadId, state, text, talkId) {
   const loja = lojaByPrefix(state.loja_prefix);
   const op = parseOption(text);
 
-  // Saudação ou texto vazio — reenvia o menu sem incrementar inválidos
-  if (ehSaudacao(text) && !op) {
-    console.log(`[BOT][${leadId}] Saudação detectada — reapresenta menu`);
+  // Qualquer mensagem sem número → reapresenta menu sem penalizar.
+  // Cobre saudações ("Oi", "Bom dia"), linguagem natural ("Quero agendar"),
+  // e qualquer outro texto que não seja uma opção numérica.
+  if (!op) {
+    console.log(`[BOT][${leadId}] Mensagem sem opção numérica — reapresenta menu`);
     await send(talkId, leadId, MSG.menuPrincipal(loja));
     return;
   }
 
-  SM.resetInvalidCount(leadId);
-
   if (op === "1") {
+    SM.resetInvalidCount(leadId);
     SM.setState(leadId, { etapa: "info_menu", ultimo_topico: "Informações" }, { persist: true });
     await applyFlowLabel(leadId, loja.prefix, "principal", "redirecionado");
     await addFlowLabel(leadId, loja.prefix, "info-novo");
@@ -250,6 +251,7 @@ async function handleMenuPrincipal(leadId, state, text, talkId) {
   }
 
   if (op === "2") {
+    SM.resetInvalidCount(leadId);
     SM.setState(leadId, { etapa: "tv_aguardando_confirm", ultimo_topico: "Teste de Visão" }, { persist: true });
     await applyFlowLabel(leadId, loja.prefix, "principal", "redirecionado");
     await addFlowLabel(leadId, loja.prefix, "tv-novo");
@@ -261,6 +263,7 @@ async function handleMenuPrincipal(leadId, state, text, talkId) {
   }
 
   if (op === "3") {
+    SM.resetInvalidCount(leadId);
     SM.setState(leadId, { etapa: "orcamento_aguardando_receita", ultimo_topico: "Orçamento" }, { persist: true });
     await applyFlowLabel(leadId, loja.prefix, "principal", "redirecionado");
     await addFlowLabel(leadId, loja.prefix, "orc-novo");
@@ -271,6 +274,7 @@ async function handleMenuPrincipal(leadId, state, text, talkId) {
   }
 
   if (op === "4") {
+    SM.resetInvalidCount(leadId);
     SM.setState(leadId, { etapa: "rh_aguardando_curriculo", ultimo_topico: "Trabalhe Conosco" }, { persist: true });
     await applyFlowLabel(leadId, loja.prefix, "principal", "redirecionado");
     await addFlowLabel(leadId, loja.prefix, "rh-novo");
@@ -280,6 +284,7 @@ async function handleMenuPrincipal(leadId, state, text, talkId) {
   }
 
   if (op === "5") {
+    SM.resetInvalidCount(leadId);
     SM.setState(leadId, { etapa: "pv_menu", ultimo_topico: "Pós Venda" }, { persist: true });
     await applyFlowLabel(leadId, loja.prefix, "principal", "redirecionado");
     await addFlowLabel(leadId, loja.prefix, "pv-novo");
@@ -288,6 +293,7 @@ async function handleMenuPrincipal(leadId, state, text, talkId) {
     return;
   }
 
+  // Número enviado mas fora do intervalo 1-5 (ex: "6", "0", "10")
   const count = SM.incrementInvalidCount(leadId);
   if (count >= 2) return transferToHuman(leadId, state, talkId, "2 respostas inválidas no menu principal");
   await send(talkId, leadId, MSG.respostaInvalida());
@@ -297,7 +303,11 @@ async function handleMenuPrincipal(leadId, state, text, talkId) {
 async function handleInfoMenu(leadId, state, text, talkId) {
   const loja = lojaByPrefix(state.loja_prefix);
   const op = parseOption(text);
-  SM.resetInvalidCount(leadId);
+
+  if (!op) {
+    await send(talkId, leadId, MSG.infoMenu());
+    return;
+  }
 
   const map = {
     "1": { etapa: "info_aguarda_sim_nao", label: "info-lentes", topic: "Lentes e Armações", message: MSG.infoLentes() },
@@ -306,6 +316,7 @@ async function handleInfoMenu(leadId, state, text, talkId) {
   };
 
   if (map[op]) {
+    SM.resetInvalidCount(leadId);
     SM.setState(leadId, {
       etapa: map[op].etapa,
       ultimo_topico: map[op].topic,
@@ -317,6 +328,7 @@ async function handleInfoMenu(leadId, state, text, talkId) {
   }
 
   if (op === "4") {
+    SM.resetInvalidCount(leadId);
     await applyFlowLabel(leadId, loja.prefix, "info", "info-especialista");
     await transferToHuman(leadId, state, talkId, "Informações - falar com especialista");
     return;
@@ -391,6 +403,12 @@ async function handleRhCurriculo(leadId, state, text, talkId) {
 async function handlePosVendaMenu(leadId, state, text, talkId) {
   const loja = lojaByPrefix(state.loja_prefix);
   const op = parseOption(text);
+
+  if (!op) {
+    await send(talkId, leadId, MSG.posVendaMenu());
+    return;
+  }
+
   const options = {
     "1": { label: "pv-nota-fiscal", topic: "Nota Fiscal", message: MSG.posVendaNotaFiscal() },
     "2": { label: "pv-garantia", topic: "Garantia", message: MSG.posVendaGarantia() },
@@ -399,6 +417,7 @@ async function handlePosVendaMenu(leadId, state, text, talkId) {
   };
 
   if (options[op]) {
+    SM.resetInvalidCount(leadId);
     const selected = options[op];
     SM.setState(leadId, { etapa: "transferido", ultimo_topico: `Pós Venda - ${selected.topic}` }, { persist: true });
     await applyFlowLabel(leadId, loja.prefix, "pv", selected.label);
