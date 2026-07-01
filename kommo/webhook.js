@@ -317,7 +317,7 @@ router.delete("/api/admin/bloqueios", requireWebhookSecret, async (req, res) => 
 });
 
 // ── GET /api/admin/pipeline-stages/:pipelineId ──────────────────
-// Lista todos os estágios de um pipeline Kommo com seus IDs e nomes.
+// Lista estágios de um pipeline específico.
 router.get("/api/admin/pipeline-stages/:pipelineId", requireWebhookSecret, async (req, res) => {
   try {
     const data = await kommo.request("GET", `/leads/pipelines/${req.params.pipelineId}`);
@@ -325,6 +325,37 @@ router.get("/api/admin/pipeline-stages/:pipelineId", requireWebhookSecret, async
     const stages = statuses.map(s => ({ id: s.id, nome: s.name, sort: s.sort }))
       .sort((a, b) => a.sort - b.sort);
     res.json({ ok: true, pipeline_id: req.params.pipelineId, nome: data.name, stages });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ── GET /api/admin/all-pipelines-stages ──────────────────────────
+// Lista estágios das 4 lojas de uma vez.
+router.get("/api/admin/all-pipelines-stages", requireWebhookSecret, async (req, res) => {
+  const pipelines = [
+    { id: "9511355",  loja: "Target (Ademar)" },
+    { id: "9907903",  loja: "Gonzaga" },
+    { id: "12931092", loja: "Enseada" },
+    { id: "12931096", loja: "Pitangueiras" },
+  ];
+  try {
+    const results = await Promise.all(pipelines.map(async p => {
+      try {
+        const data = await kommo.request("GET", `/leads/pipelines/${p.id}`);
+        const statuses = data?._embedded?.statuses || data?.statuses || [];
+        return {
+          pipeline_id: p.id,
+          loja: p.loja,
+          nome_pipeline: data.name,
+          stages: statuses.map(s => ({ id: s.id, nome: s.name, sort: s.sort }))
+            .sort((a, b) => a.sort - b.sort),
+        };
+      } catch (e) {
+        return { pipeline_id: p.id, loja: p.loja, erro: e.message };
+      }
+    }));
+    res.json({ ok: true, pipelines: results });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
