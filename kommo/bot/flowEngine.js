@@ -142,16 +142,31 @@ function isNo(text) {
   return ["NAO", "NÃO", "N", "2", "CANCELAR", "VOLTAR"].includes(clean(text).toUpperCase());
 }
 
-async function send(_talkId, leadId, text) {
+async function send(talkId, leadId, text) {
   if (process.env.KOMMO_USE_SALESBOT === "true") {
     queueResponse(leadId, text);
     return;
   }
 
+  const chatId = SM.getChatId ? SM.getChatId(leadId) : null;
+
   try {
-    await kommo.sendMessageToLead(leadId, text);
+    if (talkId) {
+      // Usa talkId direto do evento — mais confiável que busca via API
+      await kommo.sendMessage(String(talkId), text, chatId || null);
+    } else {
+      await kommo.sendMessageToLead(leadId, text);
+    }
   } catch (e) {
-    console.error(`[BOT][${leadId}] Erro ao enviar mensagem:`, e.message);
+    console.error(`[BOT][${leadId}] Erro ao enviar mensagem (talkId=${talkId}):`, e.message);
+    // Tenta fallback se o envio direto falhou e temos talkId
+    if (talkId) {
+      try {
+        await kommo.sendMessageToLead(leadId, text);
+      } catch (e2) {
+        console.error(`[BOT][${leadId}] Fallback também falhou:`, e2.message);
+      }
+    }
   }
 }
 
@@ -495,11 +510,11 @@ async function processMessage({ leadId, talkId, chatId, text, authorType, loja, 
   const state = await SM.getState(leadId);
 
   if (talkId && !state.talk_id) {
-    SM.setState(leadId, { talk_id: talkId });
+    SM.setState(leadId, { talk_id: talkId }, { persist: true });
     state.talk_id = talkId;
   }
   if (chatId && !state.chat_id) {
-    SM.setState(leadId, { chat_id: chatId });
+    SM.setState(leadId, { chat_id: chatId }, { persist: true });
     state.chat_id = chatId;
   }
 

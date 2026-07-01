@@ -11,6 +11,40 @@ const pool = new Pool({
 
 const STATE_NOTE_PREFIX = "[BOT_STATE_V1]";
 
+// Garante que a tabela existe com schema correto
+async function ensureTable() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS kommo_bot_states (
+        lead_id     TEXT PRIMARY KEY,
+        state       JSONB NOT NULL DEFAULT '{}',
+        etapa       TEXT,
+        loja_prefix TEXT,
+        bot_active  BOOLEAN DEFAULT false,
+        updated_at  TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    // Migra coluna 'loja' → 'loja_prefix' se a tabela foi criada com nome antigo
+    await pool.query(`
+      DO $$ BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='kommo_bot_states' AND column_name='loja'
+        ) AND NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='kommo_bot_states' AND column_name='loja_prefix'
+        ) THEN
+          ALTER TABLE kommo_bot_states RENAME COLUMN loja TO loja_prefix;
+        END IF;
+      END $$
+    `);
+    console.log("[State] ✅ Tabela kommo_bot_states verificada.");
+  } catch (e) {
+    console.error("[State] Erro ao garantir tabela kommo_bot_states:", e.message);
+  }
+}
+ensureTable();
+
 // Estado em memória: Map<leadId(string), stateObject>
 const states = new Map();
 
@@ -45,24 +79,25 @@ function defaultState(leadId) {
 async function persistToDb(leadId, state) {
   try {
     await pool.query(
-      `INSERT INTO kommo_bot_states (lead_id, state, etapa, loja, bot_active, updated_at)
+      `INSERT INTO kommo_bot_states (lead_id, state, etapa, loja_prefix, bot_active, updated_at)
        VALUES ($1, $2::jsonb, $3, $4, $5, NOW())
        ON CONFLICT (lead_id) DO UPDATE SET
-         state      = EXCLUDED.state,
-         etapa      = EXCLUDED.etapa,
-         loja       = EXCLUDED.loja,
-         bot_active = EXCLUDED.bot_active,
-         updated_at = NOW()`,
+         state        = EXCLUDED.state,
+         etapa        = EXCLUDED.etapa,
+         loja_prefix  = EXCLUDED.loja_prefix,
+         bot_active   = EXCLUDED.bot_active,
+         updated_at   = NOW()`,
       [
         String(leadId),
         JSON.stringify(state),
-        state.etapa  || null,
-        state.loja   || null,
+        state.etapa       || null,
+        state.loja_prefix || state.loja || null,
         Boolean(state.bot_active),
       ]
     );
+    console.log(`[State] ✅ Estado persistido — lead ${leadId} etapa=${state.etapa}`);
   } catch (e) {
-    console.error(`[State] Erro ao persistir no DB — lead ${leadId}:`, e.message);
+    console.error(`[State] ❌ Erro ao persistir no DB — lead ${leadId}:`, e.message);
   }
 }
 

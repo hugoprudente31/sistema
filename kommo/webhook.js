@@ -270,8 +270,8 @@ router.post("/api/kommo/message", async (req, res) => {
       return;
     }
 
-    trackEvent("add_message_cliente", `lead=${entry.leadId} text="${entry.text.slice(0,40)}"`);
-    console.log(`[Kommo/Message] 💬 Contato — lead ${entry.leadId} — "${entry.text.slice(0, 60)}"`);
+    trackEvent("add_message_cliente", `lead=${entry.leadId} talk=${entry.talkId} chat=${entry.chatId} text="${entry.text.slice(0,40)}"`);
+    console.log(`[Kommo/Message] 💬 Contato — lead ${entry.leadId} talk=${entry.talkId} — "${entry.text.slice(0, 60)}"`);
 
     await processMessage({
       leadId:       String(entry.leadId),

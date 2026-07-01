@@ -93,13 +93,23 @@ class KommoClient {
 
   // Retorna as conversas (talks) associadas ao lead
   async getLeadTalks(leadId) {
-    try {
-      const data = await this.request("GET", `/talks?filter[entity_type]=leads&filter[entity_id]=${leadId}`);
-      return data?._embedded?.talks || [];
-    } catch (e) {
-      console.error("[Kommo] Erro ao buscar talks:", e.message);
-      return [];
+    const paths = [
+      `/talks?filter[lead_id]=${leadId}&limit=5`,
+      `/talks?filter[entity_type]=leads&filter[entity_id]=${leadId}&limit=5`,
+      `/leads/${leadId}/talks?limit=5`,
+    ];
+    for (const path of paths) {
+      try {
+        const data = await this.request("GET", path);
+        const talks = data?._embedded?.talks || [];
+        if (talks.length) {
+          console.log(`[Kommo] Talks encontradas via ${path.split("?")[0]}`);
+          return talks;
+        }
+      } catch {}
     }
+    console.warn(`[Kommo] Nenhuma talk encontrada para lead ${leadId}`);
+    return [];
   }
 
   // Envia mensagem — testa múltiplos formatos de endpoint do Kommo
