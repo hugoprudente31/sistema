@@ -2043,8 +2043,13 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
     if (!hasRole(req.session, ["admin", "atendimento central", "gerente de loja", "consultor de vendas", "vendedor", "comprador", "optometrista"])) {
       return res.status(403).json({ ok: false, message: "Perfil sem permissão para alterar agendamentos." });
     }
-    if ((b.excluir_lead || b.restaurar_lead) && !isAdmin(req.session)) {
-      return res.status(403).json({ ok: false, message: "Apenas admin pode mover leads para a lixeira." });
+    // Restaurar da lixeira: somente admin
+    if (b.restaurar_lead && !isAdmin(req.session)) {
+      return res.status(403).json({ ok: false, message: "Apenas admin pode restaurar leads da lixeira." });
+    }
+    // Soft delete: admin, atendimento central e gerente de loja (só da própria loja — já verificado acima)
+    if (b.excluir_lead && !hasRole(req.session, ["admin", "atendimento central", "gerente de loja"])) {
+      return res.status(403).json({ ok: false, message: "Sem permissão para excluir este agendamento." });
     }
     if (roleOf(req.session) === "optometrista") {
       const allowed = new Set([
