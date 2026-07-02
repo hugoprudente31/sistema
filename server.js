@@ -1624,6 +1624,20 @@ app.get("/api/public/horarios-disponiveis", validarLandingApiKey, async (req, re
       return res.status(400).json({ ok: false, message: "Informe uma data válida." });
     }
 
+    // Verifica bloqueio administrativo (ex: falta de optometrista)
+    const bloqueio = await client.query(
+      `SELECT motivo FROM bloqueios_disponibilidade
+       WHERE LOWER(loja) = LOWER($1) AND data = $2 LIMIT 1`,
+      [loja, data]
+    ).catch(() => ({ rows: [] }));
+    if (bloqueio.rows.length) {
+      return res.json({
+        ok: true, loja, data, horarios: [],
+        message: `Sem disponibilidade nesta data. ${bloqueio.rows[0].motivo || ""}`.trim(),
+        bloqueado: true,
+      });
+    }
+
     let horariosBase = gerarHorariosBase(data);
 
     // Unidade Santos/Gonzaga tem almoço 14:00-14:30 em dias úteis (seg-sex)
