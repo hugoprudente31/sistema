@@ -3085,6 +3085,50 @@ app.get("/api/admin/kommo/bot-states", requireAdmin, async (req, res) => {
 
 // ── GET /api/admin/kommo/pipelines ────────────────────────────────────────────
 // Retorna todos os pipelines do Kommo com seus estágios atuais
+// Diagnóstico: mostra os valores exatos de loja em usuarios e agendamentos
+app.get("/api/admin/diag/loja-mismatch", requireAdmin, async (req, res) => {
+  try {
+    // Valores distintos de loja em agendamentos
+    const ag = await pool.query(`
+      SELECT COALESCE(loja,'(null)') AS loja, COUNT(*)::int AS total
+      FROM agendamentos WHERE excluido_em IS NULL
+      GROUP BY loja ORDER BY total DESC LIMIT 30
+    `);
+    // Valores de loja dos usuários
+    const us = await pool.query(`
+      SELECT nome, cargo, COALESCE(loja,'(null)') AS loja, ativo
+      FROM usuarios ORDER BY loja, nome LIMIT 100
+    `);
+    // Lojas cadastradas
+    const lj = await pool.query(`SELECT nome, ativo FROM lojas ORDER BY nome`);
+
+    // Para cada usuário de loja, verifica quantos agendamentos ele veria
+    const checks = [];
+    for (const u of us.rows) {
+      if (['admin','atendimento central'].includes(u.cargo)) continue;
+      if (!u.loja || u.loja === '(null)') continue;
+      const r = await pool.query(`
+        SELECT COUNT(*)::int AS total FROM agendamentos
+        WHERE excluido_em IS NULL
+          AND TRANSLATE(LOWER(TRIM(COALESCE(loja,''))),
+            'áàâãäéèêëíìîïóòôõöúùûüç','aaaaaeeeeiiiiooooouuuuc')
+            = TRANSLATE(LOWER(TRIM($1)),
+            'áàâãäéèêëíìîïóòôõöúùûüç','aaaaaeeeeiiiiooooouuuuc')
+      `, [u.loja]);
+      checks.push({ usuario: u.nome, cargo: u.cargo, loja_session: u.loja, agendamentos_visiveis: r.rows[0].total });
+    }
+
+    res.json({
+      ok: true,
+      lojas_cadastradas: lj.rows,
+      lojas_em_agendamentos: ag.rows,
+      usuarios_e_visibilidade: checks
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, message: e.message });
+  }
+});
+
 app.get("/api/admin/kommo/pipelines", requireAdmin, async (req, res) => {
   try {
     const kommoClient = require('./kommo/client');
