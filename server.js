@@ -3188,6 +3188,87 @@ app.post("/api/admin/kommo/setup-stages", requireAdmin, async (req, res) => {
   }
 });
 
+app.post("/api/admin/kommo/update-stage-colors", requireAdmin, async (req, res) => {
+  try {
+    const kommoClient = require('./kommo/client');
+
+    const PIPELINES = [9511355, 9907903, 12931092, 12931096];
+
+    // Regras de cor por nome de etapa (normalizado, sem acentos, sem emoji, minúsculo)
+    const COLOR_RULES = [
+      { match: 'gerencia',                      color: '#ff6762' },
+      { match: 'pos vendas',                    color: '#f4c449' },
+      { match: 'informacoes',                   color: '#67d67c' },
+      { match: 'informacao',                    color: '#67d67c' },
+      { match: 'orcamento',                     color: '#4280f6' },
+      { match: 'agendamento (teste de visao)',   color: '#53d5e0' },
+      { match: 'agendamento noshow',             color: '#ff6762' },
+      { match: 'exames realizados',              color: '#53d5e0' },
+      { match: 'venda fechada',                  color: '#4280f6' },
+      { match: 'leads quentes',                  color: '#67d67c' },
+      { match: 'leads frios',                    color: '#f4c449' },
+      { match: 'leads mortos',                   color: '#ff6762' },
+    ];
+
+    function normalize(str) {
+      return String(str || '')
+        .replace(/[\u{1F300}-\u{1FFFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '')
+        .normalize('NFD').replace(/[̀-ͯ]/g, '')
+        .toLowerCase().replace(/\s+/g, ' ').trim();
+    }
+
+    function findColor(stageName) {
+      const norm = normalize(stageName);
+      for (const rule of COLOR_RULES) {
+        if (norm.includes(rule.match)) return rule.color;
+      }
+      return null;
+    }
+
+    const log = [];
+
+    for (const pipelineId of PIPELINES) {
+      let statuses = [];
+      try {
+        const d = await kommoClient.request('GET', `/leads/pipelines/${pipelineId}/statuses`);
+        statuses = d?._embedded?.statuses || [];
+      } catch (e) {
+        log.push({ pipeline_id: pipelineId, erro: `Falha ao buscar etapas: ${e.message}` });
+        continue;
+      }
+
+      for (const status of statuses) {
+        // Ignora etapas fixas do Kommo (Ganhos/Perdidos têm ID especial)
+        if (status.type === 'won' || status.type === 'lost') continue;
+
+        const newColor = findColor(status.name);
+        if (!newColor) {
+          log.push({ pipeline_id: pipelineId, stage: status.name, acao: 'sem_regra' });
+          continue;
+        }
+
+        try {
+          await kommoClient.request('PATCH', `/leads/pipelines/${pipelineId}/statuses/${status.id}`, {
+            color: newColor
+          });
+          log.push({ pipeline_id: pipelineId, stage: status.name, acao: 'atualizado', color: newColor });
+        } catch (e) {
+          log.push({ pipeline_id: pipelineId, stage: status.name, acao: 'erro', erro: e.message });
+        }
+
+        await new Promise(r => setTimeout(r, 250));
+      }
+    }
+
+    const atualizados = log.filter(l => l.acao === 'atualizado').length;
+    const erros       = log.filter(l => l.acao === 'erro').length;
+    res.json({ ok: true, atualizados, erros, log });
+  } catch (e) {
+    console.error('[kommo/update-stage-colors]', e.message);
+    res.status(500).json({ ok: false, message: e.message });
+  }
+});
+
 app.get("/api/dashboard", async (req, res) => {
   try {
     const scoped = !canViewAllStores(req.session);
