@@ -1252,7 +1252,7 @@ function preencherFiltroLojas() {
   }).join('') : '<option value="">Nenhuma loja encontrada</option>';
   el.innerHTML = html;
 
-  if (['optometrista', 'consultor de vendas', 'vendedor', 'outros', 'gerente de loja'].indexOf(roleName()) > -1 && state.user && state.user.loja && state.user.loja !== 'Todas') {
+  if (['optometrista', 'consultor de vendas', 'vendedor', 'outros', 'gerente de loja', 'comprador'].indexOf(roleName()) > -1 && state.user && state.user.loja && state.user.loja !== 'Todas') {
     el.value = state.user.loja;
     el.disabled = true;
   } else {
@@ -1368,7 +1368,7 @@ function coletarFiltros() {
     lojaUsuario: String((state.user && state.user.loja) || '').trim()
   };
 
-  if (['optometrista', 'consultor de vendas', 'vendedor', 'outros', 'gerente de loja'].indexOf(role) > -1 && state.user && state.user.loja && state.user.loja !== 'Todas') {
+  if (['optometrista', 'consultor de vendas', 'vendedor', 'outros', 'gerente de loja', 'comprador'].indexOf(role) > -1 && state.user && state.user.loja && state.user.loja !== 'Todas') {
     filtros.loja = state.user.loja;
   }
 
