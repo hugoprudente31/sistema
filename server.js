@@ -2566,17 +2566,40 @@ app.post("/api/logs", async (req, res) => {
 });
 
 
-app.get("/api/usuarios", requireAdmin, async (req, res) => {
+app.get("/api/usuarios", requireSession, async (req, res) => {
   try {
-    const todos = req.query.todos === 'true';
-    const result = await pool.query(`
-      SELECT id, gas_id, nome, email, cargo, loja, access_tags, can_view_finance, ativo,
-             criado_em, atualizado_em
-      FROM usuarios
-      ${todos ? '' : 'WHERE ativo = true'}
-      ORDER BY loja ASC, nome ASC
-      LIMIT 1000
-    `);
+    const role = roleOf(req.session);
+    const isAdminOrCentral = hasRole(req.session, ["admin", "atendimento central"]);
+    const todos = isAdminOrCentral && req.query.todos === 'true';
+
+    let query, params;
+    if (isAdminOrCentral) {
+      query = `
+        SELECT id, gas_id, nome, email, cargo, loja, access_tags, can_view_finance, ativo,
+               criado_em, atualizado_em
+        FROM usuarios
+        ${todos ? '' : 'WHERE ativo = true'}
+        ORDER BY loja ASC, nome ASC
+        LIMIT 1000
+      `;
+      params = [];
+    } else if (hasRole(req.session, ["gerente de loja", "comprador", "consultor de vendas", "vendedor"])) {
+      // Perfis de loja: retorna somente usuários ativos da própria loja
+      const loja = req.session.loja;
+      if (!loja) return res.json({ ok: true, usuarios: [] });
+      query = `
+        SELECT id, gas_id, nome, cargo, loja, ativo
+        FROM usuarios
+        WHERE ativo = true AND ${storeSql("loja")}
+        ORDER BY nome ASC
+        LIMIT 200
+      `;
+      params = [loja];
+    } else {
+      return res.json({ ok: true, usuarios: [] });
+    }
+
+    const result = await pool.query(query, params);
     res.json({ ok: true, usuarios: result.rows });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });
