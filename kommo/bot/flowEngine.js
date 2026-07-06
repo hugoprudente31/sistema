@@ -506,9 +506,49 @@ async function handleLembreteResposta(leadId, state, text, talkId) {
   await send(talkId, leadId, `Não entendi. Por favor, responda *SIM* para confirmar ou *NÃO* para cancelar.`);
 }
 
+async function handleRecuperacaoMenu(leadId, state, text, talkId) {
+  const loja = lojaByPrefix(state.loja_prefix);
+  const op = parseOption(text);
+
+  if (!op) {
+    await send(talkId, leadId, MSG.recuperacao(state.nome));
+    return;
+  }
+
+  if (op === "1") {
+    SM.resetInvalidCount(leadId);
+    SM.setState(leadId, { etapa: "tv_aguardando_confirm", ultimo_topico: "Teste de Visão" }, { persist: true });
+    await applyFlowLabel(leadId, loja.prefix, "tv", "tv-aguardando-confirm");
+    await moveStage(leadId, "agendamento", loja.prefix);
+    await send(talkId, leadId, MSG.testeVisao(loja));
+    return;
+  }
+
+  if (op === "2") {
+    SM.resetInvalidCount(leadId);
+    SM.setState(leadId, { etapa: "orcamento_aguardando_receita", ultimo_topico: "Orçamento" }, { persist: true });
+    await applyFlowLabel(leadId, loja.prefix, "orc", "orc-aguardando-receita");
+    await moveStage(leadId, "orcamento", loja.prefix);
+    await send(talkId, leadId, MSG.orcamento());
+    return;
+  }
+
+  if (op === "3") {
+    SM.resetInvalidCount(leadId);
+    await transferToHuman(leadId, state, talkId, "Recuperação — solicitou especialista");
+    return;
+  }
+
+  const count = SM.incrementInvalidCount(leadId);
+  if (count >= 2) return transferToHuman(leadId, state, talkId, "2 respostas inválidas na recuperação");
+  await send(talkId, leadId, MSG.respostaInvalida());
+  await send(talkId, leadId, MSG.recuperacao(state.nome));
+}
+
 async function route(leadId, state, text, talkId, context) {
   if (state.etapa === "boas_vindas") return handleBoasVindas(leadId, state, talkId, context);
   if (state.etapa === "menu_principal") return handleMenuPrincipal(leadId, state, text, talkId);
+  if (state.etapa === "recuperacao_menu") return handleRecuperacaoMenu(leadId, state, text, talkId);
   if (state.etapa === "info_menu") return handleInfoMenu(leadId, state, text, talkId);
   if (state.etapa === "info_aguarda_sim_nao") return handleInfoSimNao(leadId, state, text, talkId);
   if (state.etapa === "tv_aguardando_confirm") return handleTesteVisao(leadId, state, text, talkId);

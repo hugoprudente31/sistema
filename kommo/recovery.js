@@ -36,9 +36,9 @@ async function enviarRecuperacao(leadId) {
   await moveStage(leadId, "recuperacao");
 
   SM.setState(leadId, {
-    etapa:      "menu_principal",
+    etapa:      "recuperacao_menu",
     bot_active: true,
-    last_human_at: null, // limpa timer humano para bot assumir
+    last_human_at: null,
   }, { persist: true });
 
   await kommo.addNote(leadId, "♻️ Mensagem de recuperação enviada pelo bot");
