@@ -2594,7 +2594,8 @@ app.get("/api/faturamentos", async (req, res) => {
         CASE WHEN COALESCE(valor_venda, 0) > 0 THEN 'Venda registrada' ELSE 'Sem venda' END AS status_pagamento,
         COALESCE(data_finalizacao_os, data_entrega_os, data_entrada_os, data_agendamento, criado_em::date) AS data_venda
       FROM agendamentos
-      WHERE nome NOT ILIKE '%teste%' AND COALESCE(loja, '') NOT ILIKE '%teste%'
+      WHERE excluido_em IS NULL
+        AND nome NOT ILIKE '%teste%' AND COALESCE(loja, '') NOT ILIKE '%teste%'
         AND (COALESCE(valor_venda, 0) > 0 OR COALESCE(desconto, 0) > 0)
         ${canViewAllStores(req.session) ? "" : `AND ${storeSql("loja")}`}
       ORDER BY COALESCE(data_finalizacao_os, data_entrega_os, data_entrada_os, data_agendamento, criado_em::date) DESC, id DESC LIMIT 1000`;
