@@ -336,6 +336,11 @@
         <div class="kpi"><div class="label">Leads 7 Dias (Kommo)</div><div class="value" id="kLeads7d">—</div></div>
         <div class="kpi"><div class="label">Tempo Médio Resposta</div><div class="value" id="kTempoResposta">—</div></div>
       </div>
+      <div class="row-3 hidden" id="dashboardMarketing" style="margin-top:14px;">
+        <div class="kpi"><div class="label">Investimento em Anúncios (mês)</div><div class="value" id="kAdsSpend">—</div></div>
+        <div class="kpi hidden" id="kAdsFaturamentoKpi"><div class="label">Faturamento (mês)</div><div class="value" id="kAdsFaturamento">—</div></div>
+        <div class="kpi hidden" id="kAdsRoasKpi"><div class="label">ROAS (mês)</div><div class="value" id="kAdsRoas">—</div></div>
+      </div>
     </div>
 
     <div class="card hidden" id="cardAgendamento">
@@ -720,6 +725,38 @@ function preencherDashboardKommo(kommo) {
   }
 }
 
+function getDashboardMarketing() {
+  return apiGet('/api/dashboard/ads-performance').then(function(res) {
+    return (res && res.ok) ? res : null;
+  }).catch(function() { return null; });
+}
+
+function preencherDashboardMarketing(data) {
+  var roles = ['admin', 'atendimento central', 'gerente de loja'];
+  if (roles.indexOf(roleName()) === -1) return;
+  var el = byId('dashboardMarketing');
+  if (el) el.classList.remove('hidden');
+  if (!data || !Array.isArray(data.lojas)) return;
+
+  var totalSpend = 0, totalFaturamento = 0, temFaturamento = false;
+  data.lojas.forEach(function(l) {
+    totalSpend += Number(l.spend || 0);
+    if (l.faturamento) { totalFaturamento += Number(l.faturamento); temFaturamento = true; }
+  });
+
+  var elSpend = byId('kAdsSpend');
+  if (elSpend) elSpend.textContent = 'R$ ' + totalSpend.toFixed(2);
+
+  if (temFaturamento && canFinance()) {
+    var elFat = byId('kAdsFaturamento');
+    var elRoas = byId('kAdsRoas');
+    byId('kAdsFaturamentoKpi').classList.remove('hidden');
+    byId('kAdsRoasKpi').classList.remove('hidden');
+    if (elFat) elFat.textContent = 'R$ ' + totalFaturamento.toFixed(2);
+    if (elRoas) elRoas.textContent = totalSpend > 0 ? (totalFaturamento / totalSpend).toFixed(2) + 'x' : '—';
+  }
+}
+
 function aplicarFiltrosInteligentes(rows) {
   rows = Array.isArray(rows) ? rows : [];
   if (!window.TGTFilterEngine) return rows;
@@ -1075,8 +1112,9 @@ function carregarAgendaEDashboard() {
     renderAgenda(state.agendamentos);
     preencherDashboard();
     atualizarResumoFiltros(state.agendamentos.length, state.agendamentosTodos.length);
-    // Carrega KPIs do Kommo de forma não-bloqueante
+    // Carrega KPIs do Kommo e de anúncios de forma não-bloqueante
     getDashboardKommo().then(function(kommo) { preencherDashboardKommo(kommo); });
+    getDashboardMarketing().then(function(marketing) { preencherDashboardMarketing(marketing); });
   }).catch(function(err) {
     byId('agendaBody').innerHTML = '<tr><td colspan="18">Erro ao carregar agendamentos.</td></tr>';
     setMsg('msgForm', 'Erro ao carregar agenda: ' + (err.message || err), 'err');

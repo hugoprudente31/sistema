@@ -88,6 +88,35 @@ function validarLandingApiKey(req, res, next) {
 
   next();
 }
+
+// ===============================
+// SEGURANÇA — INTEGRAÇÃO DE ANÚNCIOS (AdAnalyzer / fase2)
+// ===============================
+
+const ADANALYZER_SYNC_KEY = process.env.ADANALYZER_SYNC_KEY || "";
+const FASE2_API_KEY = process.env.FASE2_API_KEY || "";
+
+function validarAdAnalyzerKey(req, res, next) {
+  const recebida = req.headers["x-api-key"] || "";
+  if (!ADANALYZER_SYNC_KEY) {
+    return res.status(500).json({ ok: false, message: "ADANALYZER_SYNC_KEY não configurada no Railway." });
+  }
+  if (!safeEqual(recebida, ADANALYZER_SYNC_KEY)) {
+    return res.status(401).json({ ok: false, message: "Chave de sincronismo inválida." });
+  }
+  next();
+}
+
+// Aceita sessão de usuário logado (github-sistema) OU a chave do fase2 (server-to-server)
+function requireSessionOuFase2Key(req, res, next) {
+  const recebida = req.headers["x-api-key"] || "";
+  if (FASE2_API_KEY && safeEqual(recebida, FASE2_API_KEY)) {
+    req.session = { perfil: "admin", loja: "" }; // chamada server-to-server vê todas as lojas
+    return next();
+  }
+  return requireSession(req, res, next);
+}
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL
 });
@@ -934,6 +963,34 @@ async function initDatabase() {
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_kommo_bot_states_updated ON kommo_bot_states(updated_at DESC);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_kommo_bot_states_etapa   ON kommo_bot_states(etapa);`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS desempenho_anuncios (
+      id SERIAL PRIMARY KEY,
+      loja TEXT,
+      categoria TEXT,
+      data_referencia DATE NOT NULL,
+      plataforma TEXT NOT NULL DEFAULT 'meta',
+      spend NUMERIC(12,2) DEFAULT 0,
+      impressions INTEGER DEFAULT 0,
+      clicks INTEGER DEFAULT 0,
+      actions INTEGER DEFAULT 0,
+      ctr NUMERIC(6,2) DEFAULT 0,
+      cpc NUMERIC(10,4) DEFAULT 0,
+      cpa NUMERIC(10,4) DEFAULT 0,
+      criado_em TIMESTAMPTZ DEFAULT NOW(),
+      atualizado_em TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+  // Índice único por expressão: loja/categoria podem ser NULL (linhas "Multi Lojas"/"Outros"),
+  // e o Postgres não deduplica NULLs numa UNIQUE comum — por isso usamos COALESCE aqui,
+  // permitindo reenviar o mesmo dia (upsert) sem duplicar.
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS uniq_desempenho_anuncios
+    ON desempenho_anuncios (COALESCE(loja,''), COALESCE(categoria,''), data_referencia, plataforma);
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_desempenho_anuncios_data ON desempenho_anuncios(data_referencia);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_desempenho_anuncios_loja ON desempenho_anuncios(loja);`);
 }
 
 function buildGasPayload(body) {
@@ -3355,6 +3412,162 @@ app.get("/api/dashboard", async (req, res) => {
   }
 });
 
+// ===============================
+// DESEMPENHO DE ANÚNCIOS (Meta/Google Ads via AdAnalyzer)
+// ===============================
+
+const LOJAS_ANUNCIOS = [
+  "óticas TGT - Gonzaga",
+  "óticas TGT Enseada",
+  "óticas TGT Pitangueiras",
+  "óticas Target - Ademar de Barros"
+];
+
+function lojaAnunciosValida(loja) {
+  return LOJAS_ANUNCIOS.find((l) => normalizeStoreKey(l) === normalizeStoreKey(loja)) || null;
+}
+
+// Recebe o push diário do AdAnalyzer (server-to-server, autenticado por chave própria)
+app.post("/api/admin/ads-performance/sync", validarAdAnalyzerKey, async (req, res) => {
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+  if (!rows.length) {
+    return res.status(400).json({ ok: false, error: "Nenhuma linha enviada." });
+  }
+
+  const salvas = [];
+  for (const row of rows) {
+    const dataReferencia = clean(row.data_referencia);
+    if (!dataReferencia) {
+      return res.status(400).json({ ok: false, error: "data_referencia é obrigatória em cada linha." });
+    }
+
+    let loja = null;
+    if (row.loja) {
+      loja = lojaAnunciosValida(row.loja);
+      if (!loja) {
+        return res.status(400).json({ ok: false, error: `Loja desconhecida: "${row.loja}".` });
+      }
+    } else if (!row.categoria) {
+      return res.status(400).json({ ok: false, error: "Linha sem loja precisa informar categoria (ex.: Multi Lojas)." });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO desempenho_anuncios (
+         loja, categoria, data_referencia, plataforma,
+         spend, impressions, clicks, actions, ctr, cpc, cpa, atualizado_em
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW())
+       ON CONFLICT (COALESCE(loja,''), COALESCE(categoria,''), data_referencia, plataforma)
+       DO UPDATE SET
+         spend = EXCLUDED.spend,
+         impressions = EXCLUDED.impressions,
+         clicks = EXCLUDED.clicks,
+         actions = EXCLUDED.actions,
+         ctr = EXCLUDED.ctr,
+         cpc = EXCLUDED.cpc,
+         cpa = EXCLUDED.cpa,
+         atualizado_em = NOW()
+       RETURNING id`,
+      [
+        loja,
+        row.categoria || null,
+        dataReferencia,
+        clean(row.plataforma) || "meta",
+        Number(row.spend || 0),
+        Number(row.impressions || 0),
+        Number(row.clicks || 0),
+        Number(row.actions || 0),
+        Number(row.ctr || 0),
+        Number(row.cpc || 0),
+        Number(row.cpa || 0)
+      ]
+    );
+    salvas.push(result.rows[0].id);
+  }
+
+  res.json({ ok: true, salvas: salvas.length });
+});
+
+// Leitura para os dashboards (github-sistema e fase2) — sessão de usuário OU chave do fase2
+app.get("/api/dashboard/ads-performance", requireSessionOuFase2Key, async (req, res) => {
+  try {
+    const hoje = new Date().toISOString().slice(0, 10);
+    const start = clean(req.query.start) || hoje.slice(0, 8) + "01";
+    const end = clean(req.query.end) || hoje;
+
+    const scoped = !canViewAllStores(req.session);
+    if (scoped && !req.session.loja) {
+      return res.json({ ok: true, periodo: { start, end }, lojas: [], semLoja: [] });
+    }
+
+    const anuncios = await pool.query(
+      `SELECT
+         loja, categoria,
+         COALESCE(SUM(spend),0)::numeric AS spend,
+         COALESCE(SUM(impressions),0)::int AS impressions,
+         COALESCE(SUM(clicks),0)::int AS clicks,
+         COALESCE(SUM(actions),0)::int AS actions
+       FROM desempenho_anuncios
+       WHERE data_referencia BETWEEN $1 AND $2
+       ${scoped ? `AND ${storeSql("loja", "$3")}` : ""}
+       GROUP BY loja, categoria`,
+      scoped ? [start, end, req.session.loja] : [start, end]
+    );
+
+    const showFinance = canViewFinanceSession(req.session);
+    const faturamentoPorLoja = new Map();
+    if (showFinance) {
+      const params2 = scoped ? [start, end, req.session.loja] : [start, end];
+      const faturamento = await pool.query(
+        `SELECT loja, COALESCE(SUM(valor_venda),0)::numeric AS faturamento
+         FROM agendamentos
+         WHERE data_agendamento BETWEEN $1 AND $2
+           AND nome NOT ILIKE '%teste%' AND excluido_em IS NULL
+           ${scoped ? `AND ${storeSql("loja", "$3")}` : ""}
+         GROUP BY loja`,
+        params2
+      );
+      for (const row of faturamento.rows) {
+        const lojaCanonica = lojaAnunciosValida(row.loja) || row.loja;
+        faturamentoPorLoja.set(normalizeStoreKey(lojaCanonica), Number(row.faturamento));
+      }
+    }
+
+    const lojas = [];
+    const semLoja = [];
+    for (const row of anuncios.rows) {
+      const spend = Number(row.spend);
+      const impressions = Number(row.impressions);
+      const clicks = Number(row.clicks);
+      const ctr = impressions > 0 ? Number(((clicks / impressions) * 100).toFixed(2)) : 0;
+      const cpc = clicks > 0 ? Number((spend / clicks).toFixed(2)) : 0;
+
+      if (!row.loja) {
+        semLoja.push({ categoria: row.categoria, spend, impressions, clicks, actions: Number(row.actions), ctr, cpc });
+        continue;
+      }
+
+      const faturamento = showFinance ? (faturamentoPorLoja.get(normalizeStoreKey(row.loja)) || 0) : 0;
+      const roas = showFinance && spend > 0 ? Number((faturamento / spend).toFixed(2)) : null;
+
+      lojas.push({
+        loja: row.loja,
+        spend,
+        impressions,
+        clicks,
+        actions: Number(row.actions),
+        ctr,
+        cpc,
+        faturamento: showFinance ? faturamento : 0,
+        roas: showFinance ? roas : null
+      });
+    }
+
+    res.json({ ok: true, periodo: { start, end }, lojas, semLoja });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: "Erro ao carregar desempenho de anúncios.", error: error.message });
+  }
+});
+
 app.get("/", (req, res) => {
   const indexPath = path.join(publicPath, "index.html");
   if (fs.existsSync(indexPath)) return res.sendFile(indexPath);
@@ -3382,7 +3595,9 @@ app.get("/", (req, res) => {
       "GET /api/access-tags",
       "GET /api/faturamentos",
       "POST /api/faturamentos",
-      "GET /api/dashboard"
+      "GET /api/dashboard",
+      "GET /api/dashboard/ads-performance",
+      "POST /api/admin/ads-performance/sync"
     ]
   });
 });
