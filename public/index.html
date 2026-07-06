@@ -362,7 +362,7 @@
         <div style="display:flex;gap:10px;flex-wrap:wrap;min-width:250px;">
           <button class="btn-relatorio" onclick="gerarRelatorioCSV()">Relatório Operacional</button>
           <button class="btn-relatorio hidden" id="btnLeadTime" onclick="carregarLeadTime()">Lead Time</button>
-          <button class="btn-relatorio hidden" id="btnHistorico" onclick="carregarHistorico()">Histórico</button>
+          <button class="btn-relatorio hidden" id="btnHistorico" onclick="carregarHistorico(1)">Histórico Interno</button>
           <button class="btn-relatorio hidden" id="btnUsuarios" onclick="carregarUsuarios()">Usuários</button>
           <button class="btn-relatorio hidden" id="btnLixeira" onclick="carregarLixeira()" style="background:#7f1d1d">🗑 Lixeira</button>
           <button class="btn-relatorio secondary hidden" id="btnSyncSistema" onclick="sincronizarSistema()">Sincronizar sistema</button>
@@ -463,8 +463,58 @@
 
 
     <div class="card hidden" id="cardHistorico">
-      <h3>Histórico Operacional</h3>
-      <div class="scroll-x"><table><thead><tr><th>Data</th><th>Loja</th><th>Cliente</th><th>Tipo</th><th>Ação</th><th>Campo</th><th>Antes</th><th>Depois</th><th>Usuário</th><th>Perfil</th></tr></thead><tbody id="historicoBody"></tbody></table></div>
+      <div class="topbar" style="margin-bottom:16px;">
+        <div>
+          <h3 style="margin:0 0 2px;">Histórico Interno</h3>
+          <span style="font-size:12px;color:#6b7280;">Acompanhamento de atividades por perfil na sua loja</span>
+        </div>
+        <button class="btn-relatorio secondary" onclick="byId('cardHistorico').classList.add('hidden')">Fechar</button>
+      </div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:16px;">
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:10px;">
+          <div>
+            <label style="font-size:11px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;">TIPO DE AÇÃO</label>
+            <select id="histFiltroAcao" onchange="carregarHistorico(1)" style="width:100%;">
+              <option value="">Todas</option>
+              <option value="CRIACAO">Criação</option>
+              <option value="ALTERACAO">Alteração</option>
+              <option value="SISTEMA_DELETE">Exclusão</option>
+              <option value="SISTEMA_UPDATE">Atualização auto</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:11px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;">PERFIL</label>
+            <select id="histFiltroPerfil" onchange="carregarHistorico(1)" style="width:100%;">
+              <option value="">Todos</option>
+              <option value="gerente de loja">Gerente de Loja</option>
+              <option value="atendimento central">Atendimento Central</option>
+              <option value="optometrista">Optometrista</option>
+              <option value="consultor de vendas">Consultor de Vendas</option>
+              <option value="comprador">Comprador</option>
+              <option value="admin">Admin</option>
+              <option value="sistema">Sistema automático</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:11px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;">DATA INICIAL</label>
+            <input type="date" id="histDataDe" onchange="carregarHistorico(1)" style="width:100%;">
+          </div>
+          <div>
+            <label style="font-size:11px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;">DATA FINAL</label>
+            <input type="date" id="histDataAte" onchange="carregarHistorico(1)" style="width:100%;">
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px;">
+          <span id="histResumo" style="font-size:12px;color:#6b7280;"></span>
+          <button class="btn-relatorio secondary" style="font-size:12px;padding:4px 10px;" onclick="histLimparFiltros()">Limpar filtros</button>
+        </div>
+      </div>
+      <div id="histTimeline"></div>
+      <div id="histPaginacao" style="display:none;margin-top:16px;align-items:center;justify-content:center;gap:12px;">
+        <button class="btn-relatorio secondary" id="btnHistAnterior" onclick="histMudarPagina(-1)">← Anterior</button>
+        <span id="histPaginaInfo" style="font-size:13px;font-weight:600;color:#374151;"></span>
+        <button class="btn-relatorio secondary" id="btnHistProximo" onclick="histMudarPagina(1)">Próxima →</button>
+      </div>
     </div>
 
     <div class="card hidden" id="cardUsuarios">
@@ -1999,24 +2049,146 @@ function downloadCsv(fileName, csv) {
 }
 
 
-function carregarHistorico() {
+var _histPagina = 1;
+var _histTotalPaginas = 1;
+
+function carregarHistorico(pagina) {
+  if (pagina) _histPagina = pagina;
+  byId('cardHistorico').classList.remove('hidden');
+  byId('histTimeline').innerHTML = '<div class="loading-box">Carregando histórico...</div>';
+
+  var acao    = (byId('histFiltroAcao')   || {}).value || '';
+  var perfil  = (byId('histFiltroPerfil') || {}).value || '';
+  var dataDe  = (byId('histDataDe')       || {}).value || '';
+  var dataAte = (byId('histDataAte')      || {}).value || '';
+
+  var url = '/api/historico-agendamentos?pagina=' + _histPagina + '&limite=60';
+  if (acao)    url += '&acao='    + encodeURIComponent(acao);
+  if (perfil)  url += '&perfil='  + encodeURIComponent(perfil);
+  if (dataDe)  url += '&dataDe='  + encodeURIComponent(dataDe);
+  if (dataAte) url += '&dataAte=' + encodeURIComponent(dataAte);
+
   showLoading(true);
-  apiGet('/api/historico-agendamentos?limit=250')
+  apiGet(url)
     .then(function(res) {
-      byId('cardHistorico').classList.remove('hidden');
-      var rows = Array.isArray(res.historicos) ? res.historicos : [];
-      byId('historicoBody').innerHTML = rows.map(function(r) {
-        var antes = r.registro_anterior || {};
-        var depois = r.registro_novo || {};
-        var antesResumo = antes.status || antes.status_os || (antes.id ? 'Versão anterior salva' : '—');
-        var depoisResumo = depois.status || depois.status_os || (depois.id ? 'Versão nova salva' : '—');
-        return '<tr><td>' + escapeHtml(formatDateBR(r.criado_em)) + '</td><td>' + escapeHtml(r.loja || '') + '</td><td>' + escapeHtml(r.cliente_nome || '') + '</td><td>Agendamento</td><td>' + escapeHtml(r.acao || '') + '</td><td>Backup completo</td><td>' + escapeHtml(antesResumo) + '</td><td>' + escapeHtml(depoisResumo) + '</td><td>' + escapeHtml(r.feito_por_nome || '') + '</td><td>' + escapeHtml(r.feito_por_perfil || '') + '</td></tr>';
-      }).join('') || '<tr><td colspan="10">Sem histórico encontrado.</td></tr>';
+      var rows  = Array.isArray(res.historicos) ? res.historicos : [];
+      var total = res.total || 0;
+      _histTotalPaginas = Math.max(1, Math.ceil(total / (res.limite || 60)));
+
+      byId('histResumo').textContent = total + ' registro(s) encontrado(s)';
+      byId('histTimeline').innerHTML = rows.length
+        ? rows.map(histRenderItem).join('')
+        : '<div style="padding:24px;text-align:center;color:#9ca3af;font-size:14px;">Nenhum registro encontrado para os filtros selecionados.</div>';
+
+      var pg = byId('histPaginacao');
+      if (_histTotalPaginas > 1) {
+        pg.style.display = 'flex';
+        byId('histPaginaInfo').textContent = 'Página ' + _histPagina + ' de ' + _histTotalPaginas;
+        byId('btnHistAnterior').disabled = _histPagina <= 1;
+        byId('btnHistProximo').disabled  = _histPagina >= _histTotalPaginas;
+      } else {
+        pg.style.display = 'none';
+      }
     })
-    .catch(function(err) {
-      setMsg('msgForm', err.message || String(err), 'err');
-    })
+    .catch(function(err) { setMsg('msgForm', err.message || String(err), 'err'); })
     .finally(function() { showLoading(false); });
+}
+
+function histMudarPagina(delta) {
+  var nova = _histPagina + delta;
+  if (nova < 1 || nova > _histTotalPaginas) return;
+  carregarHistorico(nova);
+}
+
+function histLimparFiltros() {
+  byId('histFiltroAcao').value   = '';
+  byId('histFiltroPerfil').value = '';
+  byId('histDataDe').value       = '';
+  byId('histDataAte').value      = '';
+  carregarHistorico(1);
+}
+
+function histRenderItem(r) {
+  var ACAO = {
+    CRIACAO:        { bg: '#dcfce7', txt: '#15803d', label: 'Criação' },
+    ALTERACAO:      { bg: '#dbeafe', txt: '#1d4ed8', label: 'Alteração' },
+    SISTEMA_UPDATE: { bg: '#f1f5f9', txt: '#475569', label: 'Auto' },
+    SISTEMA_DELETE: { bg: '#fee2e2', txt: '#b91c1c', label: 'Exclusão' },
+  };
+  var PERFIL_COR = {
+    'admin':               '#7f1d1d',
+    'atendimento central': '#5b21b6',
+    'gerente de loja':     '#92400e',
+    'optometrista':        '#0e7490',
+    'consultor de vendas': '#1e40af',
+    'comprador':           '#3730a3',
+    'vendedor':            '#1e40af',
+    'sistema':             '#374151',
+  };
+
+  var acao    = r.acao || 'ALTERACAO';
+  var acaoCfg = ACAO[acao] || { bg: '#f1f5f9', txt: '#374151', label: acao };
+  var perfil  = (r.feito_por_perfil || 'sistema').toLowerCase();
+  var pCor    = PERFIL_COR[perfil] || '#374151';
+  var diff    = histComputeDiff(r.registro_anterior, r.registro_novo);
+  var ts      = r.criado_em ? (formatDateBR(r.criado_em) + ' ' + new Date(r.criado_em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })) : '—';
+
+  return '<div style="display:flex;gap:10px;padding:10px 0;border-bottom:1px solid #f1f5f9;">' +
+    '<div style="flex-shrink:0;width:9px;height:9px;border-radius:50%;background:' + acaoCfg.txt + ';margin-top:6px;"></div>' +
+    '<div style="flex:1;min-width:0;">' +
+      '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:3px;">' +
+        '<span style="font-size:11px;padding:1px 7px;border-radius:10px;background:' + acaoCfg.bg + ';color:' + acaoCfg.txt + ';font-weight:700;">' + escapeHtml(acaoCfg.label) + '</span>' +
+        '<span style="font-size:11px;padding:1px 7px;border-radius:10px;background:' + pCor + ';color:#fff;font-weight:600;">' + escapeHtml(r.feito_por_perfil || 'sistema') + '</span>' +
+        '<span style="font-weight:600;font-size:13px;">' + escapeHtml(r.feito_por_nome || 'Sistema') + '</span>' +
+        '<span style="color:#9ca3af;font-size:11px;">&nbsp;·&nbsp;' + escapeHtml(ts) + '</span>' +
+      '</div>' +
+      '<div style="font-size:13px;">' +
+        '<strong>' + escapeHtml(r.cliente_nome || '—') + '</strong>' +
+        (r.loja ? '<span style="color:#6b7280;font-size:12px;"> · ' + escapeHtml(r.loja) + '</span>' : '') +
+      '</div>' +
+      (diff ? '<div style="margin-top:3px;font-size:12px;color:#4b5563;line-height:1.8;">' + diff + '</div>' : '') +
+    '</div>' +
+  '</div>';
+}
+
+function histComputeDiff(antes, depois) {
+  if (!antes || !depois) return '';
+  var CAMPOS = [
+    { k: 'status',              label: 'Status' },
+    { k: 'compareceu',          label: 'Compareceu' },
+    { k: 'status_os',           label: 'Status OS' },
+    { k: 'numero_os',           label: 'Nº OS' },
+    { k: 'valor_venda',         label: 'Valor',     moeda: true },
+    { k: 'desconto',            label: 'Desconto',  moeda: true },
+    { k: 'data_agendamento',    label: 'Data ag.',  data: true },
+    { k: 'horario',             label: 'Horário' },
+    { k: 'data_entrega_os',     label: 'Entrega OS',   data: true },
+    { k: 'data_finalizacao_os', label: 'Finaliz. OS',  data: true },
+    { k: 'vendedor_nome',       label: 'Vendedor' },
+    { k: 'optometrista',        label: 'Optometrista' },
+    { k: 'loja',                label: 'Loja' },
+  ];
+  var partes = [];
+  CAMPOS.forEach(function(c) {
+    var a = antes[c.k], d = depois[c.k];
+    var av = a == null ? '—' : String(a);
+    var dv = d == null ? '—' : String(d);
+    if (av === dv) return;
+    if (c.data) {
+      av = av !== '—' ? (formatDateBR(a) || av) : '—';
+      dv = dv !== '—' ? (formatDateBR(d) || dv) : '—';
+    } else if (c.moeda) {
+      av = Number(a || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+      dv = Number(d || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    }
+    if (av === dv) return;
+    partes.push(
+      '<span style="color:#94a3b8;">' + escapeHtml(c.label) + ':</span> ' +
+      '<span style="text-decoration:line-through;color:#94a3b8;">' + escapeHtml(av) + '</span>' +
+      ' → <strong style="color:#1d4ed8;">' + escapeHtml(dv) + '</strong>'
+    );
+  });
+  return partes.slice(0, 6).join('&nbsp;&nbsp;|&nbsp;&nbsp;');
 }
 
 function sincronizarSistema() {

@@ -2792,21 +2792,59 @@ app.get("/api/historico-agendamentos", async (req, res) => {
     if (!hasRole(req.session, ["admin", "gerente de loja"])) {
       return res.status(403).json({ ok: false, message: "Histórico restrito à administração e gerência." });
     }
-    const limit = Math.min(Math.max(Number(req.query.limit || 250), 1), 1000);
-    const scoped = !canViewAllStores(req.session);
-    const result = scoped && !req.session.loja
-      ? { rows: [] }
-      : await pool.query(
-        `SELECT id, agendamento_id, loja, cliente_nome, acao,
-                feito_por_nome, feito_por_email, feito_por_perfil, feito_por_loja,
-                registro_anterior, registro_novo, criado_em
-         FROM historico_alteracoes_agendamentos
-         ${scoped ? `WHERE ${storeSql("loja")}` : ""}
-         ORDER BY criado_em DESC, id DESC
-         LIMIT ${limit}`,
-        scoped ? [req.session.loja] : []
-      );
-    res.json({ ok: true, total: result.rows.length, historicos: result.rows });
+
+    const pagina  = Math.max(1, parseInt(req.query.pagina || 1));
+    const limite  = Math.min(Math.max(Number(req.query.limite || req.query.limit || 80), 1), 500);
+    const offset  = (pagina - 1) * limite;
+    const scoped  = !canViewAllStores(req.session);
+
+    if (scoped && !req.session.loja) {
+      return res.json({ ok: true, total: 0, pagina, limite, historicos: [] });
+    }
+
+    const conds  = ["acao != 'BACKUP_INICIAL'"];
+    const params = [];
+
+    if (scoped) {
+      params.push(req.session.loja);
+      conds.push(storeSql("loja", `$${params.length}`));
+    }
+    if (req.query.acao) {
+      params.push(req.query.acao);
+      conds.push(`acao = $${params.length}`);
+    }
+    if (req.query.perfil) {
+      params.push(req.query.perfil.toLowerCase());
+      conds.push(`LOWER(COALESCE(feito_por_perfil,'')) = $${params.length}`);
+    }
+    if (req.query.dataDe) {
+      params.push(req.query.dataDe);
+      conds.push(`criado_em::date >= $${params.length}::date`);
+    }
+    if (req.query.dataAte) {
+      params.push(req.query.dataAte);
+      conds.push(`criado_em::date <= $${params.length}::date`);
+    }
+
+    const where = `WHERE ${conds.join(" AND ")}`;
+
+    const countRes = await pool.query(
+      `SELECT COUNT(*)::int AS total FROM historico_alteracoes_agendamentos ${where}`,
+      params
+    );
+
+    params.push(limite, offset);
+    const result = await pool.query(
+      `SELECT id, agendamento_id, loja, cliente_nome, acao,
+              feito_por_nome, feito_por_email, feito_por_perfil, feito_por_loja,
+              registro_anterior, registro_novo, criado_em
+       FROM historico_alteracoes_agendamentos ${where}
+       ORDER BY criado_em DESC, id DESC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params
+    );
+
+    res.json({ ok: true, total: countRes.rows[0].total, pagina, limite, historicos: result.rows });
   } catch (error) {
     res.status(500).json({ ok: false, message: "Erro ao carregar histórico.", error: error.message });
   }
