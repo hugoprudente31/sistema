@@ -1972,6 +1972,14 @@ app.post("/api/agendamentos", async (req, res) => {
     if (!nomeCliente) return res.status(400).json({ ok: false, message: "Nome do cliente é obrigatório." });
     if (nomeCliente.toLowerCase().includes("teste")) return res.status(400).json({ ok: false, message: "Não é permitido cadastrar cliente com nome TESTE." });
 
+    const _dataAgend = String(b.data_agendamento || b.dataAgendamento || b.data || "").slice(0, 10);
+    if (_dataAgend) {
+      const _hoje = new Date().toISOString().slice(0, 10);
+      if (_dataAgend < _hoje) {
+        return res.status(400).json({ ok: false, message: `Não é permitido agendar com data passada. Use uma data a partir de hoje (${_hoje}).` });
+      }
+    }
+
     const actorNome = clean(req.session.nome || "Usuário autenticado");
     const actorEmail = clean(req.session.email);
 
@@ -2131,6 +2139,16 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
     if (String(b.nome || b.nomeCompleto || "").toLowerCase().includes("teste")) {
       return res.status(400).json({ ok: false, message: "Não é permitido cadastrar cliente com nome TESTE." });
     }
+
+    const _novaData = String(b.data_agendamento || b.dataAgendamento || "").slice(0, 10);
+    if (_novaData) {
+      const _hoje = new Date().toISOString().slice(0, 10);
+      const _dataAtual = current.rows[0].data_agendamento ? String(current.rows[0].data_agendamento).slice(0, 10) : null;
+      if (_novaData < _hoje && _novaData !== _dataAtual) {
+        return res.status(400).json({ ok: false, message: `Não é permitido alterar a data para um dia passado. Use uma data a partir de hoje (${_hoje}).` });
+      }
+    }
+
     const actorNome = clean(req.session.nome || "Usuário autenticado");
     const actorEmail = clean(req.session.email);
 
