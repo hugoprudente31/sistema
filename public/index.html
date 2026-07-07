@@ -450,6 +450,14 @@
             <label style="font-size:11px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;">VENDEDOR / CONSULTOR</label>
             <input type="text" id="finVendedor" placeholder="Nome do vendedor" style="width:100%;">
           </div>
+          <div>
+            <label style="font-size:11px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;">PROPRIETÁRIO</label>
+            <input type="text" id="finProprietario" placeholder="Nome do proprietário" style="width:100%;">
+          </div>
+          <div>
+            <label style="font-size:11px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;">ORIGEM</label>
+            <select id="finOrigem" style="width:100%;"><option value="">Todas</option></select>
+          </div>
           <div style="display:flex;align-items:flex-end;gap:8px;">
             <button class="btn-relatorio" onclick="carregarFaturamento()">Filtrar</button>
             <button class="btn-relatorio secondary" onclick="finLimparFiltros()">Limpar</button>
@@ -526,6 +534,14 @@
           <div>
             <label style="font-size:11px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;">NOME DO OPERADOR</label>
             <input type="text" id="histFiltroNome" oninput="carregarHistorico(1)" placeholder="Buscar por nome" style="width:100%;">
+          </div>
+          <div>
+            <label style="font-size:11px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;">CLIENTE</label>
+            <input type="text" id="histFiltroCliente" oninput="carregarHistorico(1)" placeholder="Buscar por cliente" style="width:100%;">
+          </div>
+          <div>
+            <label style="font-size:11px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;">ORIGEM</label>
+            <select id="histFiltroOrigem" onchange="carregarHistorico(1)" style="width:100%;"><option value="">Todas</option></select>
           </div>
           <div>
             <label style="font-size:11px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;">DATA INICIAL</label>
@@ -1280,12 +1296,16 @@ function carregarFaturamento() {
 
   var url = '/api/faturamentos';
   var p = [];
-  var v  = (byId('finVendedor') || {}).value || '';
-  var d1 = (byId('finDataDe')   || {}).value || '';
-  var d2 = (byId('finDataAte')  || {}).value || '';
-  if (v)  p.push('vendedor=' + encodeURIComponent(v));
-  if (d1) p.push('dataDe='  + encodeURIComponent(d1));
-  if (d2) p.push('dataAte=' + encodeURIComponent(d2));
+  var v   = (byId('finVendedor')     || {}).value || '';
+  var pr  = (byId('finProprietario') || {}).value || '';
+  var ori = (byId('finOrigem')       || {}).value || '';
+  var d1  = (byId('finDataDe')       || {}).value || '';
+  var d2  = (byId('finDataAte')      || {}).value || '';
+  if (v)   p.push('vendedor='     + encodeURIComponent(v));
+  if (pr)  p.push('proprietario=' + encodeURIComponent(pr));
+  if (ori) p.push('origem='       + encodeURIComponent(ori));
+  if (d1)  p.push('dataDe='       + encodeURIComponent(d1));
+  if (d2)  p.push('dataAte='      + encodeURIComponent(d2));
   if (p.length) url += '?' + p.join('&');
 
   return apiGet(url).then(function(res) {
@@ -1346,8 +1366,10 @@ function preencherOrigens() {
     return '<option value="' + escapeHtml(o.Origem) + '">' + escapeHtml(o.Origem) + '</option>';
   }).join('') : '';
   byId('origem').innerHTML = '<option value="">Selecione a origem</option>' + (opcoesHtml || '<option value="">Nenhuma origem encontrada</option>');
-  var filtroEl = byId('filtroOrigem');
-  if (filtroEl) filtroEl.innerHTML = '<option value="">Todas</option>' + opcoesHtml;
+  ['filtroOrigem', 'finOrigem', 'histFiltroOrigem'].forEach(function(id) {
+    var el = byId(id);
+    if (el) el.innerHTML = '<option value="">Todas</option>' + opcoesHtml;
+  });
 }
 
 function preencherLojas() {
@@ -2125,16 +2147,20 @@ function carregarHistorico(pagina) {
   byId('cardHistorico').classList.remove('hidden');
   byId('histTimeline').innerHTML = '<div class="loading-box">Carregando histórico...</div>';
 
-  var acao    = (byId('histFiltroAcao')   || {}).value || '';
+  var acao    = (byId('histFiltroAcao')    || {}).value || '';
   var perfil  = (byId('histFiltroPerfil') || {}).value || '';
+  var nome    = (byId('histFiltroNome')   || {}).value || '';
+  var cliente = (byId('histFiltroCliente')|| {}).value || '';
+  var origem  = (byId('histFiltroOrigem') || {}).value || '';
   var dataDe  = (byId('histDataDe')       || {}).value || '';
   var dataAte = (byId('histDataAte')      || {}).value || '';
-  var nome    = (byId('histFiltroNome')   || {}).value || '';
 
   var url = '/api/historico-agendamentos?pagina=' + _histPagina + '&limite=60';
   if (acao)    url += '&acao='    + encodeURIComponent(acao);
   if (perfil)  url += '&perfil='  + encodeURIComponent(perfil);
   if (nome)    url += '&nome='    + encodeURIComponent(nome);
+  if (cliente) url += '&cliente=' + encodeURIComponent(cliente);
+  if (origem)  url += '&origem='  + encodeURIComponent(origem);
   if (dataDe)  url += '&dataDe='  + encodeURIComponent(dataDe);
   if (dataAte) url += '&dataAte=' + encodeURIComponent(dataAte);
 
@@ -2174,6 +2200,8 @@ function histLimparFiltros() {
   byId('histFiltroAcao').value    = '';
   byId('histFiltroPerfil').value  = '';
   byId('histFiltroNome').value    = '';
+  byId('histFiltroCliente').value = '';
+  byId('histFiltroOrigem').value  = '';
   byId('histDataDe').value        = '';
   byId('histDataAte').value       = '';
   carregarHistorico(1);
@@ -2380,26 +2408,34 @@ function gerarFaturamentoPDF() {
       r.loja || '—',
     ];
   });
-  var fp = [];
-  var v  = (byId('finVendedor') || {}).value || '';
-  var d1 = (byId('finDataDe')   || {}).value || '';
-  var d2 = (byId('finDataAte')  || {}).value || '';
-  if (v)  fp.push('Vendedor: ' + v);
-  if (d1) fp.push('De: ' + d1);
-  if (d2) fp.push('Até: ' + d2);
+  var fp  = [];
+  var v   = (byId('finVendedor')     || {}).value || '';
+  var pr  = (byId('finProprietario') || {}).value || '';
+  var ori = (byId('finOrigem')       || {}).value || '';
+  var d1  = (byId('finDataDe')       || {}).value || '';
+  var d2  = (byId('finDataAte')      || {}).value || '';
+  if (v)   fp.push('Vendedor: ' + v);
+  if (pr)  fp.push('Proprietário: ' + pr);
+  if (ori) fp.push('Origem: ' + ori);
+  if (d1)  fp.push('De: ' + d1);
+  if (d2)  fp.push('Até: ' + d2);
   abrirJanelaPDF('Relatório de Faturamento', fp.join(' | ') || 'Sem filtros', kpis, colunas, linhas);
 }
 
 function gerarHistoricoPDF() {
-  var acao    = (byId('histFiltroAcao')   || {}).value || '';
+  var acao    = (byId('histFiltroAcao')    || {}).value || '';
   var perfil  = (byId('histFiltroPerfil') || {}).value || '';
   var nome    = (byId('histFiltroNome')   || {}).value || '';
+  var cliente = (byId('histFiltroCliente')|| {}).value || '';
+  var origem  = (byId('histFiltroOrigem') || {}).value || '';
   var dataDe  = (byId('histDataDe')       || {}).value || '';
   var dataAte = (byId('histDataAte')      || {}).value || '';
   var url = '/api/historico-agendamentos?pagina=1&limite=500';
   if (acao)    url += '&acao='    + encodeURIComponent(acao);
   if (perfil)  url += '&perfil='  + encodeURIComponent(perfil);
   if (nome)    url += '&nome='    + encodeURIComponent(nome);
+  if (cliente) url += '&cliente=' + encodeURIComponent(cliente);
+  if (origem)  url += '&origem='  + encodeURIComponent(origem);
   if (dataDe)  url += '&dataDe='  + encodeURIComponent(dataDe);
   if (dataAte) url += '&dataAte=' + encodeURIComponent(dataAte);
   showLoading(true);
@@ -2419,7 +2455,9 @@ function gerarHistoricoPDF() {
     var ft = [];
     if (acao)    ft.push('Ação: '+acao);
     if (perfil)  ft.push('Perfil: '+perfil);
-    if (nome)    ft.push('Nome: '+nome);
+    if (nome)    ft.push('Operador: '+nome);
+    if (cliente) ft.push('Cliente: '+cliente);
+    if (origem)  ft.push('Origem: '+origem);
     if (dataDe)  ft.push('De: '+dataDe);
     if (dataAte) ft.push('Até: '+dataAte);
     abrirJanelaPDF('Histórico Interno', ft.join(' | ') || 'Sem filtros', kpis, colunas, linhas);
@@ -2428,9 +2466,11 @@ function gerarHistoricoPDF() {
 }
 
 function finLimparFiltros() {
-  byId('finDataDe').value   = '';
-  byId('finDataAte').value  = '';
-  byId('finVendedor').value = '';
+  byId('finDataDe').value        = '';
+  byId('finDataAte').value       = '';
+  byId('finVendedor').value      = '';
+  byId('finProprietario').value  = '';
+  byId('finOrigem').value        = '';
   carregarFaturamento();
 }
 

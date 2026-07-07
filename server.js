@@ -2624,6 +2624,14 @@ app.get("/api/faturamentos", async (req, res) => {
       params.push(`%${req.query.vendedor}%`);
       conds.push(`COALESCE(NULLIF(vendedor_nome,''), NULLIF(consultor_responsavel,''), NULLIF(vendedor_atendeu_nome,''), proprietario_nome, responsavel, '') ILIKE $${params.length}`);
     }
+    if (req.query.proprietario) {
+      params.push(`%${req.query.proprietario}%`);
+      conds.push(`COALESCE(NULLIF(proprietario_nome,''), NULLIF(agendado_por_nome,''), NULLIF(responsavel,''), '') ILIKE $${params.length}`);
+    }
+    if (req.query.origem) {
+      params.push(`%${req.query.origem}%`);
+      conds.push(`COALESCE(origem, '') ILIKE $${params.length}`);
+    }
     if (req.query.dataDe) {
       params.push(req.query.dataDe);
       conds.push(`COALESCE(data_finalizacao_os, data_entrega_os, data_entrada_os, data_agendamento) >= $${params.length}::date`);
@@ -2636,6 +2644,7 @@ app.get("/api/faturamentos", async (req, res) => {
     const where  = `WHERE ${conds.join(" AND ")}`;
     const result = await pool.query(
       `SELECT id, id AS agendamento_id, nome AS cliente_nome, numero_os, status_os, loja,
+          COALESCE(origem, '') AS origem,
           COALESCE(NULLIF(vendedor_nome,''), NULLIF(consultor_responsavel,''), NULLIF(vendedor_atendeu_nome,''), proprietario_nome, responsavel, '') AS vendedor,
           COALESCE(NULLIF(proprietario_nome,''), NULLIF(agendado_por_nome,''), NULLIF(responsavel,''), '') AS proprietario_nome,
           COALESCE(valor_venda, 0)::numeric AS valor_total,
@@ -2864,6 +2873,14 @@ app.get("/api/historico-agendamentos", async (req, res) => {
     if (req.query.nome) {
       params.push(`%${req.query.nome}%`);
       conds.push(`feito_por_nome ILIKE $${params.length}`);
+    }
+    if (req.query.cliente) {
+      params.push(`%${req.query.cliente}%`);
+      conds.push(`cliente_nome ILIKE $${params.length}`);
+    }
+    if (req.query.origem) {
+      params.push(`%${req.query.origem}%`);
+      conds.push(`(COALESCE(registro_novo->>'origem','') ILIKE $${params.length} OR COALESCE(registro_anterior->>'origem','') ILIKE $${params.length})`);
     }
     if (req.query.dataDe) {
       params.push(req.query.dataDe);
