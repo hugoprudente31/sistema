@@ -360,7 +360,8 @@
       <div class="topbar" style="margin-bottom:14px;">
         <h3 style="margin:0;">Painel de Acompanhamento de OS</h3>
         <div style="display:flex;gap:10px;flex-wrap:wrap;min-width:250px;">
-          <button class="btn-relatorio" onclick="gerarRelatorioCSV()">Relatório Operacional</button>
+          <button class="btn-relatorio" onclick="gerarRelatorioCSV()">Relatório CSV</button>
+          <button class="btn-relatorio" style="background:#1d4ed8;" onclick="gerarAgendaPDF()">📄 Baixar PDF</button>
           <button class="btn-relatorio hidden" id="btnLeadTime" onclick="carregarLeadTime()">Lead Time</button>
           <button class="btn-relatorio hidden" id="btnHistorico" onclick="carregarHistorico(1)">Histórico Interno</button>
           <button class="btn-relatorio hidden" id="btnUsuarios" onclick="carregarUsuarios()">Usuários</button>
@@ -386,7 +387,8 @@
           <div><label>Optometrista</label><input id="filtroOptometrista" type="text" oninput="debouncedReload()" placeholder="Digite o nome"></div>
           <div><label>Usuário / Proprietário</label><select id="filtroOwner" onchange="recarregarComFiltros()"></select></div>
         </div>
-        <div class="row-3">
+        <div class="row-4">
+          <div><label>Vendedor / Consultor</label><input id="filtroVendedor" type="text" oninput="debouncedReload()" placeholder="Nome do vendedor"></div>
           <div><label>Tag de acesso</label><select id="filtroAccessTag" onchange="recarregarComFiltros()"></select></div>
           <div class="checkbox-line"><input id="filtroMeus" type="checkbox" onchange="recarregarComFiltros()"><label for="filtroMeus" style="margin:0;">Meus Serviços</label></div>
           <div class="checkbox-line"><input id="filtroMinhasOSAtivas" type="checkbox" onchange="recarregarComFiltros()"><label for="filtroMinhasOSAtivas" style="margin:0;">Minhas OS Ativas</label></div>
@@ -430,7 +432,27 @@
     </div>
 
     <div class="card hidden" id="cardFinanceiro">
-      <div class="topbar" style="margin-bottom:14px;"><h3 style="margin:0;">Módulo de Faturamento</h3><div style="display:flex;gap:10px;flex-wrap:wrap;"><button class="btn-relatorio secondary" id="btnCarregarFinanceiro" onclick="carregarFaturamento()">Carregar financeiro</button><button class="btn-relatorio hidden" id="btnExportFinance" onclick="exportarFaturamentoCSV()">Exportar faturamento</button></div></div>
+      <div class="topbar" style="margin-bottom:14px;"><h3 style="margin:0;">Módulo de Faturamento</h3><div style="display:flex;gap:10px;flex-wrap:wrap;"><button class="btn-relatorio secondary" id="btnCarregarFinanceiro" onclick="carregarFaturamento()">Carregar financeiro</button><button class="btn-relatorio hidden" id="btnExportFinance" onclick="exportarFaturamentoCSV()">Exportar CSV</button><button class="btn-relatorio" style="background:#1d4ed8;" onclick="gerarFaturamentoPDF()">📄 Baixar PDF</button></div></div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:14px;">
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:10px;">
+          <div>
+            <label style="font-size:11px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;">DATA INICIAL</label>
+            <input type="date" id="finDataDe" style="width:100%;">
+          </div>
+          <div>
+            <label style="font-size:11px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;">DATA FINAL</label>
+            <input type="date" id="finDataAte" style="width:100%;">
+          </div>
+          <div>
+            <label style="font-size:11px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;">VENDEDOR / CONSULTOR</label>
+            <input type="text" id="finVendedor" placeholder="Nome do vendedor" style="width:100%;">
+          </div>
+          <div style="display:flex;align-items:flex-end;gap:8px;">
+            <button class="btn-relatorio" onclick="carregarFaturamento()">Filtrar</button>
+            <button class="btn-relatorio secondary" onclick="finLimparFiltros()">Limpar</button>
+          </div>
+        </div>
+      </div>
       <div class="row-4">
         <div class="kpi"><div class="label">Total faturado</div><div class="value" id="finTotal">R$ 0,00</div></div>
         <div class="kpi"><div class="label">Total desconto</div><div class="value" id="finDesconto">R$ 0,00</div></div>
@@ -468,7 +490,10 @@
           <h3 style="margin:0 0 2px;">Histórico Interno</h3>
           <span style="font-size:12px;color:#6b7280;">Acompanhamento de atividades por perfil na sua loja</span>
         </div>
-        <button class="btn-relatorio secondary" onclick="byId('cardHistorico').classList.add('hidden')">Fechar</button>
+        <div style="display:flex;gap:8px;">
+          <button class="btn-relatorio" style="background:#1d4ed8;" onclick="gerarHistoricoPDF()">📄 Baixar PDF</button>
+          <button class="btn-relatorio secondary" onclick="byId('cardHistorico').classList.add('hidden')">Fechar</button>
+        </div>
       </div>
       <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:16px;">
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:10px;">
@@ -494,6 +519,10 @@
               <option value="admin">Admin</option>
               <option value="sistema">Sistema automático</option>
             </select>
+          </div>
+          <div>
+            <label style="font-size:11px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;">NOME DO OPERADOR</label>
+            <input type="text" id="histFiltroNome" oninput="carregarHistorico(1)" placeholder="Buscar por nome" style="width:100%;">
           </div>
           <div>
             <label style="font-size:11px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;">DATA INICIAL</label>
@@ -1246,8 +1275,19 @@ function preencherDashboard() {
 function carregarFaturamento() {
   if (!canFinance()) return Promise.resolve();
 
-  return apiGet('/api/faturamentos').then(function(res) {
+  var url = '/api/faturamentos';
+  var p = [];
+  var v  = (byId('finVendedor') || {}).value || '';
+  var d1 = (byId('finDataDe')   || {}).value || '';
+  var d2 = (byId('finDataAte')  || {}).value || '';
+  if (v)  p.push('vendedor=' + encodeURIComponent(v));
+  if (d1) p.push('dataDe='  + encodeURIComponent(d1));
+  if (d2) p.push('dataAte=' + encodeURIComponent(d2));
+  if (p.length) url += '?' + p.join('&');
+
+  return apiGet(url).then(function(res) {
     var rows = Array.isArray(res.faturamentos) ? res.faturamentos : [];
+    window._finRows = rows;
     var total = rows.reduce(function(a, b) { return a + Number(b.valor_total || 0); }, 0);
     var descontoTotal = rows.reduce(function(a, b) { return a + Number(b.desconto || 0); }, 0);
     var pagos = rows.filter(function(r) { return Number(r.valor_total || 0) > 0; });
@@ -1438,6 +1478,7 @@ function coletarFiltros() {
     cliente: byId('filtroCliente').value.trim(),
     loja: byId('filtroLoja').value.trim(),
     optometrista: byId('filtroOptometrista').value.trim(),
+    vendedor: byId('filtroVendedor') ? byId('filtroVendedor').value.trim() : '',
     ownerId: byId('filtroOwner').value.trim(),
     accessTag: byId('filtroAccessTag').value.trim(),
     periodoDias: byId('filtroPeriodoDias').value.trim(),
@@ -1472,7 +1513,7 @@ function coletarFiltros() {
 }
 
 function limparFiltros() {
-  ['filtroDataDe', 'filtroDataAte', 'filtroCliente', 'filtroOptometrista', 'filtroStatus', 'filtroStatusOS', 'filtroOwner', 'filtroAccessTag', 'filtroPeriodoDias'].forEach(function(id) {
+  ['filtroDataDe', 'filtroDataAte', 'filtroCliente', 'filtroOptometrista', 'filtroVendedor', 'filtroStatus', 'filtroStatusOS', 'filtroOwner', 'filtroAccessTag', 'filtroPeriodoDias'].forEach(function(id) {
     byId(id).value = '';
   });
   document.querySelectorAll('#filtroResultadoGroup .filtro-btn.ativo').forEach(function(b) { b.classList.remove('ativo'); });
@@ -2061,10 +2102,12 @@ function carregarHistorico(pagina) {
   var perfil  = (byId('histFiltroPerfil') || {}).value || '';
   var dataDe  = (byId('histDataDe')       || {}).value || '';
   var dataAte = (byId('histDataAte')      || {}).value || '';
+  var nome    = (byId('histFiltroNome')   || {}).value || '';
 
   var url = '/api/historico-agendamentos?pagina=' + _histPagina + '&limite=60';
   if (acao)    url += '&acao='    + encodeURIComponent(acao);
   if (perfil)  url += '&perfil='  + encodeURIComponent(perfil);
+  if (nome)    url += '&nome='    + encodeURIComponent(nome);
   if (dataDe)  url += '&dataDe='  + encodeURIComponent(dataDe);
   if (dataAte) url += '&dataAte=' + encodeURIComponent(dataAte);
 
@@ -2101,10 +2144,11 @@ function histMudarPagina(delta) {
 }
 
 function histLimparFiltros() {
-  byId('histFiltroAcao').value   = '';
-  byId('histFiltroPerfil').value = '';
-  byId('histDataDe').value       = '';
-  byId('histDataAte').value      = '';
+  byId('histFiltroAcao').value    = '';
+  byId('histFiltroPerfil').value  = '';
+  byId('histFiltroNome').value    = '';
+  byId('histDataDe').value        = '';
+  byId('histDataAte').value       = '';
   carregarHistorico(1);
 }
 
@@ -2189,6 +2233,176 @@ function histComputeDiff(antes, depois) {
     );
   });
   return partes.slice(0, 6).join('&nbsp;&nbsp;|&nbsp;&nbsp;');
+}
+
+function construirDescFiltros() {
+  var f = coletarFiltros();
+  var parts = [];
+  if (f.dataDe)      parts.push('De: ' + f.dataDe);
+  if (f.dataAte)     parts.push('Até: ' + f.dataAte);
+  if (f.periodoDias) parts.push('Período: ' + f.periodoDias + ' dias');
+  if (f.status)      parts.push('Status: ' + f.status);
+  if (f.statusOS)    parts.push('Status OS: ' + f.statusOS);
+  if (f.cliente)     parts.push('Cliente: ' + f.cliente);
+  if (f.optometrista)parts.push('Optometrista: ' + f.optometrista);
+  if (f.vendedor)    parts.push('Vendedor: ' + f.vendedor);
+  if (f.loja)        parts.push('Loja: ' + f.loja);
+  if (f.meus === 'true') parts.push('Meus serviços');
+  return parts.join(' | ') || 'Sem filtros aplicados';
+}
+
+function abrirJanelaPDF(titulo, filtrosDesc, kpis, colunas, linhas) {
+  var usuNome   = (state.user && state.user.nome)   || '';
+  var usuPerfil = (state.user && state.user.perfil) || '';
+  var usuLoja   = (state.user && state.user.loja)   || '';
+  var agora     = new Date().toLocaleString('pt-BR');
+  var css = 'body{font-family:Arial,sans-serif;font-size:11px;color:#1a1a1a;margin:0;padding:16px}' +
+    'h1{font-size:18px;margin:0 0 2px;color:#1d4ed8}h2{font-size:12px;margin:0 0 12px;color:#6b7280;font-weight:normal}' +
+    '.hd{border-bottom:2px solid #1d4ed8;padding-bottom:10px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:flex-start}' +
+    '.hdr{text-align:right;font-size:10px;color:#6b7280;line-height:1.6}' +
+    '.filt{background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;padding:7px 12px;margin-bottom:14px;font-size:10px;color:#475569}' +
+    '.kpis{display:flex;gap:14px;margin-bottom:16px;flex-wrap:wrap}' +
+    '.kpi{border:1px solid #e2e8f0;border-radius:6px;padding:7px 14px;min-width:90px}' +
+    '.kpi .lb{font-size:9px;color:#6b7280;text-transform:uppercase;margin-bottom:2px}' +
+    '.kpi .vl{font-size:14px;font-weight:700;color:#111827}' +
+    'table{width:100%;border-collapse:collapse;font-size:10px;margin-bottom:20px}' +
+    'th{background:#1d4ed8;color:#fff;padding:5px 7px;text-align:left;font-weight:600;font-size:10px}' +
+    'tr:nth-child(even){background:#f8fafc}td{padding:4px 7px;border-bottom:1px solid #f1f5f9;vertical-align:top}' +
+    '@page{margin:1.5cm}@media print{.np{display:none!important}body{padding:0}}';
+  var html = '<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>' + escapeHtml(titulo) + '</title><style>' + css + '</style></head><body>';
+  html += '<div class="hd"><div><h1>Óticas Target</h1><h2>' + escapeHtml(titulo) + '</h2></div>' +
+    '<div class="hdr">' + escapeHtml(agora) + '<br>' + escapeHtml(usuNome) +
+    (usuPerfil ? ' · ' + escapeHtml(usuPerfil) : '') + (usuLoja ? '<br>' + escapeHtml(usuLoja) : '') + '</div></div>';
+  if (filtrosDesc) html += '<div class="filt"><strong>Filtros:</strong> ' + escapeHtml(filtrosDesc) + '</div>';
+  if (kpis && kpis.length) {
+    html += '<div class="kpis">';
+    kpis.forEach(function(k) { html += '<div class="kpi"><div class="lb">' + escapeHtml(k.label) + '</div><div class="vl">' + escapeHtml(String(k.valor)) + '</div></div>'; });
+    html += '</div>';
+  }
+  html += '<table><thead><tr>' + colunas.map(function(c) { return '<th>' + escapeHtml(c) + '</th>'; }).join('') + '</tr></thead><tbody>';
+  linhas.forEach(function(row) {
+    html += '<tr>' + row.map(function(cell) { return '<td>' + escapeHtml(String(cell == null ? '—' : cell)) + '</td>'; }).join('') + '</tr>';
+  });
+  html += '</tbody></table>';
+  html += '<div class="np" style="text-align:center;padding:16px 0">' +
+    '<button onclick="window.print()" style="padding:10px 28px;background:#1d4ed8;color:#fff;border:none;border-radius:6px;font-size:13px;cursor:pointer;margin-right:8px">🖨️ Imprimir / Salvar PDF</button>' +
+    '<button onclick="window.close()" style="padding:10px 18px;background:#f1f5f9;color:#374151;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;cursor:pointer">Fechar</button></div>';
+  html += '</body></html>';
+  var win = window.open('', '_blank', 'width=1100,height=750,scrollbars=yes');
+  if (!win) { alert('Permita pop-ups neste site para gerar o PDF.'); return; }
+  win.document.open();
+  win.document.write(html);
+  win.document.close();
+}
+
+function gerarAgendaPDF() {
+  var filtered = aplicarFiltrosInteligentes(state.agendamentos || []);
+  if (!filtered.length) { toast('Nenhum dado para exportar.', 'err'); return; }
+  var compar   = filtered.filter(function(r) { return String(r.Compareceu||r.compareceu||'').toLowerCase().indexOf('sim') >= 0 || String(r.StatusAgenda||r.status||'').toLowerCase() === 'compareceu'; }).length;
+  var comOS    = filtered.filter(function(r) { return !!(r.NumeroOS || r.numero_os); }).length;
+  var valorTot = filtered.reduce(function(s,r) { return s + Number(r.ValorVenda||r.valor_venda||0); }, 0);
+  var kpis = [
+    { label: 'Total de registros', valor: filtered.length },
+    { label: 'Compareceram',       valor: compar },
+    { label: 'Com OS',             valor: comOS },
+    { label: 'Valor total',        valor: money(valorTot) },
+  ];
+  var colunas = ['Data', 'Cliente', 'Status', 'Status OS', 'Nº OS', 'Valor', 'Desconto', 'Vendedor', 'Optometrista', 'Loja'];
+  var linhas  = filtered.map(function(r) {
+    return [
+      formatDateBR(r.DataAgendamento || r.data_agendamento) || '—',
+      r.NomeCompleto || r.nome || '—',
+      r.StatusAgenda || r.status || '—',
+      r.StatusOS || r.status_os || '—',
+      r.NumeroOS || r.numero_os || '—',
+      money(r.ValorVenda || r.valor_venda || 0),
+      money(r.Desconto || r.desconto || 0),
+      r.VendedorNome || r.vendedor_nome || '—',
+      r.Optometrista || r.optometrista || '—',
+      r.Loja || r.loja || '—',
+    ];
+  });
+  abrirJanelaPDF('Relatório de Agendamentos', construirDescFiltros(), kpis, colunas, linhas);
+}
+
+function gerarFaturamentoPDF() {
+  var rows = window._finRows || [];
+  if (!rows.length) { toast('Carregue o faturamento antes de exportar.', 'err'); return; }
+  var total = rows.reduce(function(s,r) { return s + Number(r.valor_total||0); }, 0);
+  var desc  = rows.reduce(function(s,r) { return s + Number(r.desconto||0); }, 0);
+  var pagos = rows.filter(function(r) { return Number(r.valor_total||0) > 0; }).length;
+  var kpis  = [
+    { label: 'Total faturado',  valor: money(total) },
+    { label: 'Total descontos', valor: money(desc) },
+    { label: 'OS com valor',    valor: pagos },
+    { label: 'Ticket médio',    valor: money(pagos ? total/pagos : 0) },
+    { label: 'Total de linhas', valor: rows.length },
+  ];
+  var colunas = ['Data', 'Cliente', 'Nº OS', 'Status', 'Valor', 'Desconto', 'Vendedor', 'Loja'];
+  var linhas  = rows.map(function(r) {
+    return [
+      formatDateBR(r.data_venda) || '—',
+      r.cliente_nome || '—',
+      r.numero_os || String(r.id),
+      r.status_pagamento || r.status_os || '—',
+      money(r.valor_total || 0),
+      money(r.desconto || 0),
+      r.vendedor || '—',
+      r.loja || '—',
+    ];
+  });
+  var fp = [];
+  var v  = (byId('finVendedor') || {}).value || '';
+  var d1 = (byId('finDataDe')   || {}).value || '';
+  var d2 = (byId('finDataAte')  || {}).value || '';
+  if (v)  fp.push('Vendedor: ' + v);
+  if (d1) fp.push('De: ' + d1);
+  if (d2) fp.push('Até: ' + d2);
+  abrirJanelaPDF('Relatório de Faturamento', fp.join(' | ') || 'Sem filtros', kpis, colunas, linhas);
+}
+
+function gerarHistoricoPDF() {
+  var acao    = (byId('histFiltroAcao')   || {}).value || '';
+  var perfil  = (byId('histFiltroPerfil') || {}).value || '';
+  var nome    = (byId('histFiltroNome')   || {}).value || '';
+  var dataDe  = (byId('histDataDe')       || {}).value || '';
+  var dataAte = (byId('histDataAte')      || {}).value || '';
+  var url = '/api/historico-agendamentos?pagina=1&limite=500';
+  if (acao)    url += '&acao='    + encodeURIComponent(acao);
+  if (perfil)  url += '&perfil='  + encodeURIComponent(perfil);
+  if (nome)    url += '&nome='    + encodeURIComponent(nome);
+  if (dataDe)  url += '&dataDe='  + encodeURIComponent(dataDe);
+  if (dataAte) url += '&dataAte=' + encodeURIComponent(dataAte);
+  showLoading(true);
+  apiGet(url).then(function(res) {
+    var rows = Array.isArray(res.historicos) ? res.historicos : [];
+    var porAcao = {};
+    rows.forEach(function(r) { porAcao[r.acao||'?'] = (porAcao[r.acao||'?']||0)+1; });
+    var kpis = [{ label: 'Total de registros', valor: res.total || rows.length }];
+    Object.keys(porAcao).forEach(function(k) { kpis.push({ label: k, valor: porAcao[k] }); });
+    var colunas = ['Data/Hora', 'Tipo', 'Perfil', 'Operador', 'Cliente', 'Loja', 'Alterações'];
+    var linhas  = rows.map(function(r) {
+      var diff    = histComputeDiff(r.registro_anterior, r.registro_novo);
+      var diffTxt = diff.replace(/<[^>]+>/g,'').replace(/&nbsp;/g,' ');
+      var ts = r.criado_em ? (formatDateBR(r.criado_em) + ' ' + new Date(r.criado_em).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'})) : '—';
+      return [ts, r.acao||'—', r.feito_por_perfil||'—', r.feito_por_nome||'—', r.cliente_nome||'—', r.loja||'—', diffTxt];
+    });
+    var ft = [];
+    if (acao)    ft.push('Ação: '+acao);
+    if (perfil)  ft.push('Perfil: '+perfil);
+    if (nome)    ft.push('Nome: '+nome);
+    if (dataDe)  ft.push('De: '+dataDe);
+    if (dataAte) ft.push('Até: '+dataAte);
+    abrirJanelaPDF('Histórico Interno', ft.join(' | ') || 'Sem filtros', kpis, colunas, linhas);
+  }).catch(function(err) { setMsg('msgForm', err.message, 'err'); })
+  .finally(function() { showLoading(false); });
+}
+
+function finLimparFiltros() {
+  byId('finDataDe').value   = '';
+  byId('finDataAte').value  = '';
+  byId('finVendedor').value = '';
+  carregarFaturamento();
 }
 
 function sincronizarSistema() {

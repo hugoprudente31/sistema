@@ -2587,23 +2587,49 @@ app.get("/api/faturamentos", async (req, res) => {
     if (!canViewFinanceSession(req.session)) {
       return res.status(403).json({ ok: false, message: "Perfil sem acesso ao financeiro." });
     }
-    const query = `SELECT id, id AS agendamento_id, nome AS cliente_nome, numero_os, status_os, loja,
-        COALESCE(NULLIF(vendedor_nome, ''), NULLIF(consultor_responsavel, ''), NULLIF(vendedor_atendeu_nome, ''), proprietario_nome, responsavel, '') AS vendedor,
-        COALESCE(NULLIF(proprietario_nome, ''), NULLIF(agendado_por_nome, ''), NULLIF(responsavel, ''), '') AS proprietario_nome,
-        COALESCE(valor_venda, 0)::numeric AS valor_total, COALESCE(desconto, 0)::numeric AS desconto,
-        CASE WHEN COALESCE(valor_venda, 0) > 0 THEN 'Venda registrada' ELSE 'Sem venda' END AS status_pagamento,
-        COALESCE(data_finalizacao_os, data_entrega_os, data_entrada_os, data_agendamento, criado_em::date) AS data_venda
-      FROM agendamentos
-      WHERE excluido_em IS NULL
-        AND nome NOT ILIKE '%teste%' AND COALESCE(loja, '') NOT ILIKE '%teste%'
-        AND (COALESCE(valor_venda, 0) > 0 OR COALESCE(desconto, 0) > 0)
-        ${canViewAllStores(req.session) ? "" : `AND ${storeSql("loja")}`}
-      ORDER BY COALESCE(data_finalizacao_os, data_entrega_os, data_entrada_os, data_agendamento, criado_em::date) DESC, id DESC LIMIT 1000`;
-    const result = canViewAllStores(req.session)
-      ? await pool.query(query)
-      : req.session.loja
-        ? await pool.query(query, [req.session.loja])
-        : { rows: [] };
+
+    const params = [];
+    const conds  = [
+      "excluido_em IS NULL",
+      "nome NOT ILIKE '%teste%'",
+      "COALESCE(loja, '') NOT ILIKE '%teste%'",
+      "(COALESCE(valor_venda, 0) > 0 OR COALESCE(desconto, 0) > 0)",
+    ];
+
+    if (!canViewAllStores(req.session)) {
+      if (!req.session.loja) return res.json({ ok: true, total: 0, faturamentos: [] });
+      params.push(req.session.loja);
+      conds.push(storeSql("loja", `$${params.length}`));
+    }
+
+    if (req.query.vendedor) {
+      params.push(`%${req.query.vendedor}%`);
+      conds.push(`COALESCE(NULLIF(vendedor_nome,''), NULLIF(consultor_responsavel,''), NULLIF(vendedor_atendeu_nome,''), proprietario_nome, responsavel, '') ILIKE $${params.length}`);
+    }
+    if (req.query.dataDe) {
+      params.push(req.query.dataDe);
+      conds.push(`COALESCE(data_finalizacao_os, data_entrega_os, data_entrada_os, data_agendamento) >= $${params.length}::date`);
+    }
+    if (req.query.dataAte) {
+      params.push(req.query.dataAte);
+      conds.push(`COALESCE(data_finalizacao_os, data_entrega_os, data_entrada_os, data_agendamento) <= $${params.length}::date`);
+    }
+
+    const where  = `WHERE ${conds.join(" AND ")}`;
+    const result = await pool.query(
+      `SELECT id, id AS agendamento_id, nome AS cliente_nome, numero_os, status_os, loja,
+          COALESCE(NULLIF(vendedor_nome,''), NULLIF(consultor_responsavel,''), NULLIF(vendedor_atendeu_nome,''), proprietario_nome, responsavel, '') AS vendedor,
+          COALESCE(NULLIF(proprietario_nome,''), NULLIF(agendado_por_nome,''), NULLIF(responsavel,''), '') AS proprietario_nome,
+          COALESCE(valor_venda, 0)::numeric AS valor_total,
+          COALESCE(desconto, 0)::numeric AS desconto,
+          CASE WHEN COALESCE(valor_venda, 0) > 0 THEN 'Venda registrada' ELSE 'Sem venda' END AS status_pagamento,
+          COALESCE(data_finalizacao_os, data_entrega_os, data_entrada_os, data_agendamento, criado_em::date) AS data_venda
+       FROM agendamentos ${where}
+       ORDER BY COALESCE(data_finalizacao_os, data_entrega_os, data_entrada_os, data_agendamento, criado_em::date) DESC, id DESC
+       LIMIT 1000`,
+      params
+    );
+
     res.json({ ok: true, total: result.rows.length, faturamentos: result.rows });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });
@@ -2816,6 +2842,10 @@ app.get("/api/historico-agendamentos", async (req, res) => {
     if (req.query.perfil) {
       params.push(req.query.perfil.toLowerCase());
       conds.push(`LOWER(COALESCE(feito_por_perfil,'')) = $${params.length}`);
+    }
+    if (req.query.nome) {
+      params.push(`%${req.query.nome}%`);
+      conds.push(`feito_por_nome ILIKE $${params.length}`);
     }
     if (req.query.dataDe) {
       params.push(req.query.dataDe);
