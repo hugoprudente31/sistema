@@ -63,9 +63,12 @@
         if (vnd.indexOf(normalize(filters.vendedor)) < 0) return false;
       }
       if (filters.accessTag && normalize(value(row, ['AccessTags', 'access_tags'])).indexOf(normalize(filters.accessTag)) < 0) return false;
-      if (filters.ownerId) {
-        var owner = normalize(value(row, ['ProprietarioId', 'proprietario_id', 'ProprietarioNome', 'proprietario_nome']));
-        if (owner !== normalize(filters.ownerId)) return false;
+      if (filters.proprietario) {
+        var prop = normalize([value(row, ['ProprietarioNome', 'proprietario_nome']), value(row, ['AgendadoPorNome', 'agendado_por_nome'])].join(' '));
+        if (prop.indexOf(normalize(filters.proprietario)) < 0) return false;
+      }
+      if (filters.origem) {
+        if (normalize(value(row, ['Origem', 'origem'])).indexOf(normalize(filters.origem)) < 0) return false;
       }
       if (filters.cliente) {
         var client = normalize([value(row, ['NomeCompleto', 'nome']), value(row, ['WhatsApp', 'whatsapp']), value(row, ['Email', 'email'])].join(' '));

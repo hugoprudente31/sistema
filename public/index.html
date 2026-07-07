@@ -385,11 +385,14 @@
           <div><label>Cliente</label><input id="filtroCliente" type="text" oninput="debouncedReload()" placeholder="Nome, WhatsApp ou e-mail"></div>
           <div><label>Loja</label><select id="filtroLoja" onchange="recarregarComFiltros()"></select></div>
           <div><label>Optometrista</label><input id="filtroOptometrista" type="text" oninput="debouncedReload()" placeholder="Digite o nome"></div>
-          <div><label>Usuário / Proprietário</label><select id="filtroOwner" onchange="recarregarComFiltros()"></select></div>
+          <div><label>Proprietário</label><input id="filtroOwner" type="text" oninput="debouncedReload()" placeholder="Nome do proprietário"></div>
         </div>
-        <div class="row-4">
-          <div><label>Vendedor / Consultor</label><input id="filtroVendedor" type="text" oninput="debouncedReload()" placeholder="Nome do vendedor"></div>
+        <div class="row-3">
+          <div><label>Vendedor / Consultor</label><input id="filtroVendedor" type="text" oninput="debouncedReload()" placeholder="Nome do vendedor ou consultor"></div>
+          <div><label>Origem</label><select id="filtroOrigem" onchange="recarregarComFiltros()"><option value="">Todas</option></select></div>
           <div><label>Tag de acesso</label><select id="filtroAccessTag" onchange="recarregarComFiltros()"></select></div>
+        </div>
+        <div style="display:flex;gap:20px;align-items:center;margin-top:6px;">
           <div class="checkbox-line"><input id="filtroMeus" type="checkbox" onchange="recarregarComFiltros()"><label for="filtroMeus" style="margin:0;">Meus Serviços</label></div>
           <div class="checkbox-line"><input id="filtroMinhasOSAtivas" type="checkbox" onchange="recarregarComFiltros()"><label for="filtroMinhasOSAtivas" style="margin:0;">Minhas OS Ativas</label></div>
         </div>
@@ -1339,11 +1342,12 @@ function carregarLeadTime() {
 }
 
 function preencherOrigens() {
-  var html = '<option value="">Selecione a origem</option>';
-  html += state.origens.length ? state.origens.map(function(o) {
+  var opcoesHtml = state.origens.length ? state.origens.map(function(o) {
     return '<option value="' + escapeHtml(o.Origem) + '">' + escapeHtml(o.Origem) + '</option>';
-  }).join('') : '<option value="">Nenhuma origem encontrada</option>';
-  byId('origem').innerHTML = html;
+  }).join('') : '';
+  byId('origem').innerHTML = '<option value="">Selecione a origem</option>' + (opcoesHtml || '<option value="">Nenhuma origem encontrada</option>');
+  var filtroEl = byId('filtroOrigem');
+  if (filtroEl) filtroEl.innerHTML = '<option value="">Todas</option>' + opcoesHtml;
 }
 
 function preencherLojas() {
@@ -1390,6 +1394,7 @@ function preencherFiltroLojas() {
 
 function preencherOwners() {
   var el = byId('filtroOwner');
+  if (!el || el.tagName !== 'SELECT') return;
   var role = roleName();
   if (role === 'optometrista') {
     el.innerHTML = '<option value="">Filtrado automaticamente pela sua loja</option>';
@@ -1479,7 +1484,8 @@ function coletarFiltros() {
     loja: byId('filtroLoja').value.trim(),
     optometrista: byId('filtroOptometrista').value.trim(),
     vendedor: byId('filtroVendedor') ? byId('filtroVendedor').value.trim() : '',
-    ownerId: byId('filtroOwner').value.trim(),
+    proprietario: byId('filtroOwner') ? byId('filtroOwner').value.trim() : '',
+    origem: byId('filtroOrigem') ? byId('filtroOrigem').value.trim() : '',
     accessTag: byId('filtroAccessTag').value.trim(),
     periodoDias: byId('filtroPeriodoDias').value.trim(),
     resultado: (function() {
@@ -1513,8 +1519,8 @@ function coletarFiltros() {
 }
 
 function limparFiltros() {
-  ['filtroDataDe', 'filtroDataAte', 'filtroCliente', 'filtroOptometrista', 'filtroVendedor', 'filtroStatus', 'filtroStatusOS', 'filtroOwner', 'filtroAccessTag', 'filtroPeriodoDias'].forEach(function(id) {
-    byId(id).value = '';
+  ['filtroDataDe', 'filtroDataAte', 'filtroCliente', 'filtroOptometrista', 'filtroVendedor', 'filtroOwner', 'filtroOrigem', 'filtroStatus', 'filtroStatusOS', 'filtroAccessTag', 'filtroPeriodoDias'].forEach(function(id) {
+    if (byId(id)) byId(id).value = '';
   });
   document.querySelectorAll('#filtroResultadoGroup .filtro-btn.ativo').forEach(function(b) { b.classList.remove('ativo'); });
   byId('filtroMinhasOSAtivas').checked = false;
@@ -2266,8 +2272,10 @@ function construirDescFiltros() {
   if (f.statusOS)    parts.push('Status OS: ' + f.statusOS);
   if (f.cliente)     parts.push('Cliente: ' + f.cliente);
   if (f.optometrista)parts.push('Optometrista: ' + f.optometrista);
-  if (f.vendedor)    parts.push('Vendedor: ' + f.vendedor);
-  if (f.loja)        parts.push('Loja: ' + f.loja);
+  if (f.vendedor)     parts.push('Vendedor: ' + f.vendedor);
+  if (f.proprietario) parts.push('Proprietário: ' + f.proprietario);
+  if (f.origem)       parts.push('Origem: ' + f.origem);
+  if (f.loja)         parts.push('Loja: ' + f.loja);
   if (f.meus === 'true') parts.push('Meus serviços');
   return parts.join(' | ') || 'Sem filtros aplicados';
 }
