@@ -1584,7 +1584,7 @@ function salvarAgendamento() {
   }
 
   var _dataEscolhida = byId('dataAgendamento').value.trim();
-  if (_dataEscolhida) {
+  if (_dataEscolhida && roleName() !== 'admin' && roleName() !== 'gerente de loja') {
     var _hoje = new Date().toISOString().slice(0, 10);
     if (_dataEscolhida < _hoje) {
       setMsg('msgForm', 'Não é permitido agendar com data passada. Escolha uma data a partir de hoje (' + formatDateBR(_hoje) + ').', 'err');
@@ -1665,7 +1665,10 @@ function limparFormulario(clearMsg) {
   ['nomeCompleto', 'whatsApp', 'emailCliente', 'dataAgendamento', 'horario', 'observacao', 'consultorVendedor'].forEach(function(id) {
     if (byId(id)) byId(id).value = '';
   });
-  if (byId('dataAgendamento')) byId('dataAgendamento').min = new Date().toISOString().slice(0, 10);
+  if (byId('dataAgendamento')) {
+    var _podePassado = roleName() === 'admin' || roleName() === 'gerente de loja';
+    byId('dataAgendamento').min = _podePassado ? '' : new Date().toISOString().slice(0, 10);
+  }
   byId('origem').value = '';
   byId('statusAgenda').value = '';
   byId('accessTag').value = '';
@@ -1782,7 +1785,7 @@ function salvarEdicaoLinha() {
     return;
   }
 
-  if (payload.dataAgendamento) {
+  if (payload.dataAgendamento && roleName() !== 'admin' && roleName() !== 'gerente de loja') {
     var _dataOriginal = (state.editingRow && state.editingRow.DataAgendamento) || '';
     if (payload.dataAgendamento !== _dataOriginal) {
       var _hojeEdit = new Date().toISOString().slice(0, 10);
