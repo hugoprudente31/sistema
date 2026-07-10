@@ -87,10 +87,17 @@ const PUBLIC_BLOCKING_STATUSES = [
   "OS em Andamento",
 ];
 
-const TODOS_HORARIOS = [
-  "10:00", "10:30", "11:00", "11:30",
-  "14:00", "14:30", "15:00", "15:30", "16:00", "16:30", "17:00", "17:30",
-];
+// Gerado dinamicamente — não hardcodar aqui para manter alinhamento com gerarHorariosBase
+const TODOS_HORARIOS = (function() {
+  const slots = [];
+  for (let m = 10 * 60; m <= 18 * 60; m += 15) {
+    const hh = String(Math.floor(m / 60)).padStart(2, "0");
+    const mm = String(m % 60).padStart(2, "0");
+    const h = `${hh}:${mm}`;
+    if (h !== "13:00" && h !== "13:15" && h !== "13:30" && h !== "13:45") slots.push(h);
+  }
+  return slots;
+})();
 
 const _cache = new Map();
 const CACHE_TTL = 30_000;
@@ -192,11 +199,13 @@ function cacheSet(key, data) {
 
 function generateSlots(startHour, endHour) {
   const slots = [];
-  for (let h = startHour; h <= endHour; h += 1) {
-    slots.push(`${String(h).padStart(2, "0")}:00`);
-    if (h !== endHour) slots.push(`${String(h).padStart(2, "0")}:30`);
+  for (let m = startHour * 60; m <= endHour * 60; m += 15) {
+    const hh = String(Math.floor(m / 60)).padStart(2, "0");
+    const mm = String(m % 60).padStart(2, "0");
+    slots.push(`${hh}:${mm}`);
   }
-  return slots.filter((h) => h !== "13:00" && h !== "13:30");
+  // Bloqueia almoço 13:00–13:45 (1h, 4 slots de 15 min) para todas as lojas exceto Gonzaga
+  return slots.filter(h => h !== "13:00" && h !== "13:15" && h !== "13:30" && h !== "13:45");
 }
 
 function getHorariosLoja(loja, data) {
@@ -209,8 +218,9 @@ function getHorariosLoja(loja, data) {
 
   let slots = generateSlots(10, day === 6 ? 16 : 18);
   const lojaKey = stripAccents(loja).replace(/[^a-z]/g, "");
+  // Gonzaga: almoço 14:00–14:45 em dias úteis (4 slots de 15 min)
   if ((lojaKey.includes("gonzaga") || lojaKey.includes("santos")) && day >= 1 && day <= 5) {
-    slots = slots.filter((h) => h !== "14:00" && h !== "14:30");
+    slots = slots.filter((h) => h !== "14:00" && h !== "14:15" && h !== "14:30" && h !== "14:45");
   }
 
   return slots;
