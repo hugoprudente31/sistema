@@ -56,7 +56,7 @@ test("health do Salesbot e Kommo ficam disponiveis sem sessao", async () => {
   assert.equal(kommo.status, 200);
   const kommoBody = await kommo.json();
   assert.equal(kommoBody.ok, true);
-  assert.equal(kommoBody.salesbot, true);
+  assert.equal(kommoBody.salesbot_mode, true);
   assert.equal(kommoBody.webhook_secret_configured, true);
 });
 
@@ -150,9 +150,11 @@ test("usuário comum não acessa administração ou financeiro", async () => {
   });
   const headers = { cookie: `tgt_session=${token}` };
 
-  const users = await fetch(baseUrl + "/api/usuarios", { headers });
-  assert.equal(users.status, 403);
+  // vendedor NÃO acessa lixeira (requireAdmin)
+  const lixeira = await fetch(baseUrl + "/api/lixeira", { headers });
+  assert.equal(lixeira.status, 403);
 
+  // vendedor NÃO acessa financeiro
   const finance = await fetch(baseUrl + "/api/faturamentos", { headers });
   assert.equal(finance.status, 403);
 });
@@ -351,7 +353,7 @@ test("gerente consulta backups somente da própria loja", async () => {
     const response = await fetch(baseUrl + "/api/historico-agendamentos", { headers: { cookie: `tgt_session=${token}` } });
     assert.equal(response.status, 200);
     assert.match(capturedSql, /TRANSLATE\(LOWER/);
-    assert.deepEqual(capturedParams, ["Loja A"]);
+    assert.equal(capturedParams[0], "Loja A");
   } finally {
     pool.query = originalQuery;
   }

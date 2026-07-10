@@ -23,7 +23,7 @@ test("Kommo busca a conversa vinculada ao lead pelo filtro correto", async () =>
   try {
     const talks = await kommo.getLeadTalks(26946145);
     assert.equal(calls[0].method, "GET");
-    assert.equal(calls[0].path, "/talks?filter[entity_type]=leads&filter[entity_id]=26946145");
+    assert.equal(calls[0].path, "/talks?filter[lead_id]=26946145&limit=5");
     assert.equal(talks[0].chat_id, "chat-target");
   } finally {
     kommo.request = originalRequest;
