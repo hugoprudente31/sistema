@@ -1,0 +1,883 @@
+'use strict';
+/**
+ * Testes completos de permissões por perfil e loja.
+ * Cobre os 7 perfis × 4 lojas — agendamentos, OS, financeiro, negociação,
+ * notificações e rotas exclusivas de admin.
+ */
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+
+process.env.SESSION_SECRET = 'test-session-secret-with-at-least-32-characters';
+process.env.SESSION_TTL_HOURS = '1';
+process.env.SALESBOT_SECRET = 'test-salesbot-secret';
+process.env.KOMMO_WEBHOOK_SECRET = 'test-webhook-secret';
+process.env.KOMMO_USE_SALESBOT = 'true';
+process.env.BOT_ENABLED = 'true';
+
+const { app, pool, signSession } = require('../server');
+
+let server, baseUrl;
+
+// ─── 4 lojas da rede ─────────────────────────────────────────────────────────
+const G = 'Óticas TGT - Gonzaga';
+const E = 'Óticas TGT Enseada';
+const P = 'Óticas TGT Pitangueiras';
+const A = 'Óticas Target - Ademar de Barros';
+const LOJAS = [G, E, P, A];
+
+// ─── Helpers de sessão ───────────────────────────────────────────────────────
+function tok(perfil, loja) {
+  return signSession({
+    id: String(Math.random()),
+    nome: 'Test',
+    email: `t@${perfil.replace(/\s+/g, '')}.com`,
+    perfil,
+    loja: loja || ''
+  });
+}
+function H(token) {
+  return { cookie: `tgt_session=${token}`, 'content-type': 'application/json' };
+}
+
+// ─── Helpers de mock ─────────────────────────────────────────────────────────
+// Stub de agendamento com loja e campos opcionais
+function ag(loja, extra) {
+  return Object.assign(
+    { id: 100, nome: 'Maria Silva', loja, status: 'Agendado',
+      compareceu: null, numero_os: null, valor_venda: 0,
+      kommo_lead_id: null, excluido_em: null },
+    extra || {}
+  );
+}
+
+// withQuery(map): substitui pool.query pelo mapa SQL-substring → resultado.
+// Retorna função restore(). Chaves mais específicas devem vir antes.
+function withQuery(map) {
+  const orig = pool.query;
+  pool.query = async function(sql) {
+    for (const key of Object.keys(map)) {
+      if (sql.includes(key)) return map[key];
+    }
+    return { rows: [] };
+  };
+  return function restore() { pool.query = orig; };
+}
+
+// withConnect(updateRow): substitui pool.connect para transações PATCH.
+function withConnect(updateRow) {
+  const orig = pool.connect;
+  pool.connect = async function() {
+    return {
+      query: async function(sql) {
+        if (sql.includes('UPDATE agendamentos SET')) return { rows: [updateRow] };
+        return { rows: [] };
+      },
+      release: function() {}
+    };
+  };
+  return function restore() { pool.connect = orig; };
+}
+
+test.before(async function() {
+  await new Promise(function(resolve) {
+    server = app.listen(0, '127.0.0.1', function() {
+      baseUrl = 'http://127.0.0.1:' + server.address().port;
+      resolve();
+    });
+  });
+});
+
+test.after(async function() {
+  await new Promise(function(resolve) { server.close(resolve); });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// 1. SEM SESSÃO
+// ════════════════════════════════════════════════════════════════════════════
+
+test('sem sessão: todas as rotas protegidas retornam 401', async function() {
+  const rotas = [
+    '/api/agendamentos', '/api/faturamentos', '/api/lixeira',
+    '/api/negociacao/1', '/api/notificacoes', '/api/lead-time',
+    '/api/historico-agendamentos', '/api/usuarios', '/api/clientes'
+  ];
+  for (const rota of rotas) {
+    const r = await fetch(baseUrl + rota);
+    assert.equal(r.status, 401, 'esperado 401 em ' + rota);
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// 2. ADMIN — acesso irrestrito
+// ════════════════════════════════════════════════════════════════════════════
+
+test('admin: agendamentos de todas as 4 lojas — 200', async function() {
+  const restore = withQuery({ 'FROM agendamentos': { rows: LOJAS.map(function(l) { return ag(l); }) } });
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos', { headers: H(tok('admin')) });
+    assert.equal(r.status, 200);
+    assert.equal((await r.json()).total, 4);
+  } finally { restore(); }
+});
+
+test('admin: lixeira (requireAdmin) — 200', async function() {
+  const restore = withQuery({ 'FROM agendamentos': { rows: [] } });
+  try {
+    const r = await fetch(baseUrl + '/api/lixeira', { headers: H(tok('admin')) });
+    assert.equal(r.status, 200);
+  } finally { restore(); }
+});
+
+test('admin: faturamentos globais — 200', async function() {
+  const restore = withQuery({ 'FROM agendamentos': { rows: [ag(G, { valor_venda: 500, desconto: 50 })] } });
+  try {
+    const r = await fetch(baseUrl + '/api/faturamentos', { headers: H(tok('admin')) });
+    assert.equal(r.status, 200);
+    const body = await r.json();
+    assert.ok(body.faturamentos.length > 0, 'deve retornar ao menos um registro');
+  } finally { restore(); }
+});
+
+test('admin: lead-time global — 200', async function() {
+  const restore = withQuery({ 'FROM agendamentos': { rows: [] } });
+  try {
+    const r = await fetch(baseUrl + '/api/lead-time', { headers: H(tok('admin')) });
+    assert.equal(r.status, 200);
+  } finally { restore(); }
+});
+
+test('admin: PATCH com campos OS em qualquer loja — 200', async function() {
+  const r1 = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(E)] } });
+  const r2 = withConnect(ag(E, { numero_os: 'OS999' }));
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('admin', G)),
+      body: JSON.stringify({ numero_os: 'OS999' })
+    });
+    assert.equal(r.status, 200);
+  } finally { r1(); r2(); }
+});
+
+test('admin: negociação de qualquer loja — 200', async function() {
+  const restore = withQuery({ 'FROM agendamento_negociacao': { rows: [] } });
+  try {
+    const r = await fetch(baseUrl + '/api/negociacao/100', { headers: H(tok('admin')) });
+    assert.equal(r.status, 200);
+  } finally { restore(); }
+});
+
+test('admin: POST /api/usuarios — não retorna 403', async function() {
+  const restore = withQuery({
+    'SELECT * FROM usuarios WHERE': { rows: [] },
+    'INSERT INTO usuarios': { rows: [{ id: 99, nome: 'Novo', email: 'n@n.com', cargo: 'vendedor', loja: G, ativo: true }] }
+  });
+  try {
+    const r = await fetch(baseUrl + '/api/usuarios', {
+      method: 'POST', headers: H(tok('admin')),
+      body: JSON.stringify({ nome: 'Novo', email: 'n@novo.com', senha: 'Senha#2026Forte', cargo: 'vendedor', loja: G })
+    });
+    assert.ok(r.status !== 403, 'admin não deve ser bloqueado em POST /api/usuarios');
+  } finally { restore(); }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// 3. ATENDIMENTO CENTRAL — vê tudo mas não é admin nem tem acesso financeiro
+// ════════════════════════════════════════════════════════════════════════════
+
+test('central: agendamentos de todas as 4 lojas — 200', async function() {
+  const restore = withQuery({ 'FROM agendamentos': { rows: LOJAS.map(function(l) { return ag(l); }) } });
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos', { headers: H(tok('atendimento central')) });
+    assert.equal(r.status, 200);
+    assert.equal((await r.json()).total, 4);
+  } finally { restore(); }
+});
+
+test('central: NÃO acessa lixeira — 403', async function() {
+  const r = await fetch(baseUrl + '/api/lixeira', { headers: H(tok('atendimento central')) });
+  assert.equal(r.status, 403);
+});
+
+test('central: NÃO acessa faturamentos (sem permissão financeira) — 403', async function() {
+  const r = await fetch(baseUrl + '/api/faturamentos', { headers: H(tok('atendimento central')) });
+  assert.equal(r.status, 403);
+});
+
+test('central: lead-time global — 200', async function() {
+  const restore = withQuery({ 'FROM agendamentos': { rows: [] } });
+  try {
+    const r = await fetch(baseUrl + '/api/lead-time', { headers: H(tok('atendimento central')) });
+    assert.equal(r.status, 200);
+  } finally { restore(); }
+});
+
+test('central: negociação de qualquer loja — 200', async function() {
+  const restore = withQuery({ 'FROM agendamento_negociacao': { rows: [] } });
+  try {
+    const r = await fetch(baseUrl + '/api/negociacao/100', { headers: H(tok('atendimento central')) });
+    assert.equal(r.status, 200);
+  } finally { restore(); }
+});
+
+test('central: NÃO cria usuários — 403', async function() {
+  const r = await fetch(baseUrl + '/api/usuarios', {
+    method: 'POST', headers: H(tok('atendimento central')),
+    body: JSON.stringify({ nome: 'X', email: 'x@x.com', senha: 'Abc123#Forte', cargo: 'vendedor', loja: G })
+  });
+  assert.equal(r.status, 403);
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// 4. GERENTE DE LOJA — uma instância por loja
+// ════════════════════════════════════════════════════════════════════════════
+
+for (const loja of LOJAS) {
+  test('gerente [' + loja + ']: agendamentos escopados à própria loja', async function() {
+    let capturedParam;
+    const orig = pool.query;
+    pool.query = async function(sql, params) {
+      capturedParam = (params || [])[0];
+      return { rows: [ag(loja)] };
+    };
+    try {
+      const r = await fetch(baseUrl + '/api/agendamentos', { headers: H(tok('gerente de loja', loja)) });
+      assert.equal(r.status, 200);
+      assert.equal(capturedParam, loja, 'loja da sessão deve ser parâmetro SQL');
+    } finally { pool.query = orig; }
+  });
+}
+
+test('gerente: NÃO acessa lixeira — 403', async function() {
+  const r = await fetch(baseUrl + '/api/lixeira', { headers: H(tok('gerente de loja', G)) });
+  assert.equal(r.status, 403);
+});
+
+test('gerente: faturamentos da própria loja — 200', async function() {
+  const restore = withQuery({ 'FROM agendamentos': { rows: [ag(G, { valor_venda: 1200, desconto: 100 })] } });
+  try {
+    const r = await fetch(baseUrl + '/api/faturamentos', { headers: H(tok('gerente de loja', G)) });
+    assert.equal(r.status, 200);
+  } finally { restore(); }
+});
+
+test('gerente: lead-time da própria loja — 200', async function() {
+  const restore = withQuery({ 'FROM agendamentos': { rows: [] } });
+  try {
+    const r = await fetch(baseUrl + '/api/lead-time', { headers: H(tok('gerente de loja', G)) });
+    assert.equal(r.status, 200);
+  } finally { restore(); }
+});
+
+test('gerente Gonzaga: PATCH com OS na própria loja — 200', async function() {
+  const r1 = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(G)] } });
+  const r2 = withConnect(ag(G, { numero_os: 'OS100' }));
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('gerente de loja', G)),
+      body: JSON.stringify({ numero_os: 'OS100' })
+    });
+    assert.equal(r.status, 200);
+  } finally { r1(); r2(); }
+});
+
+test('gerente Gonzaga: PATCH em agendamento da Enseada — 403 cross-store', async function() {
+  const restore = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(E)] } });
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('gerente de loja', G)),
+      body: JSON.stringify({ status: 'Confirmado' })
+    });
+    assert.equal(r.status, 403);
+  } finally { restore(); }
+});
+
+test('gerente Enseada: PATCH em agendamento do Ademar — 403 cross-store', async function() {
+  const restore = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(A)] } });
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('gerente de loja', E)),
+      body: JSON.stringify({ status: 'Confirmado' })
+    });
+    assert.equal(r.status, 403);
+  } finally { restore(); }
+});
+
+test('gerente Gonzaga: GET negociação da própria loja — 200', async function() {
+  const restore = withQuery({
+    'SELECT 1 FROM agendamentos WHERE id': { rows: [{}] },
+    'FROM agendamento_negociacao': { rows: [] }
+  });
+  try {
+    const r = await fetch(baseUrl + '/api/negociacao/100', { headers: H(tok('gerente de loja', G)) });
+    assert.equal(r.status, 200);
+  } finally { restore(); }
+});
+
+test('gerente Gonzaga: GET negociação da Enseada — 403', async function() {
+  const restore = withQuery({ 'SELECT 1 FROM agendamentos WHERE id': { rows: [] } });
+  try {
+    const r = await fetch(baseUrl + '/api/negociacao/100', { headers: H(tok('gerente de loja', G)) });
+    assert.equal(r.status, 403);
+  } finally { restore(); }
+});
+
+test('gerente Gonzaga: POST negociação da Enseada — 403', async function() {
+  const restore = withQuery({ 'SELECT 1 FROM agendamentos WHERE id': { rows: [] } });
+  try {
+    const r = await fetch(baseUrl + '/api/negociacao', {
+      method: 'POST', headers: H(tok('gerente de loja', G)),
+      body: JSON.stringify({ agendamento_id: 100 })
+    });
+    assert.equal(r.status, 403);
+  } finally { restore(); }
+});
+
+test('gerente: NÃO cria usuários — 403', async function() {
+  const r = await fetch(baseUrl + '/api/usuarios', {
+    method: 'POST', headers: H(tok('gerente de loja', G)),
+    body: JSON.stringify({ nome: 'X', email: 'x@x.com', senha: 'Abc#2026Forte', cargo: 'vendedor', loja: G })
+  });
+  assert.equal(r.status, 403);
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// 5. COMPRADOR — financeiro + OS, escopo por loja, não é admin
+// ════════════════════════════════════════════════════════════════════════════
+
+for (const loja of LOJAS) {
+  test('comprador [' + loja + ']: agendamentos escopados à própria loja', async function() {
+    let capturedParam;
+    const orig = pool.query;
+    pool.query = async function(sql, params) {
+      capturedParam = (params || [])[0];
+      return { rows: [ag(loja)] };
+    };
+    try {
+      const r = await fetch(baseUrl + '/api/agendamentos', { headers: H(tok('comprador', loja)) });
+      assert.equal(r.status, 200);
+      assert.equal(capturedParam, loja);
+    } finally { pool.query = orig; }
+  });
+}
+
+test('comprador Enseada: faturamentos — 200', async function() {
+  const restore = withQuery({ 'FROM agendamentos': { rows: [ag(E, { valor_venda: 800 })] } });
+  try {
+    const r = await fetch(baseUrl + '/api/faturamentos', { headers: H(tok('comprador', E)) });
+    assert.equal(r.status, 200);
+  } finally { restore(); }
+});
+
+test('comprador: NÃO acessa lixeira — 403', async function() {
+  const r = await fetch(baseUrl + '/api/lixeira', { headers: H(tok('comprador', E)) });
+  assert.equal(r.status, 403);
+});
+
+test('comprador: NÃO acessa lead-time — 403', async function() {
+  const r = await fetch(baseUrl + '/api/lead-time', { headers: H(tok('comprador', E)) });
+  assert.equal(r.status, 403);
+});
+
+test('comprador Enseada: PATCH OS na própria loja — 200', async function() {
+  const r1 = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(E)] } });
+  const r2 = withConnect(ag(E, { numero_os: 'OS200', status_os: 'Aberta' }));
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('comprador', E)),
+      body: JSON.stringify({ numero_os: 'OS200', status_os: 'Aberta' })
+    });
+    assert.equal(r.status, 200);
+  } finally { r1(); r2(); }
+});
+
+test('comprador Enseada: PATCH em agendamento da Gonzaga — 403 cross-store', async function() {
+  const restore = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(G)] } });
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('comprador', E)),
+      body: JSON.stringify({ status: 'Confirmado' })
+    });
+    assert.equal(r.status, 403);
+  } finally { restore(); }
+});
+
+test('comprador Pitangueiras: PATCH em agendamento do Ademar — 403 cross-store', async function() {
+  const restore = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(A)] } });
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('comprador', P)),
+      body: JSON.stringify({ numero_os: 'OS300' })
+    });
+    assert.equal(r.status, 403);
+  } finally { restore(); }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// 6. CONSULTOR DE VENDAS — sem OS/financeiro, escopo por loja
+// ════════════════════════════════════════════════════════════════════════════
+
+test('consultor Pitangueiras: agendamentos da própria loja — 200', async function() {
+  const restore = withQuery({ 'FROM agendamentos': { rows: [ag(P)] } });
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos', { headers: H(tok('consultor de vendas', P)) });
+    assert.equal(r.status, 200);
+    assert.equal((await r.json()).total, 1);
+  } finally { restore(); }
+});
+
+test('consultor: NÃO acessa faturamentos — 403', async function() {
+  const r = await fetch(baseUrl + '/api/faturamentos', { headers: H(tok('consultor de vendas', P)) });
+  assert.equal(r.status, 403);
+});
+
+test('consultor: NÃO acessa lead-time — 403', async function() {
+  const r = await fetch(baseUrl + '/api/lead-time', { headers: H(tok('consultor de vendas', P)) });
+  assert.equal(r.status, 403);
+});
+
+test('consultor Pitangueiras: PATCH numero_os — 403 (campo bloqueado)', async function() {
+  const restore = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(P)] } });
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('consultor de vendas', P)),
+      body: JSON.stringify({ numero_os: 'OS999' })
+    });
+    assert.equal(r.status, 403);
+  } finally { restore(); }
+});
+
+test('consultor Pitangueiras: PATCH valor_venda — 403 (campo bloqueado)', async function() {
+  const restore = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(P)] } });
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('consultor de vendas', P)),
+      body: JSON.stringify({ valor_venda: 500 })
+    });
+    assert.equal(r.status, 403);
+  } finally { restore(); }
+});
+
+test('consultor Pitangueiras: PATCH desconto — 403 (campo bloqueado)', async function() {
+  const restore = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(P)] } });
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('consultor de vendas', P)),
+      body: JSON.stringify({ desconto: 50 })
+    });
+    assert.equal(r.status, 403);
+  } finally { restore(); }
+});
+
+test('consultor Pitangueiras: PATCH status (campo permitido) — 200', async function() {
+  const r1 = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(P)] } });
+  const r2 = withConnect(ag(P, { status: 'Confirmado' }));
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('consultor de vendas', P)),
+      body: JSON.stringify({ status: 'Confirmado' })
+    });
+    assert.equal(r.status, 200);
+  } finally { r1(); r2(); }
+});
+
+test('consultor Pitangueiras: PATCH em agendamento da Gonzaga — 403 cross-store', async function() {
+  const restore = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(G)] } });
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('consultor de vendas', P)),
+      body: JSON.stringify({ status: 'Confirmado' })
+    });
+    assert.equal(r.status, 403);
+  } finally { restore(); }
+});
+
+test('consultor: NÃO pode excluir_lead — 403', async function() {
+  const restore = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(P)] } });
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('consultor de vendas', P)),
+      body: JSON.stringify({ excluir_lead: true })
+    });
+    assert.equal(r.status, 403);
+  } finally { restore(); }
+});
+
+test('consultor: NÃO pode criar agendamento em outra loja — 403', async function() {
+  const r = await fetch(baseUrl + '/api/agendamentos', {
+    method: 'POST', headers: H(tok('consultor de vendas', P)),
+    body: JSON.stringify({ nome: 'Cliente', loja: G, data_agendamento: '2099-12-31', horario: '10:00' })
+  });
+  assert.equal(r.status, 403);
+});
+
+test('consultor: POST negociação da própria loja — 200', async function() {
+  const orig = pool.query;
+  pool.query = async function(sql) {
+    if (sql.includes('SELECT 1 FROM agendamentos WHERE id')) return { rows: [{}] };
+    if (sql.includes('SELECT id FROM agendamento_negociacao')) return { rows: [] };
+    if (sql.includes('INSERT INTO agendamento_negociacao')) return { rows: [{ id: 1 }] };
+    return { rows: [] };
+  };
+  try {
+    const r = await fetch(baseUrl + '/api/negociacao', {
+      method: 'POST', headers: H(tok('consultor de vendas', P)),
+      body: JSON.stringify({ agendamento_id: 100, status_negociacao: 'Em andamento' })
+    });
+    assert.equal(r.status, 200);
+  } finally { pool.query = orig; }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// 7. VENDEDOR — mesmas restrições de campo que consultor
+// ════════════════════════════════════════════════════════════════════════════
+
+test('vendedor Gonzaga: agendamentos da própria loja — 200', async function() {
+  const restore = withQuery({ 'FROM agendamentos': { rows: [ag(G)] } });
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos', { headers: H(tok('vendedor', G)) });
+    assert.equal(r.status, 200);
+  } finally { restore(); }
+});
+
+test('vendedor: NÃO acessa faturamentos — 403', async function() {
+  const r = await fetch(baseUrl + '/api/faturamentos', { headers: H(tok('vendedor', G)) });
+  assert.equal(r.status, 403);
+});
+
+test('vendedor: NÃO acessa lead-time — 403', async function() {
+  const r = await fetch(baseUrl + '/api/lead-time', { headers: H(tok('vendedor', G)) });
+  assert.equal(r.status, 403);
+});
+
+test('vendedor Gonzaga: PATCH status_os — 403 (campo bloqueado)', async function() {
+  const restore = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(G)] } });
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('vendedor', G)),
+      body: JSON.stringify({ status_os: 'Finalizada' })
+    });
+    assert.equal(r.status, 403);
+  } finally { restore(); }
+});
+
+test('vendedor Gonzaga: PATCH data_abertura_os — 403 (campo bloqueado)', async function() {
+  const restore = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(G)] } });
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('vendedor', G)),
+      body: JSON.stringify({ data_abertura_os: '2026-07-10' })
+    });
+    assert.equal(r.status, 403);
+  } finally { restore(); }
+});
+
+test('vendedor Gonzaga: PATCH observacao (campo permitido) — 200', async function() {
+  const r1 = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(G)] } });
+  const r2 = withConnect(ag(G, { observacao: 'Prefere Zeiss' }));
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('vendedor', G)),
+      body: JSON.stringify({ observacao: 'Prefere Zeiss' })
+    });
+    assert.equal(r.status, 200);
+  } finally { r1(); r2(); }
+});
+
+test('vendedor Gonzaga: PATCH em agendamento do Ademar — 403 cross-store', async function() {
+  const restore = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(A)] } });
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('vendedor', G)),
+      body: JSON.stringify({ observacao: 'ok' })
+    });
+    assert.equal(r.status, 403);
+  } finally { restore(); }
+});
+
+test('vendedor: NÃO pode criar agendamento em outra loja — 403', async function() {
+  const r = await fetch(baseUrl + '/api/agendamentos', {
+    method: 'POST', headers: H(tok('vendedor', G)),
+    body: JSON.stringify({ nome: 'Cliente', loja: E, data_agendamento: '2099-12-31', horario: '10:00' })
+  });
+  assert.equal(r.status, 403);
+});
+
+test('vendedor: POST negociação da própria loja — 200', async function() {
+  const orig = pool.query;
+  pool.query = async function(sql) {
+    if (sql.includes('SELECT 1 FROM agendamentos WHERE id')) return { rows: [{}] };
+    if (sql.includes('SELECT id FROM agendamento_negociacao')) return { rows: [] };
+    if (sql.includes('INSERT INTO agendamento_negociacao')) return { rows: [{ id: 2 }] };
+    return { rows: [] };
+  };
+  try {
+    const r = await fetch(baseUrl + '/api/negociacao', {
+      method: 'POST', headers: H(tok('vendedor', G)),
+      body: JSON.stringify({ agendamento_id: 100, status_negociacao: 'Em andamento' })
+    });
+    assert.equal(r.status, 200);
+  } finally { pool.query = orig; }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// 8. OPTOMETRISTA — só compareceu/status/observação, sem financeiro ou OS
+// ════════════════════════════════════════════════════════════════════════════
+
+for (const loja of LOJAS) {
+  test('optometrista [' + loja + ']: agendamentos escopados à própria loja', async function() {
+    let capturedParam;
+    const orig = pool.query;
+    pool.query = async function(sql, params) {
+      capturedParam = (params || [])[0];
+      return { rows: [ag(loja)] };
+    };
+    try {
+      const r = await fetch(baseUrl + '/api/agendamentos', { headers: H(tok('optometrista', loja)) });
+      assert.equal(r.status, 200);
+      assert.equal(capturedParam, loja);
+    } finally { pool.query = orig; }
+  });
+}
+
+test('optometrista Enseada: PATCH compareceu (campo permitido) — 200', async function() {
+  const r1 = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(E)] } });
+  const r2 = withConnect(ag(E, { compareceu: 'sim' }));
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('optometrista', E)),
+      body: JSON.stringify({ compareceu: 'sim' })
+    });
+    assert.equal(r.status, 200);
+  } finally { r1(); r2(); }
+});
+
+test('optometrista Enseada: PATCH status (campo permitido) — 200', async function() {
+  const r1 = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(E)] } });
+  const r2 = withConnect(ag(E, { status: 'Confirmado' }));
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('optometrista', E)),
+      body: JSON.stringify({ status: 'Confirmado' })
+    });
+    assert.equal(r.status, 200);
+  } finally { r1(); r2(); }
+});
+
+test('optometrista Enseada: PATCH observacao (campo permitido) — 200', async function() {
+  const r1 = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(E)] } });
+  const r2 = withConnect(ag(E, { observacao: 'Usa lentes de grau alto' }));
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('optometrista', E)),
+      body: JSON.stringify({ observacao: 'Usa lentes de grau alto' })
+    });
+    assert.equal(r.status, 200);
+  } finally { r1(); r2(); }
+});
+
+test('optometrista: PATCH numero_os — 403 (campo bloqueado)', async function() {
+  const restore = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(E)] } });
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('optometrista', E)),
+      body: JSON.stringify({ numero_os: 'OS500' })
+    });
+    assert.equal(r.status, 403);
+  } finally { restore(); }
+});
+
+test('optometrista: PATCH valor_venda — 403 (campo bloqueado)', async function() {
+  const restore = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(E)] } });
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('optometrista', E)),
+      body: JSON.stringify({ valor_venda: 999 })
+    });
+    assert.equal(r.status, 403);
+  } finally { restore(); }
+});
+
+test('optometrista: PATCH loja — 403 (campo bloqueado)', async function() {
+  const restore = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(E)] } });
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('optometrista', E)),
+      body: JSON.stringify({ loja: G })
+    });
+    assert.equal(r.status, 403);
+  } finally { restore(); }
+});
+
+test('optometrista: NÃO acessa faturamentos — 403', async function() {
+  const r = await fetch(baseUrl + '/api/faturamentos', { headers: H(tok('optometrista', E)) });
+  assert.equal(r.status, 403);
+});
+
+test('optometrista: NÃO acessa lead-time — 403', async function() {
+  const r = await fetch(baseUrl + '/api/lead-time', { headers: H(tok('optometrista', E)) });
+  assert.equal(r.status, 403);
+});
+
+test('optometrista Enseada: PATCH em agendamento da Pitangueiras — 403 cross-store', async function() {
+  const restore = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(P)] } });
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('optometrista', E)),
+      body: JSON.stringify({ compareceu: 'sim' })
+    });
+    assert.equal(r.status, 403);
+  } finally { restore(); }
+});
+
+test('optometrista: NÃO pode criar agendamento — 403', async function() {
+  const r = await fetch(baseUrl + '/api/agendamentos', {
+    method: 'POST', headers: H(tok('optometrista', E)),
+    body: JSON.stringify({ nome: 'Cliente', loja: E, data_agendamento: '2099-12-31', horario: '10:00' })
+  });
+  assert.equal(r.status, 403);
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// 9. NOTIFICAÇÕES — admin/central vê tudo; demais perfis filtram por loja
+// ════════════════════════════════════════════════════════════════════════════
+
+test('notificações: admin vê todas — 200', async function() {
+  const restore = withQuery({
+    'FROM notificacoes': { rows: [{ id: 1, tipo: 'negociacao', titulo: 'T', mensagem: 'M', agendamento_id: 1, criado_em: new Date().toISOString() }] }
+  });
+  try {
+    const r = await fetch(baseUrl + '/api/notificacoes', { headers: H(tok('admin')) });
+    assert.equal(r.status, 200);
+    assert.equal((await r.json()).notificacoes.length, 1);
+  } finally { restore(); }
+});
+
+test('notificações: central vê todas — 200', async function() {
+  const restore = withQuery({
+    'FROM notificacoes': { rows: [{ id: 2, tipo: 'proposta_15min', titulo: 'T', mensagem: 'M', agendamento_id: 2, criado_em: new Date().toISOString() }] }
+  });
+  try {
+    const r = await fetch(baseUrl + '/api/notificacoes', { headers: H(tok('atendimento central')) });
+    assert.equal(r.status, 200);
+    assert.equal((await r.json()).notificacoes.length, 1);
+  } finally { restore(); }
+});
+
+test('notificações: gerente Gonzaga tem loja como parâmetro SQL', async function() {
+  let capturedParams = [];
+  const orig = pool.query;
+  pool.query = async function(sql, params) {
+    capturedParams = params || [];
+    return { rows: [] };
+  };
+  try {
+    await fetch(baseUrl + '/api/notificacoes', { headers: H(tok('gerente de loja', G)) });
+    assert.ok(capturedParams.includes(G), 'loja Gonzaga deve estar nos parâmetros do SQL de notificações');
+  } finally { pool.query = orig; }
+});
+
+test('notificações: vendedor Pitangueiras tem loja como parâmetro SQL', async function() {
+  let capturedParams = [];
+  const orig = pool.query;
+  pool.query = async function(sql, params) {
+    capturedParams = params || [];
+    return { rows: [] };
+  };
+  try {
+    await fetch(baseUrl + '/api/notificacoes', { headers: H(tok('vendedor', P)) });
+    assert.ok(capturedParams.includes(P), 'loja Pitangueiras deve estar nos parâmetros do SQL de notificações');
+  } finally { pool.query = orig; }
+});
+
+test('notificações: optometrista Enseada tem loja como parâmetro SQL', async function() {
+  let capturedParams = [];
+  const orig = pool.query;
+  pool.query = async function(sql, params) {
+    capturedParams = params || [];
+    return { rows: [] };
+  };
+  try {
+    await fetch(baseUrl + '/api/notificacoes', { headers: H(tok('optometrista', E)) });
+    assert.ok(capturedParams.includes(E), 'loja Enseada deve estar nos parâmetros do SQL de notificações');
+  } finally { pool.query = orig; }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// 10. ROTAS EXCLUSIVAS DE ADMIN — todos os outros perfis bloqueados
+// ════════════════════════════════════════════════════════════════════════════
+
+const NAO_ADMIN = [
+  ['atendimento central', ''],
+  ['gerente de loja', G],
+  ['comprador', E],
+  ['consultor de vendas', P],
+  ['vendedor', P],
+  ['optometrista', E]
+];
+
+test('todos os não-admin: GET /api/lixeira retorna 403', async function() {
+  for (const arr of NAO_ADMIN) {
+    const r = await fetch(baseUrl + '/api/lixeira', { headers: H(tok(arr[0], arr[1])) });
+    assert.equal(r.status, 403, arr[0] + ' deve ser bloqueado na lixeira');
+  }
+});
+
+test('todos os não-admin: POST /api/usuarios retorna 403', async function() {
+  for (const arr of NAO_ADMIN) {
+    const r = await fetch(baseUrl + '/api/usuarios', {
+      method: 'POST', headers: H(tok(arr[0], arr[1])),
+      body: JSON.stringify({ nome: 'X', email: 'x@tst.com', senha: 'Abc#Forte2026', cargo: 'vendedor', loja: arr[1] })
+    });
+    assert.equal(r.status, 403, arr[0] + ' deve ser bloqueado em POST /api/usuarios');
+  }
+});
+
+test('todos os não-admin: DELETE /api/agendamentos retorna 403', async function() {
+  for (const arr of NAO_ADMIN) {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'DELETE', headers: H(tok(arr[0], arr[1]))
+    });
+    assert.equal(r.status, 403, arr[0] + ' deve ser bloqueado em DELETE agendamento');
+  }
+});
+
+test('perfis sem acesso financeiro: faturamentos retorna 403', async function() {
+  const semFinance = [
+    ['atendimento central', ''],
+    ['consultor de vendas', P],
+    ['vendedor', P],
+    ['optometrista', E]
+  ];
+  for (const arr of semFinance) {
+    const r = await fetch(baseUrl + '/api/faturamentos', { headers: H(tok(arr[0], arr[1])) });
+    assert.equal(r.status, 403, arr[0] + ' deve ser bloqueado em faturamentos');
+  }
+});
+
+test('perfis sem acesso a lead-time: retorna 403', async function() {
+  const semLeadTime = [
+    ['comprador', E],
+    ['consultor de vendas', P],
+    ['vendedor', P],
+    ['optometrista', E]
+  ];
+  for (const arr of semLeadTime) {
+    const r = await fetch(baseUrl + '/api/lead-time', { headers: H(tok(arr[0], arr[1])) });
+    assert.equal(r.status, 403, arr[0] + ' deve ser bloqueado em lead-time');
+  }
+});
+
+test('perfis sem acesso a historico-agendamentos: retorna 403', async function() {
+  const semHistorico = [
+    ['atendimento central', ''],
+    ['comprador', E],
+    ['consultor de vendas', P],
+    ['vendedor', P],
+    ['optometrista', E]
+  ];
+  for (const arr of semHistorico) {
+    const r = await fetch(baseUrl + '/api/historico-agendamentos', { headers: H(tok(arr[0], arr[1])) });
+    assert.equal(r.status, 403, arr[0] + ' deve ser bloqueado em historico-agendamentos');
+  }
+});

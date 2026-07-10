@@ -156,12 +156,19 @@ function registerRoutes(app, pool, deps) {
       setImmediate(async function() {
         try {
           var ag = await pool.query(
-            'SELECT nome, loja FROM agendamentos WHERE id = $1',
+            `SELECT nome, loja, kommo_lead_id,
+                    COALESCE(compareceu, '') AS compareceu,
+                    COALESCE(valor_venda, 0)::numeric AS valor_venda,
+                    COALESCE(numero_os, '') AS numero_os
+             FROM agendamentos WHERE id = $1`,
             [agendamento_id]
           );
           if (!ag.rows.length) return;
-          var cliente = ag.rows[0].nome;
-          var loja = ag.rows[0].loja;
+          var a = ag.rows[0];
+          var cliente = a.nome;
+          var loja = a.loja;
+
+          // Notificação padrão de negociação registrada
           await pool.query(
             `INSERT INTO notificacoes (tipo, titulo, mensagem, agendamento_id, destinatarios)
              VALUES ($1,$2,$3,$4,$5)`,
@@ -173,6 +180,66 @@ function registerRoutes(app, pool, deps) {
               ['admin', 'atendimento central']
             ]
           );
+
+          // Fluxo proposta 15 min — somente quando compareceu mas não comprou
+          var comp = (a.compareceu || '').toLowerCase()
+            .normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+          var semCompra = comp === 'sim' && parseFloat(a.valor_venda) === 0 && !a.numero_os;
+          if (!semCompra) return;
+
+          var jaProgramado = await pool.query(
+            `SELECT 1 FROM notificacoes WHERE agendamento_id = $1 AND tipo = 'proposta_15min' LIMIT 1`,
+            [agendamento_id]
+          );
+          if (jaProgramado.rows.length) return;
+
+          // Notificação imediata de acompanhamento para central
+          await pool.query(
+            `INSERT INTO notificacoes (tipo, titulo, mensagem, agendamento_id, destinatarios)
+             VALUES ($1,$2,$3,$4,$5)`,
+            [
+              'proposta_15min',
+              '⏱️ Proposta em 15 min — ' + (cliente || 'Lead'),
+              (cliente || 'Lead') + ' compareceu mas não comprou em ' + (loja || 'loja') + '. Proposta será enviada via WhatsApp em 15 minutos.',
+              agendamento_id,
+              ['admin', 'atendimento central']
+            ]
+          );
+
+          // WhatsApp em 15 minutos (só envia se ainda não houve compra)
+          setTimeout(async function() {
+            try {
+              var latest = await pool.query(
+                `SELECT kommo_lead_id, nome, loja,
+                        COALESCE(valor_venda, 0)::numeric AS valor_venda,
+                        COALESCE(numero_os, '') AS numero_os
+                 FROM agendamentos WHERE id = $1`,
+                [agendamento_id]
+              );
+              if (!latest.rows.length) return;
+              var r = latest.rows[0];
+              if (parseFloat(r.valor_venda) > 0 || r.numero_os) return;
+              if (!r.kommo_lead_id) return;
+
+              var MSG = require('./kommo/bot/messages');
+              var kommo = require('./kommo/client');
+              await kommo.sendMessageToLead(String(r.kommo_lead_id), MSG.propostaSemCompra(r.nome, r.loja));
+
+              await pool.query(
+                `INSERT INTO notificacoes (tipo, titulo, mensagem, agendamento_id, destinatarios)
+                 VALUES ($1,$2,$3,$4,$5)`,
+                [
+                  'proposta_enviada',
+                  '📩 Proposta enviada — acompanhe ' + (r.nome || 'lead'),
+                  'Proposta enviada via WhatsApp para ' + (r.nome || 'lead') + ' (' + (r.loja || '') + '). Aguardando retorno do cliente.',
+                  agendamento_id,
+                  ['admin', 'atendimento central']
+                ]
+              );
+            } catch (e) {
+              console.error('[proposta-15min] Erro ao enviar:', e.message);
+            }
+          }, 15 * 60 * 1000);
         } catch (e) {
           console.error('[negociacao notif]', e);
         }

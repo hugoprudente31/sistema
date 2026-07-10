@@ -169,6 +169,17 @@ module.exports = {
     `2️⃣ Orçamento\n` +
     `3️⃣ Falar com especialista`,
 
+  propostaSemCompra: (nome, loja) => {
+    var primeiro = nome ? nome.trim().split(" ")[0] : "";
+    return `Olá${primeiro ? ", " + primeiro : ""}! 😊\n\n` +
+      `Foi muito bom te receber${loja ? " na " + loja : ""}!\n\n` +
+      `Queremos garantir que você encontre a combinação perfeita de lentes e armações. ` +
+      `Temos uma proposta especial preparada para você!\n\n` +
+      `Posso te enviar agora?\n\n` +
+      `1️⃣ Sim, quero ver a proposta\n` +
+      `2️⃣ Prefiro em outro momento`;
+  },
+
   notaParaAtendente: (state) => [
     "RESUMO DO ATENDIMENTO BOT",
     `Nome: ${state.nome || "Desconhecido"}`,
