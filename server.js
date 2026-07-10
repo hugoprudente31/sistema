@@ -1930,12 +1930,20 @@ app.post("/api/public/agendamentos", validarLandingApiKey, async (req, res) => {
 
     await client.query("COMMIT");
 
+    // Cria lead no Kommo em background — garante lembrete 24h e recuperação automáticos
+    const agRow = agendamento.rows[0];
+    if (agRow.whatsapp) {
+      setImmediate(() => sincronizarAgendamentoKommo(agRow).catch(e =>
+        console.error('[landing-page] Erro ao sincronizar Kommo:', e.message)
+      ));
+    }
+
     res.status(201).json({
       ok: true,
       message: "Agendamento criado com sucesso.",
-      id: agendamento.rows[0].id,
-      agendamentoId: agendamento.rows[0].id,
-      agendamento: agendamento.rows[0],
+      id: agRow.id,
+      agendamentoId: agRow.id,
+      agendamento: agRow,
       cliente_id: cliente.rows[0].id
     });
   } catch (error) {
@@ -2344,6 +2352,12 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
 
         if (!mudancas.length) return;
         await adicionarNotaKommo(leadId, `📋 Atualização — ${after.nome || ''}:\n` + mudancas.map(m => `• ${m}`).join('\n'));
+
+        // Aplica semáforo nao-compareceu no Kommo → aciona recovery.js no dia seguinte
+        if (nc2(after.compareceu) === 'nao' && nc2(before.compareceu) !== 'nao') {
+          const kommoLabels = require('./kommo/labels');
+          await kommoLabels.applyTrafficLight(leadId, 'Não Compareceu').catch(() => {});
+        }
       } catch (_) {}
     });
 

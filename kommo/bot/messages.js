@@ -8,28 +8,28 @@ const LOJAS_INFO = [
     nome: "Gonzaga & Santos",
     titulo: "Óticas TGT - Gonzaga / Santos",
     whatsapp: "(13) 99645-3111",
-    horario: "Segunda a Sexta: 09h às 19h | Sábado: 10h às 18h | Domingo: Fechado",
+    horario: "Agendamentos: Seg–Sex 10h às 18h | Sábado 10h às 16h | Domingo Fechado",
   },
   {
     prefix: "ens",
     nome: "Óticas TGT Enseada",
     titulo: "Óticas TGT - Enseada",
     whatsapp: "(13) 99721-4862",
-    horario: "Segunda a Sexta: 09h às 19h | Sábado: 10h às 16h | Domingo: Fechado",
+    horario: "Agendamentos: Seg–Sex 10h às 18h | Sábado 10h às 16h | Domingo Fechado",
   },
   {
     prefix: "pit",
     nome: "Óticas TGT Pitangueiras",
     titulo: "Óticas TGT - Pitangueiras",
     whatsapp: "(13) 99704-0234",
-    horario: "Segunda a Sexta: 09h às 19h | Sábado: 10h às 16h | Domingo: Fechado",
+    horario: "Agendamentos: Seg–Sex 10h às 18h | Sábado 10h às 16h | Domingo Fechado",
   },
   {
     prefix: "tgt",
     nome: "Óticas Target - Ademar de Barros",
     titulo: "Óticas TGT - Santo Antonio / Target",
     whatsapp: "(13) 99785-6493",
-    horario: "Segunda a Sexta: 09h às 19h | Sábado: 09h às 15h | Domingo: Fechado",
+    horario: "Agendamentos: Seg–Sex 10h às 18h | Sábado 10h às 16h | Domingo Fechado",
   },
 ];
 
