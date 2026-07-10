@@ -416,8 +416,8 @@ function horarioValidoPorRegra(data, horario) {
     return { ok: false, message: "Aos sábados, escolha entre 10:00 e 16:00." };
   }
 
-  if (hr === "13:00" || hr === "13:30") {
-    return { ok: false, message: "Horário de almoço não disponível. Escolha um horário fora do intervalo 13:00–13:30." };
+  if (hr === "13:00" || hr === "13:15" || hr === "13:30" || hr === "13:45") {
+    return { ok: false, message: "Horário de almoço não disponível. Escolha um horário fora do intervalo 13:00–14:00." };
   }
 
   // Datas com encerramento antecipado — todas as lojas
@@ -442,11 +442,12 @@ function gerarHorariosBase(data) {
   const fim = dia === 6 ? 16 * 60 : 18 * 60;
   const horarios = [];
 
-  for (let m = inicio; m <= fim; m += 30) {
+  for (let m = inicio; m <= fim; m += 15) {
     const hh = String(Math.floor(m / 60)).padStart(2, "0");
     const mm = String(m % 60).padStart(2, "0");
     const h = `${hh}:${mm}`;
-    if (h !== "13:00" && h !== "13:30") horarios.push(h);
+    // Bloqueia almoço 13:00–13:45 (1 hora, 4 slots de 15 min) para todas as lojas exceto Gonzaga
+    if (h !== "13:00" && h !== "13:15" && h !== "13:30" && h !== "13:45") horarios.push(h);
   }
 
   // Encerramento antecipado em datas especiais — todas as lojas
@@ -1697,12 +1698,12 @@ app.get("/api/public/horarios-disponiveis", validarLandingApiKey, async (req, re
 
     let horariosBase = gerarHorariosBase(data);
 
-    // Unidade Santos/Gonzaga tem almoço 14:00-14:30 em dias úteis (seg-sex)
+    // Unidade Santos/Gonzaga tem almoço 14:00-14:45 em dias úteis (seg-sex) — 4 slots de 15 min
     const diaRef = new Date(data + "T12:00:00").getDay();
     const lojaKey = loja.toLowerCase().replace(/[^a-z]/g, "");
     const isGonzagaSantos = lojaKey.includes("gonzaga") || lojaKey.includes("santos");
     if (isGonzagaSantos && diaRef >= 1 && diaRef <= 5) {
-      horariosBase = horariosBase.filter(h => h !== "14:00" && h !== "14:30");
+      horariosBase = horariosBase.filter(h => h !== "14:00" && h !== "14:15" && h !== "14:30" && h !== "14:45");
     }
 
     if (!horariosBase.length) {
@@ -1801,8 +1802,8 @@ app.post("/api/public/agendamentos", validarLandingApiKey, async (req, res) => {
       return res.status(400).json(regraHorario);
     }
 
-    // Unidade Santos/Gonzaga: almoço 14:00-14:30 em dias úteis
-    if (horario === "14:00" || horario === "14:30") {
+    // Unidade Santos/Gonzaga: almoço 14:00-14:45 em dias úteis (4 slots de 15 min)
+    if (horario === "14:00" || horario === "14:15" || horario === "14:30" || horario === "14:45") {
       const lojaKeyPost = loja.toLowerCase().replace(/[^a-z]/g, "");
       if (lojaKeyPost.includes("gonzaga") || lojaKeyPost.includes("santos")) {
         const diaPost = new Date(dataAgendamento + "T12:00:00").getDay();
