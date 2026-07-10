@@ -58,6 +58,18 @@ function registerRoutes(app, pool, deps) {
       var id = parseInt(req.params.agendamento_id, 10);
       if (!id || isNaN(id)) return res.status(400).json({ ok: false, message: 'ID inválido.' });
 
+      if (!canViewAllStores(req.session)) {
+        var lojaCheck = await pool.query(
+          `SELECT 1 FROM agendamentos WHERE id = $1
+           AND TRANSLATE(LOWER(TRIM(COALESCE(loja,''))), 'áàâãäéèêëíìîïóòôõöúùûüç', 'aaaaaeeeeiiiiooooouuuuc')
+             = TRANSLATE(LOWER(TRIM($2)), 'áàâãäéèêëíìîïóòôõöúùûüç', 'aaaaaeeeeiiiiooooouuuuc')`,
+          [id, req.session.loja || '']
+        );
+        if (!lojaCheck.rows.length) {
+          return res.status(403).json({ ok: false, message: 'Sem permissão para acessar dados desta loja.' });
+        }
+      }
+
       var result = await pool.query(
         'SELECT * FROM agendamento_negociacao WHERE agendamento_id = $1 ORDER BY criado_em DESC LIMIT 1',
         [id]
@@ -77,6 +89,18 @@ function registerRoutes(app, pool, deps) {
       var agendamento_id = parseInt(body.agendamento_id, 10);
       if (!agendamento_id || isNaN(agendamento_id)) {
         return res.status(400).json({ ok: false, message: 'agendamento_id obrigatório.' });
+      }
+
+      if (!canViewAllStores(session)) {
+        var lojaCheck = await pool.query(
+          `SELECT 1 FROM agendamentos WHERE id = $1
+           AND TRANSLATE(LOWER(TRIM(COALESCE(loja,''))), 'áàâãäéèêëíìîïóòôõöúùûüç', 'aaaaaeeeeiiiiooooouuuuc')
+             = TRANSLATE(LOWER(TRIM($2)), 'áàâãäéèêëíìîïóòôõöúùûüç', 'aaaaaeeeeiiiiooooouuuuc')`,
+          [agendamento_id, session.loja || '']
+        );
+        if (!lojaCheck.rows.length) {
+          return res.status(403).json({ ok: false, message: 'Sem permissão para operar dados desta loja.' });
+        }
       }
 
       var status_negociacao = body.status_negociacao || 'Em andamento';
@@ -167,19 +191,32 @@ function registerRoutes(app, pool, deps) {
       var session = req.session;
       var perfil = (session.perfil || '').toLowerCase();
       var email = session.email || '';
+      var loja  = session.loja  || '';
 
-      var result = await pool.query(
-        `SELECT id, tipo, titulo, mensagem, agendamento_id, criado_em
-         FROM notificacoes
-         WHERE (
-           $1 = ANY(destinatarios) OR $2 = ANY(destinatarios)
-         )
-         AND NOT ($3 = ANY(lidos_por))
-         ORDER BY criado_em DESC
-         LIMIT 50`,
-        [perfil, email, email]
-      );
+      // Admin e central veem tudo pelo perfil ou e-mail.
+      // Demais perfis (gerente, comprador, vendedor…) só veem notificações
+      // endereçadas à sua loja específica OU diretamente ao seu e-mail.
+      var query, params;
+      if (canViewAllStores(session)) {
+        query = `
+          SELECT id, tipo, titulo, mensagem, agendamento_id, criado_em
+          FROM notificacoes
+          WHERE ($1 = ANY(destinatarios) OR $2 = ANY(destinatarios))
+            AND NOT ($2 = ANY(lidos_por))
+          ORDER BY criado_em DESC LIMIT 50`;
+        params = [perfil, email];
+      } else {
+        query = `
+          SELECT id, tipo, titulo, mensagem, agendamento_id, criado_em
+          FROM notificacoes
+          WHERE ($1 = ANY(destinatarios) OR $2 = ANY(destinatarios))
+            AND ($3 = ANY(destinatarios) OR $2 = ANY(destinatarios))
+            AND NOT ($2 = ANY(lidos_por))
+          ORDER BY criado_em DESC LIMIT 50`;
+        params = [perfil, email, loja];
+      }
 
+      var result = await pool.query(query, params);
       return res.json({ ok: true, notificacoes: result.rows });
     } catch (err) {
       console.error('[notificacoes GET]', err);
