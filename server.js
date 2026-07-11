@@ -2138,6 +2138,16 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         return res.status(403).json({ ok: false, message: "Atendimento Central não pode registrar check-in ou presença." });
       }
     }
+    if (roleOf(req.session) === "comprador") {
+      const statusPresenca = clean(b.status || b.statusAgenda).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const alteraPresenca = Object.prototype.hasOwnProperty.call(b, "compareceu") ||
+        Object.prototype.hasOwnProperty.call(b, "atendimento_realizado") ||
+        Object.prototype.hasOwnProperty.call(b, "atendimentoRealizado") ||
+        ["compareceu", "nao compareceu"].includes(statusPresenca);
+      if (alteraPresenca) {
+        return res.status(403).json({ ok: false, message: "Comprador não pode registrar check-in ou presença." });
+      }
+    }
     // Restaurar da lixeira: somente admin
     if (b.restaurar_lead && !isAdmin(req.session)) {
       return res.status(403).json({ ok: false, message: "Apenas admin pode restaurar leads da lixeira." });

@@ -2081,8 +2081,8 @@ function getActionHtml(r) {
     options += '<option value="cancelar">Cancelar</option>';
   }
 
-  // Check-in — Admin, Gerente, Optometrista, Comprador. Central não registra presença.
-  if (['admin', 'gerente de loja', 'optometrista', 'comprador'].indexOf(role) > -1 && ['Agendado', 'Confirmado'].indexOf(st) > -1) {
+  // Check-in — somente Admin, Gerente e Optometrista.
+  if (['admin', 'gerente de loja', 'optometrista'].indexOf(role) > -1 && ['Agendado', 'Confirmado'].indexOf(st) > -1) {
     buttons += '<button onclick="marcarCompareceu(\'' + id + '\')">Check-in Sim</button>';
     buttons += '<button class="secondary" onclick="marcarNaoCompareceu(\'' + id + '\')">Check-in Não</button>';
   }

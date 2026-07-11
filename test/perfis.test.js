@@ -435,6 +435,28 @@ test('comprador Pitangueiras: PATCH em agendamento do Ademar — 403 cross-store
   } finally { restore(); }
 });
 
+test('comprador: NÃO pode marcar check-in compareceu — 403', async function() {
+  const restore = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(E)] } });
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('comprador', E)),
+      body: JSON.stringify({ compareceu: 'Sim', statusAgenda: 'Compareceu' })
+    });
+    assert.equal(r.status, 403);
+  } finally { restore(); }
+});
+
+test('comprador: NÃO pode marcar check-in não compareceu — 403', async function() {
+  const restore = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(P)] } });
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('comprador', P)),
+      body: JSON.stringify({ statusAgenda: 'Não Compareceu' })
+    });
+    assert.equal(r.status, 403);
+  } finally { restore(); }
+});
+
 // ════════════════════════════════════════════════════════════════════════════
 // 6. CONSULTOR DE VENDAS — sem OS/financeiro, escopo por loja
 // ════════════════════════════════════════════════════════════════════════════
