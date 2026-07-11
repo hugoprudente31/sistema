@@ -2128,6 +2128,16 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
     if (!hasRole(req.session, ["admin", "atendimento central", "gerente de loja", "consultor de vendas", "vendedor", "comprador", "optometrista"])) {
       return res.status(403).json({ ok: false, message: "Perfil sem permissão para alterar agendamentos." });
     }
+    if (roleOf(req.session) === "atendimento central") {
+      const statusPresenca = clean(b.status || b.statusAgenda).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const alteraPresenca = Object.prototype.hasOwnProperty.call(b, "compareceu") ||
+        Object.prototype.hasOwnProperty.call(b, "atendimento_realizado") ||
+        Object.prototype.hasOwnProperty.call(b, "atendimentoRealizado") ||
+        ["compareceu", "nao compareceu"].includes(statusPresenca);
+      if (alteraPresenca) {
+        return res.status(403).json({ ok: false, message: "Atendimento Central não pode registrar check-in ou presença." });
+      }
+    }
     // Restaurar da lixeira: somente admin
     if (b.restaurar_lead && !isAdmin(req.session)) {
       return res.status(403).json({ ok: false, message: "Apenas admin pode restaurar leads da lixeira." });

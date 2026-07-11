@@ -228,6 +228,28 @@ test('central: NÃO cria usuários — 403', async function() {
   assert.equal(r.status, 403);
 });
 
+test('central: NÃO pode marcar check-in compareceu — 403', async function() {
+  const restore = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(G)] } });
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('atendimento central')),
+      body: JSON.stringify({ compareceu: 'Sim', statusAgenda: 'Compareceu' })
+    });
+    assert.equal(r.status, 403);
+  } finally { restore(); }
+});
+
+test('central: NÃO pode marcar check-in não compareceu — 403', async function() {
+  const restore = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(E)] } });
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('atendimento central')),
+      body: JSON.stringify({ statusAgenda: 'Não Compareceu' })
+    });
+    assert.equal(r.status, 403);
+  } finally { restore(); }
+});
+
 // ════════════════════════════════════════════════════════════════════════════
 // 4. GERENTE DE LOJA — uma instância por loja
 // ════════════════════════════════════════════════════════════════════════════
