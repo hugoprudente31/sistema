@@ -7,7 +7,6 @@ on:
 jobs:
   codex:
     runs-on: ubuntu-latest
-    continue-on-error: true
     permissions:
       contents: read
     outputs:
@@ -43,6 +42,7 @@ jobs:
       - name: Run Codex
         id: run_codex
         if: steps.check_key.outputs.available == 'true'
+        continue-on-error: true
         uses: openai/codex-action@v1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}

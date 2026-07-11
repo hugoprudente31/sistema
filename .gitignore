@@ -12,5 +12,6 @@ build/
 .cache/
 logs/
 *.log
+tmp-audit-*.js
 pids/
 *.pid
