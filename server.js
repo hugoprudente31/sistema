@@ -391,7 +391,7 @@ function normalizeWhatsappPublico(v) {
   return clean(v).replace(/\D/g, "");
 }
 
-function horarioValidoPorRegra(data, horario) {
+function horarioValidoPorRegra(data, horario, loja = "") {
   const dt = toPgDate(data);
   const hr = clean(horario);
 
@@ -416,8 +416,15 @@ function horarioValidoPorRegra(data, horario) {
     return { ok: false, message: "Aos sábados, escolha entre 10:00 e 16:00." };
   }
 
-  if (hr === "13:00" || hr === "13:15" || hr === "13:30" || hr === "13:45") {
+  const lojaKey = clean(loja).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const isGonzagaSantos = lojaKey.includes("gonzaga") || lojaKey.includes("santos");
+
+  if (!isGonzagaSantos && (hr === "13:00" || hr === "13:15" || hr === "13:30" || hr === "13:45")) {
     return { ok: false, message: "Horário de almoço não disponível. Escolha um horário fora do intervalo 13:00–14:00." };
+  }
+
+  if (isGonzagaSantos && dia >= 1 && dia <= 5 && ["14:00", "14:15", "14:30", "14:45"].includes(hr)) {
+    return { ok: false, message: "Horário de almoço não disponível em Gonzaga. Escolha um horário fora do intervalo 14:00–15:00." };
   }
 
   // Datas com encerramento antecipado — todas as lojas
@@ -429,7 +436,7 @@ function horarioValidoPorRegra(data, horario) {
   return { ok: true };
 }
 
-function gerarHorariosBase(data) {
+function gerarHorariosBase(data, loja = "") {
   const dt = toPgDate(data);
   if (!dt) return [];
 
@@ -447,7 +454,11 @@ function gerarHorariosBase(data) {
     const mm = String(m % 60).padStart(2, "0");
     const h = `${hh}:${mm}`;
     // Bloqueia almoço 13:00–13:45 (1 hora, 4 slots de 15 min) para todas as lojas exceto Gonzaga
-    if (h !== "13:00" && h !== "13:15" && h !== "13:30" && h !== "13:45") horarios.push(h);
+    const lojaKey = clean(loja).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const isGonzagaSantos = lojaKey.includes("gonzaga") || lojaKey.includes("santos");
+    const almocoPadrao = ["13:00", "13:15", "13:30", "13:45"].includes(h);
+    const almocoGonzaga = dia >= 1 && dia <= 5 && ["14:00", "14:15", "14:30", "14:45"].includes(h);
+    if ((!isGonzagaSantos && !almocoPadrao) || (isGonzagaSantos && !almocoGonzaga)) horarios.push(h);
   }
 
   // Encerramento antecipado em datas especiais — todas as lojas
@@ -1696,7 +1707,7 @@ app.get("/api/public/horarios-disponiveis", validarLandingApiKey, async (req, re
       });
     }
 
-    let horariosBase = gerarHorariosBase(data);
+    let horariosBase = gerarHorariosBase(data, loja);
 
     // Unidade Santos/Gonzaga tem almoço 14:00-14:45 em dias úteis (seg-sex) — 4 slots de 15 min
     const diaRef = new Date(data + "T12:00:00").getDay();
@@ -1797,7 +1808,7 @@ app.post("/api/public/agendamentos", validarLandingApiKey, async (req, res) => {
       return res.status(400).json({ ok: false, message: "Data do agendamento é obrigatória." });
     }
 
-    const regraHorario = horarioValidoPorRegra(dataAgendamento, horario);
+    const regraHorario = horarioValidoPorRegra(dataAgendamento, horario, loja);
     if (!regraHorario.ok) {
       return res.status(400).json(regraHorario);
     }

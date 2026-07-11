@@ -2709,7 +2709,8 @@ function deletarPermanenteLead(id, nome) {
 }
 
 function executarDiagnostico() {
-  gas('testarBackend').then(function(res) {
+  byId('diagnosticoOut').textContent = 'Testando Railway e PostgreSQL...';
+  apiGet('/health').then(function(res) {
     byId('diagnosticoOut').textContent = JSON.stringify(res, null, 2);
   }).catch(function(err) {
     byId('diagnosticoOut').textContent = err.message || String(err);
