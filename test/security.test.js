@@ -271,6 +271,15 @@ test("interface usa a permissão financeira assinada pelo servidor", () => {
   assert.doesNotMatch(html, /if \(r === 'admin' \|\| r === 'gerente de loja'\) return true/);
 });
 
+test("painel atualiza imediatamente e ignora respostas antigas após edição", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "public", "index.html"), "utf8");
+  assert.match(html, /cache:\s*'no-store'/);
+  assert.match(html, /aplicarRespostaAgendamentoAtualizado\(data\)/);
+  assert.match(html, /requestSeq !== window\._agendaRequestSeq/);
+  assert.match(html, /recarregarComFiltros\(true\)/);
+  assert.doesNotMatch(html, /agendarAtualizacaoAposAcao\(1500\)/);
+});
+
 test("criação de agendamento grava backup com perfil na mesma transação", async () => {
   const originalConnect = pool.connect;
   const queries = [];

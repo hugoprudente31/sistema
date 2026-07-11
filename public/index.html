@@ -679,7 +679,14 @@ function gas(fnName) {
 
 // ── API PostgreSQL / Railway ─────────────────────────────────
 function apiGet(url) {
-  return fetch(url, { method: 'GET' }).then(function(r) {
+  var separator = String(url).indexOf('?') > -1 ? '&' : '?';
+  var freshUrl = String(url) + separator + '_t=' + Date.now();
+  return fetch(freshUrl, {
+    method: 'GET',
+    cache: 'no-store',
+    credentials: 'same-origin',
+    headers: { 'Accept': 'application/json', 'Cache-Control': 'no-cache' }
+  }).then(function(r) {
     if (!r.ok) throw new Error('Erro HTTP ' + r.status + ' em ' + url);
     return r.json();
   });
@@ -709,6 +716,7 @@ function apiPatch(url, body) {
       if (!r.ok || (data && data.ok === false)) {
         throw new Error((data && (data.message || data.error)) || ('Erro HTTP ' + r.status + ' em ' + url));
       }
+      aplicarRespostaAgendamentoAtualizado(data);
       return data;
     }).catch(function(err) {
       if (err && err.message && err.message.indexOf('Erro HTTP') === 0) throw err;
@@ -716,6 +724,22 @@ function apiPatch(url, body) {
       throw err;
     });
   });
+}
+
+function aplicarRespostaAgendamentoAtualizado(data) {
+  if (!data || !data.agendamento || !data.agendamento.id) return;
+  var atualizado = mapAgendamentoDb(data.agendamento);
+  var id = String(atualizado.ID);
+  var todos = Array.isArray(state.agendamentosTodos) ? state.agendamentosTodos.slice() : [];
+  var index = todos.findIndex(function(row) { return String(row.ID) === id; });
+  if (index >= 0) todos[index] = atualizado;
+  else todos.unshift(atualizado);
+  state.agendamentosTodos = todos;
+  state.agendamentos = aplicarFiltrosInteligentes(todos);
+  state.dashboard = buildDashboardLocal(state.agendamentos, dashboardFiltrado(state.agendamentos));
+  renderAgenda(state.agendamentos);
+  preencherDashboard();
+  atualizarResumoFiltros(state.agendamentos.length, state.agendamentosTodos.length);
 }
 
 function mapAgendamentoDb(r) {
@@ -1209,6 +1233,7 @@ function atualizarStatusSistema(res) {
 }
 
 function carregarAgendaEDashboard() {
+  var requestSeq = window._agendaRequestSeq = (window._agendaRequestSeq || 0) + 1;
   state.agendamentos = [];
   byId('agendaBody').innerHTML = '<tr><td colspan="18"><div class="loading-box">Carregando agendamentos do PostgreSQL...</div></td></tr>';
 
@@ -1216,6 +1241,7 @@ function carregarAgendaEDashboard() {
     getAgendamentosPostgres(),
     getDashboardPostgres()
   ]).then(function(results) {
+    if (requestSeq !== window._agendaRequestSeq) return;
     state.agendamentosTodos = Array.isArray(results[0]) ? results[0] : [];
     state.agendamentos = aplicarFiltrosInteligentes(state.agendamentosTodos);
     state.dashboard = buildDashboardLocal(state.agendamentos, dashboardFiltrado(state.agendamentos));
@@ -1231,15 +1257,17 @@ function carregarAgendaEDashboard() {
   });
 }
 
-function recarregarComFiltros() {
-  if (window._reloadingFiltros) return window._reloadingFiltros;
+function recarregarComFiltros(force) {
+  if (window._reloadingFiltros && !force) return window._reloadingFiltros;
+  var requestSeq = window._agendaRequestSeq = (window._agendaRequestSeq || 0) + 1;
 
   byId('agendaBody').innerHTML = '<tr><td colspan="18"><div class="loading-box">Atualizando dados...</div></td></tr>';
 
-  window._reloadingFiltros = Promise.all([
+  var reloadPromise = Promise.all([
     getAgendamentosPostgres(),
     getDashboardPostgres()
   ]).then(function(results) {
+    if (requestSeq !== window._agendaRequestSeq) return;
     state.agendamentosTodos = Array.isArray(results[0]) ? results[0] : [];
     state.agendamentos = aplicarFiltrosInteligentes(state.agendamentosTodos);
     state.dashboard = buildDashboardLocal(state.agendamentos, dashboardFiltrado(state.agendamentos));
@@ -1252,21 +1280,21 @@ function recarregarComFiltros() {
     setMsg('msgForm', 'Erro ao aplicar filtros: ' + (err.message || err), 'err');
     throw err;
   }).finally(function() {
-    window._reloadingFiltros = null;
+    if (window._reloadingFiltros === reloadPromise) window._reloadingFiltros = null;
   });
-
-  return window._reloadingFiltros;
+  window._reloadingFiltros = reloadPromise;
+  return reloadPromise;
 }
 
 function agendarAtualizacaoAposAcao(delayMs) {
-  delayMs = Number(delayMs || 1500);
+  delayMs = delayMs == null ? 0 : Number(delayMs);
   clearTimeout(window._refreshAfterActionTimer);
 
   window._refreshAfterActionTimer = setTimeout(function() {
     if (!state.user) return;
     if (byId('editModal') && !byId('editModal').classList.contains('hidden')) return;
 
-    recarregarComFiltros()
+    recarregarComFiltros(true)
       .catch(function(err) {
         console.warn('Atualização após ação falhou:', err.message || err);
       });
@@ -1815,7 +1843,7 @@ function salvarEdicaoLinha() {
       setMsg('msgForm', 'Registro atualizado no PostgreSQL.', 'ok');
       toast('Registro atualizado no PostgreSQL.', 'ok');
       fecharModalEdicao();
-      agendarAtualizacaoAposAcao(1500);
+      agendarAtualizacaoAposAcao(0);
     })
     .catch(function(err) {
       setMsg('msgEdit', err.message || String(err), 'err');
@@ -1840,7 +1868,7 @@ function marcarComprou(id) {
     .then(function() {
       setMsg('msgForm', 'Compra marcada no PostgreSQL.', 'ok');
       toast('Compra marcada no PostgreSQL.', 'ok');
-      agendarAtualizacaoAposAcao(1500);
+      agendarAtualizacaoAposAcao(0);
     })
     .catch(function(err) {
       setMsg('msgForm', err.message || String(err), 'err');
@@ -1859,7 +1887,7 @@ function marcarNaoComprou(id) {
     .then(function() {
       setMsg('msgForm', 'Atendimento sem compra marcado no PostgreSQL.', 'ok');
       toast('Atendimento sem compra marcado no PostgreSQL.', 'ok');
-      agendarAtualizacaoAposAcao(1500);
+      agendarAtualizacaoAposAcao(0);
     })
     .catch(function(err) {
       setMsg('msgForm', err.message || String(err), 'err');
@@ -1896,7 +1924,7 @@ function runAction(fn, id) {
     .then(function() {
       setMsg('msgForm', 'Ação salva no PostgreSQL.', 'ok');
       toast('Ação salva no PostgreSQL.', 'ok');
-      agendarAtualizacaoAposAcao(1500);
+      agendarAtualizacaoAposAcao(0);
       return true;
     })
     .catch(function(err) {
@@ -1958,7 +1986,7 @@ function salvarOS_Modal(id) {
       document.getElementById('osModalBackdrop').remove();
       setMsg('msgForm', 'OS salva com sucesso.', 'ok');
       toast('OS salva com sucesso.', 'ok');
-      agendarAtualizacaoAposAcao(1500);
+      agendarAtualizacaoAposAcao(0);
     })
     .catch(function(err) {
       var msgEl = document.getElementById('msgOSModal');
