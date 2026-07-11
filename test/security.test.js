@@ -271,6 +271,15 @@ test("interface usa a permissão financeira assinada pelo servidor", () => {
   assert.doesNotMatch(html, /if \(r === 'admin' \|\| r === 'gerente de loja'\) return true/);
 });
 
+test("notificação recuperar lead é restrita a gerente e atendimento central", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "public", "index.html"), "utf8");
+  assert.match(html, /id="cardRecuperarLead"/);
+  assert.match(html, /RECUPERAR LEAD/);
+  assert.match(html, /\(2 \* 60 \* 60 \* 1000\)/);
+  assert.match(html, /\['gerente de loja', 'atendimento central'\]\.indexOf\(roleName\(\)\) > -1/);
+  assert.match(html, /Compareceu e não comprou/);
+});
+
 test("criação de agendamento grava backup com perfil na mesma transação", async () => {
   const originalConnect = pool.connect;
   const queries = [];
