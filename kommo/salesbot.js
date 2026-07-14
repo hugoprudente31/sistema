@@ -105,7 +105,9 @@ router.post("/api/salesbot", requireSalesbotSecret, async (req, res) => {
   const message = String(payload.message  || "").trim();
   const loja = String(payload.loja || payload.store || payload.store_name || "").trim();
   const pipelineId = String(payload.pipeline_id || payload.pipelineId || "").trim();
-  const contactName = String(payload.contact_name || payload.nome || "").trim();
+  // Sanitiza variáveis não resolvidas pelo Kommo (ex: "{{contact_name}}" literal)
+  const rawContactName = String(payload.contact_name || payload.nome || "").trim();
+  const contactName = /^\{\{.*\}\}$/.test(rawContactName) ? "" : rawContactName;
 
   console.log(`[Salesbot] lead=${leadId} talk=${talkId} chat=${chatId} msg="${message.slice(0, 60)}"`);
 

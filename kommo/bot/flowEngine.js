@@ -243,9 +243,14 @@ async function transferToHuman(leadId, state, talkId, motivo = "solicitação do
   SM.setState(leadId, { etapa: "transferido", bot_active: false, transferred_at: Date.now() }, { persist: true });
 }
 
+function sanitizeNome(v) {
+  const s = clean(v);
+  return /\{\{.*\}\}/.test(s) ? "" : s; // descarta variável Kommo não resolvida
+}
+
 async function handleBoasVindas(leadId, state, talkId, context) {
   const loja = await ensureStoreState(leadId, state, context);
-  let nome = state.nome || clean(context.contact_name || context.nome);
+  let nome = sanitizeNome(state.nome) || sanitizeNome(context.contact_name || context.nome);
 
   if (!nome) {
     try {
