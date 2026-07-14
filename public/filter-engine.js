@@ -22,6 +22,14 @@
     }
     return '';
   }
+  function numberBR(raw) {
+    if (typeof raw === 'number') return Number.isFinite(raw) ? raw : 0;
+    var text = String(raw == null ? '' : raw).trim();
+    if (!text) return 0;
+    var normalized = text.replace(/\./g, '').replace(',', '.').replace(/[^\d.-]/g, '');
+    var parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
   function addDays(iso, days) {
     var date = new Date(iso + 'T12:00:00');
     date.setDate(date.getDate() + days);
@@ -82,12 +90,13 @@
         var nos  = String(value(row, ['NumeroOS', 'numero_os']) || '').trim();
         var sos  = normalize(value(row, ['StatusOS', 'status_os']));
         var tags = normalize(value(row, ['AccessTags', 'access_tags']));
+        var valorVenda = numberBR(value(row, ['ValorVenda', 'valor_venda']));
         var matchAny = false;
         for (var ri = 0; ri < filters.resultado.length; ri++) {
           var r = filters.resultado[ri];
           if (r === 'compareceu'     && (comp === 'sim' || stag === 'compareceu'))                                  { matchAny = true; break; }
           if (r === 'nao-compareceu' && (comp === 'nao' || stag === 'nao compareceu'))                              { matchAny = true; break; }
-          if (r === 'comprou'        && nos && sos !== '' && ['cancelada','cancelado','reembolso'].indexOf(sos) < 0) { matchAny = true; break; }
+          if (r === 'comprou'        && valorVenda > 0)                                                             { matchAny = true; break; }
           if (r === 'cancelou'       && stag === 'cancelado')                                                       { matchAny = true; break; }
           if (r === 'reagendou'      && tags.indexOf('reagendado') >= 0)                                            { matchAny = true; break; }
         }
