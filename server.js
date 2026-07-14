@@ -622,6 +622,7 @@ async function initDatabase() {
       observacao TEXT,
       status TEXT DEFAULT 'Agendado',
       compareceu TEXT DEFAULT 'Pendente',
+      patologia TEXT DEFAULT 'Pendente',
       responsavel TEXT,
       atendimento_realizado TEXT,
       venda_gerada TEXT,
@@ -803,6 +804,7 @@ async function initDatabase() {
   await addColumnIfMissing("agendamentos", "ultima_alteracao_por_email", "TEXT");
   await addColumnIfMissing("agendamentos", "ultima_alteracao_em", "TIMESTAMP");
   await addColumnIfMissing("agendamentos", "excluido_em", "TIMESTAMP");
+  await addColumnIfMissing("agendamentos", "patologia", "TEXT DEFAULT 'Pendente'");
 
   await addColumnIfMissing("clientes", "gas_id", "TEXT UNIQUE");
   await addColumnIfMissing("clientes", "origem_sync", "TEXT DEFAULT 'postgres'");
@@ -2201,6 +2203,19 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         return res.status(403).json({ ok: false, message: "Comprador não pode registrar check-in ou presença." });
       }
     }
+    const hasPatologia = Object.prototype.hasOwnProperty.call(b, "patologia");
+    let patologiaAtualizada = null;
+    if (hasPatologia) {
+      if (!hasRole(req.session, ["admin", "optometrista"])) {
+        return res.status(403).json({ ok: false, message: "Somente o optometrista pode registrar patologia." });
+      }
+      const valorPatologia = clean(b.patologia).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const opcoesPatologia = { sim: "Sim", nao: "Não", pendente: "Pendente" };
+      patologiaAtualizada = opcoesPatologia[valorPatologia] || null;
+      if (!patologiaAtualizada) {
+        return res.status(400).json({ ok: false, message: "Patologia deve ser marcada como Sim ou Não." });
+      }
+    }
     // Restaurar da lixeira: somente admin
     if (b.restaurar_lead && !isAdmin(req.session)) {
       return res.status(403).json({ ok: false, message: "Apenas admin pode restaurar leads da lixeira." });
@@ -2212,7 +2227,7 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
     if (roleOf(req.session) === "optometrista") {
       const allowed = new Set([
         "compareceu", "status", "statusAgenda", "atendimento_realizado", "atendimentoRealizado",
-        "observacao", "ultima_alteracao_por_nome", "ultima_alteracao_por_email", "ultima_alteracao_em"
+        "observacao", "patologia", "ultima_alteracao_por_nome", "ultima_alteracao_por_email", "ultima_alteracao_em"
       ]);
       const forbidden = Object.keys(b).filter((key) => !allowed.has(key));
       if (forbidden.length) {
@@ -2274,6 +2289,7 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         data_entrada_os = COALESCE($25, data_entrada_os),
         data_finalizacao_os = COALESCE($26, data_finalizacao_os),
         data_entrega_os = COALESCE($27, data_entrega_os),
+        patologia = COALESCE($29, patologia),
         agendado_por_nome = COALESCE(NULLIF(agendado_por_nome,''), $19, agendado_por_nome),
         agendado_por_email = COALESCE(NULLIF(agendado_por_email,''), $20, agendado_por_email),
         ultima_alteracao_por_nome = $21,
@@ -2311,7 +2327,8 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         b.data_entrada_os || b.dataEntradaOS || null,
         b.data_finalizacao_os || b.dataFinalizacaoOS || null,
         b.data_entrega_os || b.dataEntregaOS || null,
-        b.excluir_lead ? 'LIXEIRA' : (b.restaurar_lead ? 'RESTAURAR' : null)
+        b.excluir_lead ? 'LIXEIRA' : (b.restaurar_lead ? 'RESTAURAR' : null),
+        patologiaAtualizada
         ]
       );
       if (!result.rows.length) {
@@ -2429,6 +2446,7 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         if (before.status !== after.status) mudancas.push(`Status: ${before.status || '—'} → ${after.status || '—'}`);
         const nc2 = v => String(v||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim();
         if (nc2(before.compareceu) !== nc2(after.compareceu)) mudancas.push(`Compareceu: ${before.compareceu || '—'} → ${after.compareceu || '—'}`);
+        if (nc2(before.patologia) !== nc2(after.patologia)) mudancas.push(`Patologia: ${before.patologia || 'Pendente'} → ${after.patologia || 'Pendente'}`);
         if (!before.numero_os && after.numero_os) mudancas.push(`OS aberta: ${after.numero_os}`);
         if (before.status_os !== after.status_os && after.status_os) mudancas.push(`Status OS: ${after.status_os}`);
         if (before.data_agendamento !== after.data_agendamento || before.horario !== after.horario)

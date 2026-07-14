@@ -171,6 +171,8 @@
 
     .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; min-width: 320px; }
     .actions button, .actions select { max-width: 180px; }
+    .clinical-actions { flex-basis: 100%; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding-top: 4px; }
+    .clinical-actions strong { font-size: 12px; color: var(--muted); }
 
     .btn-relatorio {
       max-width: 260px;
@@ -429,7 +431,7 @@
         <table>
           <thead>
             <tr>
-              <th>ID</th><th>Data Registro</th><th>Cliente</th><th>Agendado por</th><th>Última alt.</th><th>Dia Agendado</th><th>Status Ag.</th><th>Presença</th><th>Nº OS</th><th>Status OS</th><th>Datas da OS</th><th>Loja</th><th>Optometrista</th><th>Lead Time</th><th>Valor</th><th>Desconto</th><th>Tag</th><th>Ações</th>
+              <th>ID</th><th>Data Registro</th><th>Cliente</th><th>Agendado por</th><th>Última alt.</th><th>Dia Agendado</th><th>Status Ag.</th><th>Presença</th><th>Patologia</th><th>Nº OS</th><th>Status OS</th><th>Datas da OS</th><th>Loja</th><th>Optometrista</th><th>Lead Time</th><th>Valor</th><th>Desconto</th><th>Tag</th><th>Ações</th>
             </tr>
           </thead>
           <tbody id="agendaBody"></tbody>
@@ -776,6 +778,7 @@ function mapAgendamentoDb(r) {
     Observacao: r.observacao || '',
     StatusAgenda: r.status || 'Agendado',
     Compareceu: r.compareceu || 'Pendente',
+    Patologia: r.patologia || 'Pendente',
     AtendimentoRealizado: r.atendimento_realizado || '',
     VendaGerada: r.venda_gerada || '',
     ValorVenda: valorVenda,
@@ -1194,7 +1197,7 @@ function carregarInfoBase() {
 
 function carregarSistemaTurbo() {
   state.agendamentos = [];
-  byId('agendaBody').innerHTML = '<tr><td colspan="18"><div class="loading-box">Carregando sistema com PostgreSQL...</div></td></tr>';
+  byId('agendaBody').innerHTML = '<tr><td colspan="19"><div class="loading-box">Carregando sistema com PostgreSQL...</div></td></tr>';
 
   return gas('getInfoInicial', (state.user && state.user.email) || '')
     .then(function(res) {
@@ -1235,7 +1238,7 @@ function atualizarStatusSistema(res) {
 function carregarAgendaEDashboard() {
   var requestSeq = window._agendaRequestSeq = (window._agendaRequestSeq || 0) + 1;
   state.agendamentos = [];
-  byId('agendaBody').innerHTML = '<tr><td colspan="18"><div class="loading-box">Carregando agendamentos do PostgreSQL...</div></td></tr>';
+  byId('agendaBody').innerHTML = '<tr><td colspan="19"><div class="loading-box">Carregando agendamentos do PostgreSQL...</div></td></tr>';
 
   return Promise.all([
     getAgendamentosPostgres(),
@@ -1252,7 +1255,7 @@ function carregarAgendaEDashboard() {
     getDashboardKommo().then(function(kommo) { preencherDashboardKommo(kommo); });
     getDashboardMarketing().then(function(marketing) { preencherDashboardMarketing(marketing); });
   }).catch(function(err) {
-    byId('agendaBody').innerHTML = '<tr><td colspan="18">Erro ao carregar agendamentos.</td></tr>';
+    byId('agendaBody').innerHTML = '<tr><td colspan="19">Erro ao carregar agendamentos.</td></tr>';
     setMsg('msgForm', 'Erro ao carregar agenda: ' + (err.message || err), 'err');
   });
 }
@@ -1261,7 +1264,7 @@ function recarregarComFiltros(force) {
   if (window._reloadingFiltros && !force) return window._reloadingFiltros;
   var requestSeq = window._agendaRequestSeq = (window._agendaRequestSeq || 0) + 1;
 
-  byId('agendaBody').innerHTML = '<tr><td colspan="18"><div class="loading-box">Atualizando dados...</div></td></tr>';
+  byId('agendaBody').innerHTML = '<tr><td colspan="19"><div class="loading-box">Atualizando dados...</div></td></tr>';
 
   var reloadPromise = Promise.all([
     getAgendamentosPostgres(),
@@ -1276,7 +1279,7 @@ function recarregarComFiltros(force) {
     atualizarResumoFiltros(state.agendamentos.length, state.agendamentosTodos.length);
     if (canFinance()) return carregarFaturamento();
   }).catch(function(err) {
-    byId('agendaBody').innerHTML = '<tr><td colspan="18">Erro ao carregar agendamentos.</td></tr>';
+    byId('agendaBody').innerHTML = '<tr><td colspan="19">Erro ao carregar agendamentos.</td></tr>';
     setMsg('msgForm', 'Erro ao aplicar filtros: ' + (err.message || err), 'err');
     throw err;
   }).finally(function() {
@@ -1856,6 +1859,23 @@ function salvarEdicaoLinha() {
 function confirmarAgendamento(id) { return runAction('confirmarAgendamento', id); }
 function marcarCompareceu(id) { return runAction('marcarCompareceu', id); }
 function marcarNaoCompareceu(id) { return runAction('marcarNaoCompareceu', id); }
+function marcarPatologia(id, valor) {
+  showLoading(true);
+  return apiPatch('/api/agendamentos/' + encodeURIComponent(id), { patologia: valor })
+    .then(function(res) {
+      if (!res || !res.ok) throw new Error((res && res.message) || 'Falha ao registrar patologia.');
+      setMsg('msgForm', 'Patologia registrada como ' + valor + '.', 'ok');
+      toast('Patologia registrada como ' + valor + '.', 'ok');
+      agendarAtualizacaoAposAcao(0);
+      return true;
+    })
+    .catch(function(err) {
+      setMsg('msgForm', err.message || String(err), 'err');
+      toast(err.message || String(err), 'err');
+      throw err;
+    })
+    .finally(function() { showLoading(false); });
+}
 function cancelarAgendamento(id) { if (confirm('Cancelar este agendamento?')) return runAction('cancelarAgendamento', id); return Promise.resolve(false); }
 function excluirAgendamento(id) { if (confirm('Deseja realmente excluir este agendamento?')) return runAction('excluirAgendamento', id); return Promise.resolve(false); }
 
@@ -2053,7 +2073,7 @@ function renderAgenda(rowsParam) {
   var rows = Array.isArray(rowsParam) ? rowsParam : (state.agendamentos || []);
   var body = byId('agendaBody');
   if (!rows.length) {
-    body.innerHTML = '<tr><td colspan="18">Nenhum serviço encontrado.</td></tr>';
+    body.innerHTML = '<tr><td colspan="19">Nenhum serviço encontrado.</td></tr>';
     return;
   }
 
@@ -2070,6 +2090,7 @@ function renderAgenda(rowsParam) {
       '<td>' + escapeHtml(formatDateBR(r.DataAgendamentoBR || r.DataAgendamento || '')) + '<br>' + escapeHtml(r.Horario || '') + '</td>' +
       '<td><span class="status ' + statusClassAgendamento(r) + '">' + escapeHtml(r.StatusAgenda) + '</span>' + (r.AtendimentoSemaforoLabel ? '<div style="margin-top:6px;"><span class="status ' + statusClassAtendimentoSemaforo(r) + '">' + escapeHtml(r.AtendimentoSemaforoLabel) + '</span></div>' : '') + '</td>' +
       '<td>' + escapeHtml(r.Compareceu || 'Pendente') + '</td>' +
+      '<td>' + escapeHtml(r.Patologia || 'Pendente') + '</td>' +
       '<td>' + escapeHtml(r.NumeroOS || '') + '</td>' +
       '<td><span class="status ' + statusClassOS(r) + '">' + escapeHtml(r.StatusOS || '') + '</span></td>' +
       '<td>Abertura: ' + escapeHtml(formatDateBR(r.DataAberturaOSBR || r.DataAberturaOS || '')) + '<br>Entrada: ' + escapeHtml(formatDateBR(r.DataEntradaOSBR || r.DataEntradaOS || '')) + '<br>Entrega: ' + escapeHtml(formatDateBR(r.DataEntregaOSBR || r.DataEntregaOS || '')) + '<br>Finalização: ' + escapeHtml(formatDateBR(r.DataFinalizacaoOSBR || r.DataFinalizacaoOS || '')) + '</td>' +
@@ -2115,6 +2136,13 @@ function getActionHtml(r) {
     buttons += '<button class="secondary" onclick="marcarNaoCompareceu(\'' + id + '\')">Check-in Não</button>';
   }
 
+  // Patologia — somente o optometrista da loja registra; todos da loja visualizam na tabela.
+  if (role === 'optometrista' && ownStore && ['Agendado', 'Confirmado', 'Compareceu'].indexOf(st) > -1) {
+    buttons += '<div class="clinical-actions"><strong>Patologia:</strong>' +
+      '<button onclick="marcarPatologia(\'' + id + '\', \'Sim\')">Patologia Sim</button>' +
+      '<button class="secondary" onclick="marcarPatologia(\'' + id + '\', \'Não\')">Patologia Não</button></div>';
+  }
+
   // Editar — Admin, Central, Gerente (todos), Comprador (todos da loja), Consultor (só os seus)
   if (central || gerente) {
     buttons += '<button class="secondary" onclick="abrirModalEdicao(\'' + id + '\')">Editar</button>';
@@ -2141,7 +2169,7 @@ function gerarRelatorioCSV() {
   var rows = state.agendamentos || [];
   if (!rows.length) { setMsg('msgForm', 'Nenhum dado carregado para exportar.', 'err'); return; }
   var cols = ['ID','DataCadastro','Origem','NomeCompleto','WhatsApp','Email','Loja','Optometrista',
-    'Responsavel','DataAgendamento','Horario','StatusAgenda','Compareceu','NumeroOS','StatusOS',
+    'Responsavel','DataAgendamento','Horario','StatusAgenda','Compareceu','Patologia','NumeroOS','StatusOS',
     'DataAberturaOS','DataEntradaOS','DataFinalizacaoOS','DataEntregaOS','ValorVenda','Desconto',
     'VendedorNome','AccessTags','LeadTimeDias','AgendadoPorNome','UltimaAlteracaoPorNome','UltimaAlteracaoEm','Observacao'];
   function esc(v) { var s = String(v === null || v === undefined ? '' : v); return '"' + s.replace(/"/g, '""') + '"'; }
