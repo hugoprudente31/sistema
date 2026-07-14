@@ -240,7 +240,7 @@ async function transferToHuman(leadId, state, talkId, motivo = "solicitação do
   await labels.setHumanControl(leadId);
   await labels.applyLabel(leadId, labels.LABELS.ATENDIMENTO_HUMANO);
   await moveStage(leadId, "atendente", loja.prefix);
-  SM.setState(leadId, { etapa: "transferido", bot_active: false }, { persist: true });
+  SM.setState(leadId, { etapa: "transferido", bot_active: false, transferred_at: Date.now() }, { persist: true });
 }
 
 async function handleBoasVindas(leadId, state, talkId, context) {
@@ -659,18 +659,8 @@ async function processMessage({ leadId, talkId, chatId, text, authorType, loja, 
 
   await ensureStoreState(leadId, state, { loja, pipeline_id, pipelineId });
 
-  // Bot bloqueado em atendimento humano
-  if (!SM.shouldBotActivate(state)) {
-    if (state.etapa === "transferido") {
-      // Cliente enviou mensagem após atendimento humano — reativa o bot diretamente
-      console.log(`[BOT][${leadId}] Cliente retornou após atendimento humano — reativando bot`);
-      SM.setState(leadId, { etapa: "boas_vindas", bot_active: false, last_human_at: null }, { persist: true });
-      state.etapa = "boas_vindas";
-      state.bot_active = false;
-      await handleBoasVindas(leadId, state, state.talk_id || talkId, { loja, pipeline_id, pipelineId, contact_name });
-    }
-    return;
-  }
+  // Bot bloqueado em atendimento humano — só reativa via nova conversa (add_talk)
+  if (!SM.shouldBotActivate(state)) return;
 
   if (!state.bot_active) {
     SM.setState(leadId, { bot_active: true });
@@ -684,10 +674,28 @@ async function processNewLead(leadId, context = {}) {
   if (process.env.BOT_ENABLED === "false") return;
   const state = await SM.getState(leadId);
 
-  // Lead em atendimento humano: NÃO reativa por add_talk (pode ser mensagem template do atendente).
-  // A reativação ocorre em processMessage quando o cliente envia uma nova mensagem.
   if (state.etapa === "transferido") {
-    console.log(`[BOT][${leadId}] add_talk — lead em atendimento humano, aguardando mensagem do cliente`);
+    // Grace period: Kommo dispara add_talk automaticamente logo após o bot transferir
+    // (quando o Salesbot fecha o fluxo e abre para o atendente). Ignoramos esse evento
+    // por 60s para evitar que o bot reative durante o handoff. Após o período, um
+    // novo add_talk legítimo (cliente voltou a contatar) reativa o bot normalmente.
+    const elapsed = Date.now() - (state.transferred_at || 0);
+    if (elapsed < 60 * 1000) {
+      console.log(`[BOT][${leadId}] add_talk durante handoff (${Math.round(elapsed / 1000)}s após transferência) — ignorando`);
+      return;
+    }
+
+    console.log(`[BOT][${leadId}] 📱 Nova conversa — reativando bot após atendimento humano`);
+    SM.setState(leadId, { etapa: "boas_vindas", bot_active: false, last_human_at: null, transferred_at: null }, { persist: true });
+    state.etapa = "boas_vindas";
+    state.bot_active = false;
+
+    // Em modo Salesbot: não envia boas-vindas aqui (a fila seria descartada pelo /api/salesbot).
+    // O estado boas_vindas fica aguardando a primeira mensagem do cliente, que chega pelo
+    // /api/salesbot com contact_name — aí handleBoasVindas é chamado com o nome correto.
+    if (process.env.KOMMO_USE_SALESBOT !== "true") {
+      await handleBoasVindas(leadId, state, context.talkId || null, context);
+    }
     return;
   }
 
@@ -696,8 +704,16 @@ async function processNewLead(leadId, context = {}) {
     console.log(`[BOT][${leadId}] Novo lead/talk — já processado (etapa: ${state.etapa})`);
     return;
   }
-  console.log(`[BOT][${leadId}] 📱 Novo lead — enviando boas-vindas imediatamente`);
-  await handleBoasVindas(leadId, state, context.talkId || null, context);
+
+  // Em modo Salesbot: mantém estado boas_vindas. O primeiro /api/salesbot recebe
+  // contact_name no payload e chama handleBoasVindas com o nome correto do lead.
+  // Em modo direto: envia boas-vindas imediatamente.
+  if (process.env.KOMMO_USE_SALESBOT !== "true") {
+    console.log(`[BOT][${leadId}] 📱 Novo lead — enviando boas-vindas imediatamente`);
+    await handleBoasVindas(leadId, state, context.talkId || null, context);
+  } else {
+    console.log(`[BOT][${leadId}] 📱 Novo lead — aguardando primeira mensagem do cliente via Salesbot`);
+  }
 }
 
 module.exports = { processMessage, processNewLead, flushResponses };
