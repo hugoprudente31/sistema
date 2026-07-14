@@ -10,6 +10,7 @@ process.env.SALESBOT_SECRET = "test-salesbot-secret";
 process.env.KOMMO_WEBHOOK_SECRET = "test-webhook-secret";
 process.env.KOMMO_USE_SALESBOT = "true";
 process.env.BOT_ENABLED = "true";
+process.env.ADANALYZER_SYNC_KEY = "test-adanalyzer-sync-key";
 
 const { app, pool, signSession } = require("../server");
 
@@ -175,6 +176,30 @@ test("proxy GAS aplica whitelist por perfil", async () => {
     body: JSON.stringify({ fn: "atualizarPlanilhaSistemaCompleto", args: [] })
   });
   assert.equal(response.status, 403);
+});
+
+test("marketing performance requires a key and returns aggregates only", async () => {
+  const denied = await fetch(baseUrl + "/api/internal/marketing-performance?start=2026-07-01&end=2026-07-31");
+  assert.equal(denied.status, 401);
+  const originalQuery = pool.query;
+  pool.query = async (sql, params) => {
+    assert.match(String(sql), /FROM agendamentos/);
+    assert.deepEqual(params, ["2026-07-01", "2026-07-31"]);
+    return { rows: [{ loja: "Loja A", agendamentos: 10, comparecimentos: 7, vendas: 3, faturamento: "4500.50", descontos: "120.00" }] };
+  };
+  try {
+    const response = await fetch(baseUrl + "/api/internal/marketing-performance?start=2026-07-01&end=2026-07-31", {
+      headers: { "x-api-key": "test-adanalyzer-sync-key" }
+    });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.fonte, "postgresql");
+    assert.equal(body.lojas[0].faturamento, 4500.5);
+    assert.equal(body.totais.agendamentos, 10);
+    assert.equal(body.lojas[0].nome, undefined);
+  } finally {
+    pool.query = originalQuery;
+  }
 });
 
 test("respostas incluem cabeçalhos básicos de segurança", async () => {

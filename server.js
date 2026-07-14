@@ -1523,6 +1523,59 @@ app.post("/api/auth/logout", (req, res) => {
   res.json({ ok: true });
 });
 
+// Aggregated PostgreSQL metrics for AdAnalyzer; no customer PII is returned.
+app.get("/api/internal/marketing-performance", validarAdAnalyzerKey, async (req, res) => {
+  try {
+    const hoje = new Date().toISOString().slice(0, 10);
+    const start = clean(req.query.start) || hoje.slice(0, 8) + "01";
+    const end = clean(req.query.end) || hoje;
+    const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+    if (!datePattern.test(start) || !datePattern.test(end) || start > end) {
+      return res.status(400).json({ ok: false, message: "Periodo invalido. Use start/end em YYYY-MM-DD." });
+    }
+    const startDate = new Date(`${start}T00:00:00Z`);
+    const endDate = new Date(`${end}T00:00:00Z`);
+    if ((endDate - startDate) / 86400000 > 366) {
+      return res.status(400).json({ ok: false, message: "Periodo maximo: 366 dias." });
+    }
+
+    const result = await pool.query(
+      `SELECT loja,
+         COUNT(*)::int AS agendamentos,
+         COUNT(*) FILTER (WHERE LOWER(COALESCE(compareceu,'')) IN ('sim','compareceu','true','1'))::int AS comparecimentos,
+         COUNT(*) FILTER (WHERE COALESCE(valor_venda,0) > 0 OR LOWER(COALESCE(venda_gerada,'')) IN ('sim','true','1'))::int AS vendas,
+         COALESCE(SUM(valor_venda),0)::numeric AS faturamento,
+         COALESCE(SUM(desconto),0)::numeric AS descontos
+       FROM agendamentos
+       WHERE data_agendamento BETWEEN $1::date AND $2::date
+         AND excluido_em IS NULL
+         AND nome NOT ILIKE '%teste%'
+         AND COALESCE(loja,'') NOT ILIKE '%teste%'
+       GROUP BY loja ORDER BY loja`,
+      [start, end]
+    );
+
+    const lojas = result.rows.map((row) => ({
+      loja: row.loja || "Sem loja",
+      agendamentos: Number(row.agendamentos || 0),
+      comparecimentos: Number(row.comparecimentos || 0),
+      vendas: Number(row.vendas || 0),
+      faturamento: Number(row.faturamento || 0),
+      descontos: Number(row.descontos || 0)
+    }));
+    const totais = lojas.reduce((acc, row) => {
+      for (const key of ["agendamentos", "comparecimentos", "vendas", "faturamento", "descontos"]) acc[key] += row[key];
+      return acc;
+    }, { agendamentos: 0, comparecimentos: 0, vendas: 0, faturamento: 0, descontos: 0 });
+
+    res.setHeader("Cache-Control", "private, max-age=60");
+    res.json({ ok: true, fonte: "postgresql", periodo: { start, end }, totais, lojas });
+  } catch (error) {
+    console.error("Erro em marketing-performance:", error.message);
+    res.status(500).json({ ok: false, message: "Erro ao consultar desempenho de marketing." });
+  }
+});
+
 app.use("/api", (req, res, next) => {
   if (req.path === "/auth/login" || req.path === "/auth/logout") return next();
   if (req.path.startsWith("/public/")) return next();
