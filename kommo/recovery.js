@@ -1,50 +1,14 @@
-// Kommo Recovery — Sistema Óticas Target
-// Cron diário: recupera leads frios, não comparecidos e sem resposta
+// Kommo cold-lead recovery - native Salesbot launcher
 
-const kommo  = require("./client");
-const MSG    = require("./bot/messages");
-const SM     = require("./bot/stateManager");
+const kommo = require("./client");
+const SM = require("./bot/stateManager");
 const labels = require("./labels");
 
-const HORAS_48 = 48 * 60 * 60 * 1000;
-const HORAS_72 = 72 * 60 * 60 * 1000;
+const HOURS_48 = 48 * 60 * 60 * 1000;
+const HOURS_72 = 72 * 60 * 60 * 1000;
 
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
-// ── Envia mensagem de recuperação para um lead ───────────────────
-
-async function enviarRecuperacao(leadId) {
-  const state = await SM.getState(leadId);
-
-  let talkId = state.talk_id;
-  if (!talkId) {
-    const talks = await kommo.getLeadTalks(leadId).catch(() => []);
-    if (!talks.length) {
-      console.log(`[Recovery] Lead ${leadId} sem conversa — pulando`);
-      return;
-    }
-    talkId = String(talks[0].id);
-    SM.setState(leadId, { talk_id: talkId });
-  }
-
-  const nome = state.nome || "cliente";
-  console.log(`[Recovery] Enviando recuperação — ${nome} / lead ${leadId}`);
-
-  await kommo.sendMessage(talkId, MSG.recuperacao(nome));
-  await labels.applyLabel(leadId, labels.LABELS.EM_RECUPERACAO);
-  await labels.removeLabel(leadId, labels.LABELS.LEAD_FRIO);
-  await moveStage(leadId, "recuperacao");
-
-  SM.setState(leadId, {
-    etapa:      "recuperacao_menu",
-    bot_active: true,
-    last_human_at: null,
-  }, { persist: true });
-
-  await kommo.addNote(leadId, "♻️ Mensagem de recuperação enviada pelo bot");
-}
-
-// Move de estágio — lookup por pipeline via KOMMO_STAGES_MAP, fallback env var genérica
 async function moveStage(leadId, stageKey) {
   let stagesMap = {};
   try { stagesMap = JSON.parse(process.env.KOMMO_STAGES_MAP || "{}"); } catch {}
@@ -52,112 +16,124 @@ async function moveStage(leadId, stageKey) {
   let stageId = null;
   try {
     const lead = await kommo.getLead(leadId);
-    const pipelineId = String(lead?.pipeline_id || "");
-    stageId = stagesMap[pipelineId]?.[stageKey];
+    stageId = stagesMap[String(lead?.pipeline_id || "")]?.[stageKey];
   } catch {}
 
   if (!stageId) stageId = process.env[`KOMMO_STAGE_${stageKey.toUpperCase()}`];
-  if (!stageId) return;
-  await kommo.moveToStage(leadId, stageId).catch(() => {});
+  if (stageId) await kommo.moveToStage(leadId, stageId);
 }
 
-// ── Fecha lead como perdido ──────────────────────────────────────
+async function sendRecovery(leadId) {
+  const botId = process.env.KOMMO_RECOVERY_SALESBOT_ID;
+  if (!botId) throw new Error("KOMMO_RECOVERY_SALESBOT_ID nao configurado");
 
-async function fecharComoPerdido(leadId) {
+  console.log(`[Recovery] Iniciando Salesbot ${botId} no lead ${leadId}`);
+  await kommo.launchSalesbot(botId, leadId);
+
+  // Only change state after Kommo accepts the Salesbot launch.
+  await labels.applyLabel(leadId, labels.LABELS.EM_RECUPERACAO);
+  await labels.removeLabel(leadId, labels.LABELS.LEAD_FRIO);
+  await moveStage(leadId, "recuperacao");
+  SM.setState(leadId, {
+    etapa: "recuperacao_menu",
+    bot_active: true,
+    last_human_at: null,
+  }, { persist: true });
+  await kommo.addNote(leadId, "Mensagem de recuperacao iniciada pelo Salesbot");
+}
+
+async function closeAsLost(leadId) {
   console.log(`[Recovery] Fechando lead ${leadId} como perdido`);
-
-  await labels.swapLabel(leadId,
+  await labels.swapLabel(
+    leadId,
     [labels.LABELS.EM_RECUPERACAO, labels.LABELS.LEAD_FRIO, labels.LABELS.LEAD_MORNO],
     labels.LABELS.FECHADO_PERDIDO
   );
   await moveStage(leadId, "fechado_perdido");
-  await kommo.addNote(leadId, "🔴 Lead fechado como perdido — sem resposta após recuperação");
+  await kommo.addNote(leadId, "Lead fechado como perdido - sem resposta apos recuperacao");
   SM.setState(leadId, { etapa: "transferido", bot_active: false }, { persist: true });
 }
 
-// ── Job principal ────────────────────────────────────────────────
-
 async function runRecovery() {
-  if (process.env.BOT_ENABLED === "false") return;
-  console.log("[Recovery] Iniciando job de recuperação...");
-
-  // 1. Leads que não compareceram → enviar recuperação
-  const naoCompareceram = await kommo.searchLeadsByTag(labels.LABELS.NAO_COMPARECEU);
-  console.log(`[Recovery] Não compareceram: ${naoCompareceram.length}`);
-
-  for (const lead of naoCompareceram) {
-    const state = await SM.getState(lead.id);
-    // Evita enviar segunda vez se já está em recuperação
-    const jaEmRecuperacao = (lead._embedded?.tags || [])
-      .some(t => t.name === labels.LABELS.EM_RECUPERACAO);
-    if (jaEmRecuperacao) continue;
-
-    await enviarRecuperacao(String(lead.id)).catch(e =>
-      console.error(`[Recovery] Erro lead ${lead.id}:`, e.message)
-    );
-    await sleep(2000);
+  if (process.env.BOT_ENABLED === "false" || process.env.RECOVERY_AUTOMATION_ENABLED === "false") {
+    return { enviados: 0, erros: 0, desativado: true };
   }
 
-  // 2. Leads frios (lead-frio) → enviar recuperação
-  const frios = await kommo.searchLeadsByTag(labels.LABELS.LEAD_FRIO);
-  console.log(`[Recovery] Leads frios: ${frios.length}`);
+  console.log("[Recovery] Iniciando job de recuperacao...");
+  let enviados = 0;
+  let erros = 0;
 
-  for (const lead of frios) {
-    const state = await SM.getState(lead.id);
-    const jaEmRecuperacao = (lead._embedded?.tags || [])
-      .some(t => t.name === labels.LABELS.EM_RECUPERACAO);
-    if (jaEmRecuperacao) continue;
-
-    // Só recupera se inativo há mais de 48h
-    const ultimaAtividade = state.last_client_at || state.updated_at || 0;
-    if (Date.now() - ultimaAtividade < HORAS_48) continue;
-
-    await enviarRecuperacao(String(lead.id)).catch(e =>
-      console.error(`[Recovery] Erro lead ${lead.id}:`, e.message)
-    );
+  const processCandidate = async lead => {
+    const alreadyRecovering = (lead._embedded?.tags || [])
+      .some(tag => tag.name === labels.LABELS.EM_RECUPERACAO);
+    if (alreadyRecovering) return;
+    try {
+      await sendRecovery(String(lead.id));
+      enviados++;
+    } catch (error) {
+      erros++;
+      console.error(`[Recovery] Erro lead ${lead.id}:`, error.message);
+    }
     await sleep(2000);
+  };
+
+  const missed = await kommo.searchLeadsByTag(labels.LABELS.NAO_COMPARECEU);
+  console.log(`[Recovery] Nao compareceram: ${missed.length}`);
+  for (const lead of missed) await processCandidate(lead);
+
+  const cold = await kommo.searchLeadsByTag(labels.LABELS.LEAD_FRIO);
+  console.log(`[Recovery] Leads frios: ${cold.length}`);
+  for (const lead of cold) {
+    const state = await SM.getState(lead.id);
+    const lastActivity = state.last_client_at || state.updated_at || 0;
+    if (Date.now() - lastActivity >= HOURS_48) await processCandidate(lead);
   }
 
-  // 3. Leads em recuperação há mais de 72h sem resposta → fechar como perdido
-  const emRecuperacao = await kommo.searchLeadsByTag(labels.LABELS.EM_RECUPERACAO);
-  console.log(`[Recovery] Em recuperação: ${emRecuperacao.length}`);
-
-  for (const lead of emRecuperacao) {
+  const recovering = await kommo.searchLeadsByTag(labels.LABELS.EM_RECUPERACAO);
+  console.log(`[Recovery] Em recuperacao: ${recovering.length}`);
+  for (const lead of recovering) {
     const state = await SM.getState(lead.id);
-    const ultimaAtividade = state.last_client_at || state.updated_at || 0;
-    if (Date.now() - ultimaAtividade > HORAS_72) {
-      await fecharComoPerdido(String(lead.id)).catch(e =>
-        console.error(`[Recovery] Erro ao fechar lead ${lead.id}:`, e.message)
-      );
+    const lastActivity = Number(state.last_client_at || state.updated_at || 0);
+    // Legacy tags have no reliable recovery timestamp. Never close those
+    // automatically; only close leads started by this job and persisted in state.
+    const startedByThisJob = state.etapa === "recuperacao_menu" && lastActivity > 0;
+    if (startedByThisJob && Date.now() - lastActivity > HOURS_72) {
+      try { await closeAsLost(String(lead.id)); }
+      catch (error) {
+        erros++;
+        console.error(`[Recovery] Erro ao fechar lead ${lead.id}:`, error.message);
+      }
       await sleep(2000);
     }
   }
 
-  console.log("[Recovery] Concluído.");
+  console.log(`[Recovery] Concluido: ${enviados} enviados, ${erros} erros.`);
+  return { enviados, erros };
 }
 
-// ── Inicializa o cron (setInterval a cada 5 minutos) ─────────────
-
-let recoveryLastRunDate = null;
-
 function startRecoveryCron() {
-  const targetHour = parseInt(process.env.RECOVERY_HOUR || "9");
+  if (process.env.RECOVERY_AUTOMATION_ENABLED === "false") {
+    console.log("    Recovery: desativado para validacao");
+    return;
+  }
+  const targetHour = Number.parseInt(process.env.RECOVERY_HOUR || "9", 10);
+  const scheduleNext = () => {
+    const now = new Date();
+    const next = new Date(now);
+    next.setHours(targetHour, 0, 0, 0);
+    if (next <= now) next.setDate(next.getDate() + 1);
 
-  const tick = () => {
-    const now   = new Date();
-    const today = now.toDateString();
-    const hora  = now.getHours();
-
-    if (hora >= targetHour && recoveryLastRunDate !== today) {
-      recoveryLastRunDate = today;
-      runRecovery().catch(e => console.error("[Recovery] Erro no job:", e.message));
-    }
+    const timer = setTimeout(async () => {
+      try { await runRecovery(); }
+      catch (error) { console.error("[Recovery] Erro no job:", error.message); }
+      scheduleNext();
+    }, next.getTime() - now.getTime());
+    timer.unref?.();
+    console.log(`[Recovery] Proxima execucao: ${next.toString()}`);
   };
 
-  setInterval(tick, 5 * 60 * 1000);
-  tick();
-
-  console.log(`    Recovery: ✅ cron ativo (roda às ${targetHour}h todos os dias)`);
+  scheduleNext();
+  console.log(`    Recovery: cron ativo (${targetHour}h)`);
 }
 
 module.exports = { startRecoveryCron, runRecovery };

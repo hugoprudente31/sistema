@@ -1,133 +1,131 @@
-// Kommo Reminder — Sistema Óticas Target
-// Cron diário: envia lembrete 24h antes do agendamento
+// Kommo appointment reminders - native Salesbot launcher
 
 const { Pool } = require("pg");
 const kommo = require("./client");
-const MSG   = require("./bot/messages");
-const SM    = require("./bot/stateManager");
+const SM = require("./bot/stateManager");
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.DATABASE_SSL === "false" ? false : { rejectUnauthorized: false },
 });
 
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
-// Amanhã no formato YYYY-MM-DD (PostgreSQL)
-function dataAmanhaPG() {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  const dd   = String(d.getDate()).padStart(2, "0");
-  const mm   = String(d.getMonth() + 1).padStart(2, "0");
-  const yyyy = d.getFullYear();
-  return `${yyyy}-${mm}-${dd}`;
+function tomorrowForDatabase() {
+  const date = new Date();
+  date.setDate(date.getDate() + 1);
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
 }
 
-// ── Busca agendamentos de amanhã direto do banco ──────────────────
-async function getAgendamentosDB(dataPg) {
+async function getAppointments(date) {
   const { rows } = await pool.query(
     `SELECT id, kommo_lead_id, nome, horario, loja,
             TO_CHAR(data_agendamento, 'DD/MM/YYYY') AS data_agendamento,
             status
-     FROM agendamentos
-     WHERE data_agendamento = $1
-       AND status IN ('Agendado', 'Confirmado')
-       AND kommo_lead_id IS NOT NULL
-       AND excluido_em IS NULL
-       AND lembrete_24h_em IS NULL
-     ORDER BY horario ASC`,
-    [dataPg]
+       FROM agendamentos
+      WHERE data_agendamento = $1
+        AND status IN ('Agendado', 'Confirmado')
+        AND kommo_lead_id IS NOT NULL
+        AND excluido_em IS NULL
+        AND lembrete_24h_em IS NULL
+      ORDER BY horario ASC`,
+    [date]
   );
   return rows;
 }
 
-// ── Envia lembrete para um agendamento ───────────────────────────
-async function enviarLembrete(ag) {
-  const leadId = ag.kommo_lead_id;
-  if (!leadId) return;
+async function sendReminder(appointment) {
+  const leadId = appointment.kommo_lead_id;
+  const botId = process.env.KOMMO_REMINDER_SALESBOT_ID;
+  if (!leadId) throw new Error("Agendamento sem lead vinculado");
+  if (!botId) throw new Error("KOMMO_REMINDER_SALESBOT_ID nao configurado");
 
-  const state = await SM.getState(leadId);
+  const fieldId = Number(process.env.KOMMO_APPOINTMENT_DETAILS_FIELD_ID || 773261);
+  const details = [
+    `Data: ${appointment.data_agendamento}`,
+    `Horario: ${appointment.horario || "a confirmar"}`,
+    `Loja: ${appointment.loja || "Oticas TGT"}`,
+  ].join(" | ");
 
-  let talkId = state.talk_id;
-  if (!talkId) {
-    const talks = await kommo.getLeadTalks(leadId).catch(() => []);
-    if (!talks.length) {
-      console.log(`[Reminder] Lead ${leadId} sem conversa ativa — pulando`);
-      return;
-    }
-    talkId = String(talks[0].id);
-    SM.setState(leadId, { talk_id: talkId });
-  }
+  console.log(`[Reminder] Iniciando Salesbot ${botId} no lead ${leadId}`);
+  await kommo.updateLead(leadId, {
+    custom_fields_values: [{ field_id: fieldId, values: [{ value: details }] }],
+  });
+  await kommo.launchSalesbot(botId, leadId);
 
-  const nome    = ag.nome    || state.nome || "cliente";
-  const data    = ag.data_agendamento;
-  const horario = ag.horario;
-  const loja    = ag.loja;
-
-  const chatId = state.chat_id || null;
-  console.log(`[Reminder] Enviando lembrete — ${nome} / lead ${leadId} / ${data} ${horario}`);
-
-  await kommo.sendMessage(talkId, MSG.lembrete24h(nome, data, horario, loja), chatId);
   SM.setState(leadId, { etapa: "lembrete_resposta" }, { persist: true });
-  await kommo.addNote(leadId, `⏰ Lembrete 24h enviado — ${data} às ${horario}`);
+  await kommo.addNote(
+    leadId,
+    `Lembrete 24h iniciado - ${appointment.data_agendamento} as ${appointment.horario}`
+  );
 
-  // Marca no DB para evitar reenvio se Railway reiniciar
-  if (ag.id) {
-    await pool.query(
-      `UPDATE agendamentos SET lembrete_24h_em = NOW() WHERE id = $1`,
-      [ag.id]
-    ).catch(e => console.error("[Reminder] Erro ao marcar lembrete_24h_em:", e.message));
-  }
+  await pool.query(
+    "UPDATE agendamentos SET lembrete_24h_em = NOW() WHERE id = $1",
+    [appointment.id]
+  );
 }
 
-// ── Job principal ─────────────────────────────────────────────────
 async function runReminders() {
-  if (process.env.BOT_ENABLED === "false") return;
-
-  const dataPg = dataAmanhaPG();
-  console.log(`[Reminder] Buscando agendamentos para amanhã: ${dataPg}`);
-
-  let agendamentos;
-  try {
-    agendamentos = await getAgendamentosDB(dataPg);
-  } catch (e) {
-    console.error("[Reminder] Erro ao consultar banco:", e.message);
-    return;
+  if (process.env.BOT_ENABLED === "false" || process.env.REMINDER_AUTOMATION_ENABLED === "false") {
+    return { enviados: 0, erros: 0, desativado: true };
   }
 
-  console.log(`[Reminder] ${agendamentos.length} agendamento(s) encontrado(s)`);
+  const date = tomorrowForDatabase();
+  console.log(`[Reminder] Buscando agendamentos para ${date}`);
 
-  for (const ag of agendamentos) {
-    await enviarLembrete(ag).catch(e =>
-      console.error(`[Reminder] Erro no lead ${ag.kommo_lead_id}:`, e.message)
-    );
+  let appointments;
+  try {
+    appointments = await getAppointments(date);
+  } catch (error) {
+    console.error("[Reminder] Erro ao consultar banco:", error.message);
+    return { enviados: 0, erros: 1 };
+  }
+
+  let enviados = 0;
+  let erros = 0;
+  for (const appointment of appointments) {
+    try {
+      await sendReminder(appointment);
+      enviados++;
+    } catch (error) {
+      erros++;
+      console.error(`[Reminder] Erro no lead ${appointment.kommo_lead_id}:`, error.message);
+    }
     await sleep(2000);
   }
 
-  console.log("[Reminder] Concluído.");
+  console.log(`[Reminder] Concluido: ${enviados} enviados, ${erros} erros.`);
+  return { enviados, erros };
 }
 
-// ── Inicializa o cron (setInterval a cada 5 minutos) ──────────────
-let reminderLastRunDate = null;
+function scheduleDaily(label, targetHour, job) {
+  const scheduleNext = () => {
+    const now = new Date();
+    const next = new Date(now);
+    next.setHours(targetHour, 0, 0, 0);
+    if (next <= now) next.setDate(next.getDate() + 1);
+
+    const timer = setTimeout(async () => {
+      try { await job(); }
+      catch (error) { console.error(`[${label}] Erro no job:`, error.message); }
+      scheduleNext();
+    }, next.getTime() - now.getTime());
+    timer.unref?.();
+    console.log(`[${label}] Proxima execucao: ${next.toString()}`);
+  };
+  scheduleNext();
+}
 
 function startReminderCron() {
-  const targetHour = parseInt(process.env.REMINDER_HOUR || "8");
-
-  const tick = () => {
-    const now   = new Date();
-    const today = now.toDateString();
-    const hora  = now.getHours();
-
-    if (hora >= targetHour && reminderLastRunDate !== today) {
-      reminderLastRunDate = today;
-      runReminders().catch(e => console.error("[Reminder] Erro no job:", e.message));
-    }
-  };
-
-  setInterval(tick, 5 * 60 * 1000);
-  tick();
-
-  console.log(`    Reminder: ✅ cron ativo (roda às ${targetHour}h todos os dias)`);
+  if (process.env.REMINDER_AUTOMATION_ENABLED === "false") {
+    console.log("    Reminder: desativado para validacao");
+    return;
+  }
+  const targetHour = Number.parseInt(process.env.REMINDER_HOUR || "8", 10);
+  scheduleDaily("Reminder", targetHour, runReminders);
+  console.log(`    Reminder: cron ativo (${targetHour}h)`);
 }
 
-module.exports = { startReminderCron, runReminders };
+module.exports = { startReminderCron, runReminders, scheduleDaily };

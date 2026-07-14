@@ -103,8 +103,28 @@ router.post("/webhook/kommo", requireWebhookSecret, async (req, res) => {
         if (entry?.leadId && entry.authorType === "user") {
           SM.markHumanActivity(String(entry.leadId));
           console.log(`[Webhook/Kommo] 👤 Atendente registrado — lead ${entry.leadId}`);
+        } else if (entry?.leadId) {
+          const reminderState = await SM.getState(String(entry.leadId));
+          const reminderSteps = new Set([
+            "lembrete_resposta",
+            "reagendamento_data",
+            "reagendamento_horario",
+          ]);
+          if (reminderSteps.has(reminderState.etapa)) {
+            console.log(`[Webhook/Kommo] 📅 Resposta do lembrete — lead ${entry.leadId}, etapa ${reminderState.etapa}`);
+            await processMessage({
+              leadId: String(entry.leadId),
+              talkId: entry.talkId ? String(entry.talkId) : null,
+              chatId: entry.chatId ? String(entry.chatId) : null,
+              text: entry.text,
+              authorType: entry.authorType,
+              pipeline_id: entry.pipeline_id,
+            });
+          } else {
+            console.log("[Webhook/Kommo] Modo Salesbot — mensagem tratada pelo Salesbot nativo");
+          }
         } else {
-          console.log("[Webhook/Kommo] Modo Salesbot — message.add do cliente ignorado (Salesbot processa)");
+          console.log("[Webhook/Kommo] Modo Salesbot — message.add sem lead ignorado");
         }
         return;
       }
@@ -338,6 +358,58 @@ router.post("/api/admin/bloqueios", requireWebhookSecret, async (req, res) => {
     res.json({ ok: true, mensagem: `Loja "${loja}" bloqueada em ${data}.` });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// Disparo controlado de lembrete para validar o fluxo ponta a ponta sem ligar o cron.
+// Prepara o estado na mesma instancia que recebera as respostas do WhatsApp.
+router.post("/api/admin/test-reminder", requireWebhookSecret, async (req, res) => {
+  const leadId = String(req.body?.lead_id || "").trim();
+  if (!/^\d+$/.test(leadId)) {
+    return res.status(400).json({ ok: false, error: "lead_id invalido." });
+  }
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, nome, loja, horario,
+              TO_CHAR(data_agendamento, 'DD/MM/YYYY') AS data_agendamento
+         FROM agendamentos
+        WHERE kommo_lead_id = $1
+          AND status IN ('Agendado', 'Confirmado')
+          AND excluido_em IS NULL
+        ORDER BY data_agendamento DESC, horario DESC, id DESC
+        LIMIT 1`,
+      [leadId]
+    );
+    const appointment = rows[0];
+    if (!appointment) {
+      return res.status(404).json({ ok: false, error: "Agendamento ativo nao encontrado." });
+    }
+
+    const lojaPrefix = /gonzaga|santos/i.test(appointment.loja) ? "gon"
+      : /enseada/i.test(appointment.loja) ? "ens"
+      : /pitangueiras/i.test(appointment.loja) ? "pit"
+      : "tgt";
+    const detailsFieldId = Number(process.env.KOMMO_APPOINTMENT_DETAILS_FIELD_ID || 773261);
+    const details = `Data: ${appointment.data_agendamento} | Horario: ${appointment.horario} | Loja: ${appointment.loja}`;
+
+    await kommo.updateLead(leadId, {
+      custom_fields_values: [{ field_id: detailsFieldId, values: [{ value: details }] }],
+    });
+    await SM.getState(leadId);
+    SM.setState(leadId, {
+      etapa: "lembrete_resposta",
+      loja: appointment.loja,
+      loja_prefix: lojaPrefix,
+      bot_active: true,
+      reagendamento: null,
+    }, { persist: true });
+    await kommo.launchSalesbot(process.env.KOMMO_REMINDER_SALESBOT_ID, leadId);
+    await kommo.addNote(leadId, `Lembrete de teste controlado iniciado - ${details}`);
+
+    return res.json({ ok: true, lead_id: leadId, etapa: "lembrete_resposta", appointment });
+  } catch (error) {
+    console.error("[Admin/TestReminder]", error.message);
+    return res.status(500).json({ ok: false, error: error.message });
   }
 });
 

@@ -57,3 +57,23 @@ test("Kommo envia mensagem ao chat da conversa do lead", async () => {
     kommo.sendMessage = originalSendMessage;
   }
 });
+
+test("Kommo inicia Salesbot nativo no lead", async () => {
+  const originalRequest = kommo.request;
+  const calls = [];
+  kommo.request = async (method, path, body) => {
+    calls.push({ method, path, body });
+    return {};
+  };
+
+  try {
+    await kommo.launchSalesbot(58013, 26946145);
+    assert.deepEqual(calls, [{
+      method: "POST",
+      path: "/bots/58013/run",
+      body: { entity_id: 26946145, entity_type: "leads" },
+    }]);
+  } finally {
+    kommo.request = originalRequest;
+  }
+});

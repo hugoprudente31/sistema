@@ -8,7 +8,7 @@ const { Pool } = require("pg");
 require("dotenv").config();
 
 const { startRecoveryCron } = require("./kommo/recovery");
-const { startReminderCron } = require("./kommo/reminder");
+const { startReminderCron, runReminders } = require("./kommo/reminder");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -3981,7 +3981,7 @@ async function disparadorLembretes24h() {
 
 // Endpoint para disparar manualmente (admin)
 app.post('/api/admin/lembretes/disparar', requireAdmin, async (req, res) => {
-  const resultado = await disparadorLembretes24h();
+  const resultado = await runReminders();
   res.json({ ok: true, ...resultado });
 });
 
@@ -4002,6 +4002,7 @@ async function startServer() {
 if (require.main === module) {
   startServer()
     .then(() => {
+      if (process.env.ENABLE_LEGACY_REMINDERS !== "true") return;
       // Disparar lembretes 45s após o boot, depois a cada hora
       setTimeout(() => {
         disparadorLembretes24h();

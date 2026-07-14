@@ -4,6 +4,7 @@ const kommo = require("../client");
 const labels = require("../labels");
 const MSG = require("./messages");
 const SM = require("./stateManager");
+const scheduling = require("../scheduling");
 
 const pendingResponses = new Map();
 
@@ -135,7 +136,7 @@ function parseOption(text) {
 }
 
 function isYes(text) {
-  return ["SIM", "S", "1", "OK", "CONFIRMADO", "CONFIRMO"].includes(clean(text).toUpperCase());
+  return ["SIM", "S", "1", "OK", "CONFIRMAR", "CONFIRMADO", "CONFIRMO"].includes(clean(text).toUpperCase());
 }
 
 function isNo(text) {
@@ -488,22 +489,98 @@ async function handlePosVendaMenu(leadId, state, text, talkId) {
 }
 
 async function handleLembreteResposta(leadId, state, text, talkId) {
+  if (normalize(text) === "reagendar") {
+    SM.setState(leadId, {
+      etapa: "reagendamento_data",
+      reagendamento: { data: null, horario: null },
+    }, { persist: true });
+    return;
+  }
+
+  // Compatibilidade com conversas em que o clique em Reagendar nao gerou
+  // evento separado, mas a resposta de data chegou ao webhook.
+  if (/^\d{1,2}\/\d{1,2}(?:\/\d{4})?$/.test(clean(text))) {
+    return handleReagendamentoData(leadId, state, text);
+  }
+
   if (isYes(text)) {
     SM.setState(leadId, { etapa: "menu_principal" }, { persist: true });
     await send(talkId, leadId, MSG.lembreteConfirmado());
     return;
   }
   if (isNo(text)) {
+    const cancellation = await scheduling.cancelarAgendamentoPorLead({ leadId });
     SM.setState(leadId, { etapa: "transferido", bot_active: false }, { persist: true });
     await send(talkId, leadId, MSG.lembreteCancelado());
     const loja = lojaByPrefix(state.loja_prefix);
-    await kommo.addNote(leadId, "❌ Cliente cancelou o agendamento pelo bot (resposta ao lembrete 24h).");
+    await kommo.addNote(leadId,
+      cancellation?.ok
+        ? "❌ Cliente cancelou o agendamento pelo bot. Status atualizado no sistema."
+        : `⚠️ Cliente pediu cancelamento, mas o sistema não encontrou agendamento ativo: ${cancellation?.error || "erro desconhecido"}`
+    );
     await labels.setHumanControl(leadId);
     await moveStage(leadId, "recuperacao", loja.prefix);
     return;
   }
   // Resposta não reconhecida — repete a pergunta
   await send(talkId, leadId, `Não entendi. Por favor, responda *SIM* para confirmar ou *NÃO* para cancelar.`);
+}
+
+async function handleReagendamentoData(leadId, state, text) {
+  const value = clean(text);
+  if (!/^\d{1,2}\/\d{1,2}(?:\/\d{4})?$/.test(value)) {
+    await kommo.addNote(leadId, `⚠️ Data de reagendamento inválida recebida: ${value}`);
+    return;
+  }
+  SM.setState(leadId, {
+    etapa: "reagendamento_horario",
+    reagendamento: { ...(state.reagendamento || {}), data: value, horario: null },
+  }, { persist: true });
+}
+
+async function handleReagendamentoHorario(leadId, state, text) {
+  const raw = clean(text);
+  const match = raw.match(/^(\d{1,2})(?::|h)(\d{2})?$|^(\d{1,2})$/i);
+  if (!match) {
+    await kommo.addNote(leadId, `⚠️ Horário de reagendamento inválido recebido: ${raw}`);
+    SM.setState(leadId, { etapa: "transferido", bot_active: false }, { persist: true });
+    await labels.setHumanControl(leadId).catch(() => {});
+    return;
+  }
+
+  const hour = Number(match[1] || match[3]);
+  const minute = Number(match[2] || 0);
+  const horario = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+  const data = state.reagendamento?.data;
+  const result = await scheduling.reagendarAgendamentoPorLead({ leadId, data, horario });
+  const detailsFieldId = Number(process.env.KOMMO_APPOINTMENT_DETAILS_FIELD_ID || 773261);
+
+  if (result?.ok) {
+    const details = `Reagendamento confirmado | Data: ${result.data_agendamento} | Horário: ${result.horario} | Loja: ${result.loja}`;
+    await kommo.updateLead(leadId, {
+      custom_fields_values: [{ field_id: detailsFieldId, values: [{ value: details }] }],
+    }).catch(() => {});
+    await kommo.addNote(leadId,
+      `✅ Reagendamento confirmado no sistema\n📅 ${result.data_agendamento} às ${result.horario}\n🏪 ${result.loja}\n👁 ${result.optometrista || "A definir"}`
+    );
+    SM.setState(leadId, {
+      etapa: "menu_principal",
+      reagendamento: { data, horario, confirmado: true },
+    }, { persist: true });
+    return;
+  }
+
+  const error = result?.error || "Não foi possível confirmar automaticamente.";
+  await kommo.updateLead(leadId, {
+    custom_fields_values: [{ field_id: detailsFieldId, values: [{ value: `Reagendamento pendente | ${error}` }] }],
+  }).catch(() => {});
+  await kommo.addNote(leadId, `⚠️ Reagendamento requer atendimento humano\nData: ${data}\nHorário: ${horario}\nMotivo: ${error}`);
+  SM.setState(leadId, {
+    etapa: "transferido",
+    bot_active: false,
+    reagendamento: { data, horario, confirmado: false, erro: error },
+  }, { persist: true });
+  await labels.setHumanControl(leadId).catch(() => {});
 }
 
 async function handleRecuperacaoMenu(leadId, state, text, talkId) {
@@ -556,6 +633,8 @@ async function route(leadId, state, text, talkId, context) {
   if (state.etapa === "rh_aguardando_curriculo") return handleRhCurriculo(leadId, state, text, talkId);
   if (state.etapa === "pv_menu") return handlePosVendaMenu(leadId, state, text, talkId);
   if (state.etapa === "lembrete_resposta") return handleLembreteResposta(leadId, state, text, talkId);
+  if (state.etapa === "reagendamento_data") return handleReagendamentoData(leadId, state, text);
+  if (state.etapa === "reagendamento_horario") return handleReagendamentoHorario(leadId, state, text);
   if (state.etapa === "transferido") return;
 
   SM.setState(leadId, { etapa: "menu_principal" }, { persist: true });

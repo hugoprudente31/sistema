@@ -157,9 +157,173 @@ function toPgDate(v) {
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
   const br = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
   if (br) return `${br[3]}-${br[2]}-${br[1]}`;
+  const brShort = s.match(/^(\d{1,2})\/(\d{1,2})$/);
+  if (brShort) {
+    const now = new Date();
+    let year = now.getFullYear();
+    const month = String(Number(brShort[2])).padStart(2, "0");
+    const day = String(Number(brShort[1])).padStart(2, "0");
+    let candidate = `${year}-${month}-${day}`;
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    if (candidate < today) candidate = `${year + 1}-${month}-${day}`;
+    return candidate;
+  }
   const d = new Date(s);
   if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
   return null;
+}
+
+async function reagendarAgendamentoPorLead({ leadId, data, horario }) {
+  const dataPg = toPgDate(data);
+  const horarioNormalizado = clean(horario).replace(/^(\d{1,2})h(\d{2})?$/i, (_, h, m) =>
+    `${String(Number(h)).padStart(2, "0")}:${m || "00"}`
+  );
+
+  if (!leadId) return { ok: false, error: "Lead do Kommo nao informado." };
+  if (!dataPg) return { ok: false, error: "Data invalida. Use DD/MM ou DD/MM/AAAA." };
+  if (!/^\d{2}:\d{2}$/.test(horarioNormalizado)) {
+    return { ok: false, error: "Horario invalido. Use HH:MM." };
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  if (dataPg < today) return { ok: false, error: "A nova data precisa ser hoje ou uma data futura." };
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const current = await client.query(
+      `SELECT * FROM agendamentos
+       WHERE kommo_lead_id = $1
+         AND status = ANY($2::text[])
+         AND excluido_em IS NULL
+       ORDER BY data_agendamento DESC, horario DESC, id DESC
+       LIMIT 1
+       FOR UPDATE`,
+      [String(leadId), ["Agendado", "Confirmado"]]
+    );
+
+    if (!current.rows.length) {
+      await client.query("ROLLBACK");
+      return { ok: false, error: "Nenhum agendamento ativo foi encontrado para este lead." };
+    }
+
+    const appointment = current.rows[0];
+    const loja = normalizeLoja(appointment.loja);
+    if (!getHorariosLoja(loja, dataPg).includes(horarioNormalizado)) {
+      await client.query("ROLLBACK");
+      return { ok: false, error: "Esse horario nao faz parte do atendimento da loja nessa data." };
+    }
+    if (await estaLojaBloqueada(loja, dataPg)) {
+      await client.query("ROLLBACK");
+      return { ok: false, error: "A loja nao possui atendimento disponivel nessa data." };
+    }
+
+    const optometristaLivre = await buscarPrimeiroOptometristaLivre(
+      client,
+      loja,
+      dataPg,
+      horarioNormalizado,
+      appointment.optometrista,
+      appointment.gas_id
+    );
+    if (!optometristaLivre) {
+      await client.query("ROLLBACK");
+      return { ok: false, error: "Esse horario acabou de ser reservado. Escolha outro horario." };
+    }
+
+    const updated = await client.query(
+      `UPDATE agendamentos
+          SET data_agendamento = $1,
+              horario = $2,
+              optometrista = $3,
+              status = 'Agendado',
+              compareceu = 'Pendente',
+              lembrete_24h_em = NULL,
+              observacao = CONCAT(COALESCE(observacao, ''), $4::text),
+              atualizado_em = CURRENT_TIMESTAMP
+        WHERE id = $5
+        RETURNING id, nome, loja, optometrista,
+                  TO_CHAR(data_agendamento, 'DD/MM/YYYY') AS data_agendamento,
+                  horario`,
+      [
+        dataPg,
+        horarioNormalizado,
+        optometristaLivre,
+        `\nReagendado pelo WhatsApp/Kommo em ${new Date().toISOString()} (antes: ${toBrDate(appointment.data_agendamento)} ${appointment.horario}).`,
+        appointment.id,
+      ]
+    );
+
+    await client.query(
+      `INSERT INTO logs_sistema (tipo, origem, mensagem, detalhes)
+       VALUES ('kommo','salesbot','Agendamento reagendado pelo Kommo',$1)`,
+      [JSON.stringify({
+        agendamento_id: appointment.id,
+        kommo_lead_id: String(leadId),
+        loja,
+        data_anterior: toBrDate(appointment.data_agendamento),
+        horario_anterior: appointment.horario,
+        nova_data: dataPg,
+        novo_horario: horarioNormalizado,
+      })]
+    );
+
+    await client.query("COMMIT");
+    _cache.delete(`disponibilidade|${loja}|${toPgDate(appointment.data_agendamento)}`);
+    _cache.delete(`disponibilidade|${loja}|${dataPg}`);
+    return { ok: true, ...updated.rows[0] };
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    console.error("[Scheduling] Erro ao reagendar no banco:", e.message);
+    return { ok: false, error: e.message };
+  } finally {
+    client.release();
+  }
+}
+
+async function cancelarAgendamentoPorLead({ leadId, motivo = "Cancelado pelo cliente no WhatsApp/Kommo" }) {
+  if (!leadId) return { ok: false, error: "Lead do Kommo nao informado." };
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const current = await client.query(
+      `SELECT id, loja, data_agendamento, horario
+         FROM agendamentos
+        WHERE kommo_lead_id = $1
+          AND status = ANY($2::text[])
+          AND excluido_em IS NULL
+        ORDER BY data_agendamento DESC, horario DESC, id DESC
+        LIMIT 1
+        FOR UPDATE`,
+      [String(leadId), ["Agendado", "Confirmado"]]
+    );
+    if (!current.rows.length) {
+      await client.query("ROLLBACK");
+      return { ok: false, error: "Nenhum agendamento ativo foi encontrado para este lead." };
+    }
+    const appointment = current.rows[0];
+    await client.query(
+      `UPDATE agendamentos
+          SET status = 'Cancelado',
+              observacao = CONCAT(COALESCE(observacao, ''), $1::text),
+              atualizado_em = CURRENT_TIMESTAMP
+        WHERE id = $2`,
+      [`\n${motivo} em ${new Date().toISOString()}.`, appointment.id]
+    );
+    await client.query(
+      `INSERT INTO logs_sistema (tipo, origem, mensagem, detalhes)
+       VALUES ('kommo','salesbot','Agendamento cancelado pelo Kommo',$1)`,
+      [JSON.stringify({ agendamento_id: appointment.id, kommo_lead_id: String(leadId), motivo })]
+    );
+    await client.query("COMMIT");
+    _cache.delete(`disponibilidade|${normalizeLoja(appointment.loja)}|${toPgDate(appointment.data_agendamento)}`);
+    return { ok: true, id: appointment.id };
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    return { ok: false, error: e.message };
+  } finally {
+    client.release();
+  }
 }
 
 function toBrDate(v) {
@@ -475,6 +639,8 @@ module.exports = {
   getHorariosLoja,
   getHorariosDisponiveis,
   criarAgendamento,
+  reagendarAgendamentoPorLead,
+  cancelarAgendamentoPorLead,
   getContatoDoLead,
   adicionarBloqueio,
   removerBloqueio,

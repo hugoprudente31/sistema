@@ -68,6 +68,17 @@ class KommoClient {
     return this.request("PATCH", `/leads/${leadId}`, fields);
   }
 
+  // Starts a native Salesbot on a lead. Kommo requires this route when the
+  // conversation channel belongs to another connected integration.
+  async launchSalesbot(botId, leadId) {
+    if (!botId) throw new Error("ID do Salesbot nao configurado");
+    if (!leadId) throw new Error("ID do lead nao informado");
+    return this.request("POST", `/bots/${Number(botId)}/run`, {
+      entity_id: Number(leadId),
+      entity_type: "leads",
+    });
+  }
+
   // Move o lead para um estágio do pipeline
   async moveToStage(leadId, stageId) {
     if (!stageId) return;
