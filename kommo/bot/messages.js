@@ -58,18 +58,7 @@ module.exports = {
     `Desculpe, não entendi sua resposta. 😅\nPor favor, responda com o número da opção desejada.`,
 
   menuPrincipal,
-  boasVindas: (nome, loja) => {
-    const primeiro = nome ? nome.trim().split(" ")[0] : "";
-    return `Olá${primeiro ? ", " + primeiro : ""}! Seja bem-vindo(a) à ${loja.titulo}! 😊\n\n` +
-      `É um prazer ter você aqui! Como podemos te ajudar hoje?\n\n` +
-      `Escolha uma das opções abaixo:\n\n` +
-      `1️⃣ Informações\n` +
-      `2️⃣ Teste de Visão Grátis\n` +
-      `3️⃣ Orçamento\n` +
-      `4️⃣ Trabalhe Conosco\n` +
-      `5️⃣ Pós Venda\n\n` +
-      `Digite o número da opção desejada. 👓`;
-  },
+  boasVindas: (_nome, loja) => menuPrincipal(loja),
 
   infoMenu: () =>
     `Ótimo! Sobre o que você gostaria de saber mais? 😊\n\n` +
