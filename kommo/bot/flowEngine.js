@@ -659,8 +659,18 @@ async function processMessage({ leadId, talkId, chatId, text, authorType, loja, 
 
   await ensureStoreState(leadId, state, { loja, pipeline_id, pipelineId });
 
-  // Bot bloqueado em atendimento humano — só reativa via nova conversa (add_talk)
-  if (!SM.shouldBotActivate(state)) return;
+  // Bot bloqueado em atendimento humano
+  if (!SM.shouldBotActivate(state)) {
+    if (state.etapa === "transferido") {
+      // Cliente enviou mensagem após atendimento humano — reativa o bot diretamente
+      console.log(`[BOT][${leadId}] Cliente retornou após atendimento humano — reativando bot`);
+      SM.setState(leadId, { etapa: "boas_vindas", bot_active: false, last_human_at: null }, { persist: true });
+      state.etapa = "boas_vindas";
+      state.bot_active = false;
+      await handleBoasVindas(leadId, state, state.talk_id || talkId, { loja, pipeline_id, pipelineId, contact_name });
+    }
+    return;
+  }
 
   if (!state.bot_active) {
     SM.setState(leadId, { bot_active: true });
@@ -674,13 +684,10 @@ async function processNewLead(leadId, context = {}) {
   if (process.env.BOT_ENABLED === "false") return;
   const state = await SM.getState(leadId);
 
-  // Nova conversa após atendimento humano — atendente fechou, cliente voltou a contatar
+  // Lead em atendimento humano: NÃO reativa por add_talk (pode ser mensagem template do atendente).
+  // A reativação ocorre em processMessage quando o cliente envia uma nova mensagem.
   if (state.etapa === "transferido") {
-    console.log(`[BOT][${leadId}] 📱 Nova conversa — reativando bot após atendimento humano`);
-    SM.setState(leadId, { etapa: "boas_vindas", bot_active: false, last_human_at: null }, { persist: true });
-    state.etapa = "boas_vindas";
-    state.bot_active = false;
-    await handleBoasVindas(leadId, state, context.talkId || null, context);
+    console.log(`[BOT][${leadId}] add_talk — lead em atendimento humano, aguardando mensagem do cliente`);
     return;
   }
 

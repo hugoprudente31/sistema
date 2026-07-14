@@ -319,6 +319,19 @@ router.post("/api/kommo/message", async (req, res) => {
     trackEvent("add_message_cliente", `lead=${entry.leadId} talk=${entry.talkId} chat=${entry.chatId} text="${entry.text.slice(0,40)}"`);
     console.log(`[Kommo/Message] 💬 Contato — lead ${entry.leadId} talk=${entry.talkId} — "${entry.text.slice(0, 60)}"`);
 
+    // Em modo Salesbot, mensagens regulares de clientes são processadas pelo /api/salesbot —
+    // processá-las aqui também causaria duplo processamento com avanço indevido de estado.
+    // Exceção: estados de lembrete (onde o Salesbot nativo não atua diretamente).
+    if (process.env.KOMMO_USE_SALESBOT === "true") {
+      const currentState = await SM.getState(String(entry.leadId));
+      const reminderSteps = new Set(["lembrete_resposta", "reagendamento_data", "reagendamento_horario"]);
+      if (!reminderSteps.has(currentState.etapa)) {
+        console.log(`[Kommo/Message] Modo Salesbot — mensagem ignorada (tratada pelo /api/salesbot), etapa atual: ${currentState.etapa}`);
+        return;
+      }
+      console.log(`[Kommo/Message] 📅 Modo Salesbot — processando resposta de lembrete (etapa: ${currentState.etapa})`);
+    }
+
     await processMessage({
       leadId:       String(entry.leadId),
       talkId:       entry.talkId       ? String(entry.talkId)       : null,
