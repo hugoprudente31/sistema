@@ -173,6 +173,7 @@
     .actions button, .actions select { max-width: 180px; }
     .clinical-actions { flex-basis: 100%; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding-top: 4px; }
     .clinical-actions strong { font-size: 12px; color: var(--muted); }
+    .clinical-actions button.choice-selected { background: #166534; color: #fff; border: 2px solid #14532d; }
 
     .btn-relatorio {
       max-width: 260px;
@@ -431,7 +432,7 @@
         <table>
           <thead>
             <tr>
-              <th>ID</th><th>Data Registro</th><th>Cliente</th><th>Agendado por</th><th>Última alt.</th><th>Dia Agendado</th><th>Status Ag.</th><th>Presença</th><th>Patologia</th><th>Nº OS</th><th>Status OS</th><th>Datas da OS</th><th>Loja</th><th>Optometrista</th><th>Lead Time</th><th>Valor</th><th>Desconto</th><th>Tag</th><th>Ações</th>
+              <th>ID</th><th>Data Registro</th><th>Cliente</th><th>Agendado por</th><th>Última alt.</th><th>Dia Agendado</th><th>Status Ag.</th><th>Presença</th><th>Resultado Optometrista</th><th>Nº OS</th><th>Status OS</th><th>Datas da OS</th><th>Loja</th><th>Optometrista</th><th>Lead Time</th><th>Valor</th><th>Desconto</th><th>Tag</th><th>Ações</th>
             </tr>
           </thead>
           <tbody id="agendaBody"></tbody>
@@ -778,7 +779,7 @@ function mapAgendamentoDb(r) {
     Observacao: r.observacao || '',
     StatusAgenda: r.status || 'Agendado',
     Compareceu: r.compareceu || 'Pendente',
-    Patologia: r.patologia || 'Pendente',
+    ResultadoOptometrista: (r.resultado_optometrista && normalizeKey(r.resultado_optometrista) !== 'pendente') ? r.resultado_optometrista : (normalizeKey(r.patologia) === 'sim' ? 'Patologia' : (normalizeKey(r.compareceu) === 'sim' ? 'Check-in Sim veio' : (normalizeKey(r.compareceu) === 'nao' ? 'Check-in Não veio' : 'Pendente'))),
     AtendimentoRealizado: r.atendimento_realizado || '',
     VendaGerada: r.venda_gerada || '',
     ValorVenda: valorVenda,
@@ -1859,13 +1860,13 @@ function salvarEdicaoLinha() {
 function confirmarAgendamento(id) { return runAction('confirmarAgendamento', id); }
 function marcarCompareceu(id) { return runAction('marcarCompareceu', id); }
 function marcarNaoCompareceu(id) { return runAction('marcarNaoCompareceu', id); }
-function marcarPatologia(id, valor) {
+function marcarResultadoOptometrista(id, valor) {
   showLoading(true);
-  return apiPatch('/api/agendamentos/' + encodeURIComponent(id), { patologia: valor })
+  return apiPatch('/api/agendamentos/' + encodeURIComponent(id), { resultadoOptometrista: valor })
     .then(function(res) {
-      if (!res || !res.ok) throw new Error((res && res.message) || 'Falha ao registrar patologia.');
-      setMsg('msgForm', 'Patologia registrada como ' + valor + '.', 'ok');
-      toast('Patologia registrada como ' + valor + '.', 'ok');
+      if (!res || !res.ok) throw new Error((res && res.message) || 'Falha ao registrar o resultado.');
+      setMsg('msgForm', 'Resultado registrado: ' + valor + '.', 'ok');
+      toast('Resultado registrado: ' + valor + '.', 'ok');
       agendarAtualizacaoAposAcao(0);
       return true;
     })
@@ -2090,7 +2091,7 @@ function renderAgenda(rowsParam) {
       '<td>' + escapeHtml(formatDateBR(r.DataAgendamentoBR || r.DataAgendamento || '')) + '<br>' + escapeHtml(r.Horario || '') + '</td>' +
       '<td><span class="status ' + statusClassAgendamento(r) + '">' + escapeHtml(r.StatusAgenda) + '</span>' + (r.AtendimentoSemaforoLabel ? '<div style="margin-top:6px;"><span class="status ' + statusClassAtendimentoSemaforo(r) + '">' + escapeHtml(r.AtendimentoSemaforoLabel) + '</span></div>' : '') + '</td>' +
       '<td>' + escapeHtml(r.Compareceu || 'Pendente') + '</td>' +
-      '<td>' + escapeHtml(r.Patologia || 'Pendente') + '</td>' +
+      '<td><strong>' + escapeHtml(r.ResultadoOptometrista || 'Pendente') + '</strong></td>' +
       '<td>' + escapeHtml(r.NumeroOS || '') + '</td>' +
       '<td><span class="status ' + statusClassOS(r) + '">' + escapeHtml(r.StatusOS || '') + '</span></td>' +
       '<td>Abertura: ' + escapeHtml(formatDateBR(r.DataAberturaOSBR || r.DataAberturaOS || '')) + '<br>Entrada: ' + escapeHtml(formatDateBR(r.DataEntradaOSBR || r.DataEntradaOS || '')) + '<br>Entrega: ' + escapeHtml(formatDateBR(r.DataEntregaOSBR || r.DataEntregaOS || '')) + '<br>Finalização: ' + escapeHtml(formatDateBR(r.DataFinalizacaoOSBR || r.DataFinalizacaoOS || '')) + '</td>' +
@@ -2130,17 +2131,17 @@ function getActionHtml(r) {
     options += '<option value="cancelar">Cancelar</option>';
   }
 
-  // Check-in — somente Admin, Gerente e Optometrista.
-  if (['admin', 'gerente de loja', 'optometrista'].indexOf(role) > -1 && ['Agendado', 'Confirmado'].indexOf(st) > -1) {
+  // Resultado clínico — o optometrista escolhe exatamente uma das três opções.
+  if (role === 'optometrista' && ownStore && ['Agendado', 'Confirmado', 'Compareceu', 'Não Compareceu'].indexOf(st) > -1) {
+    var resultadoAtual = normalizeKey(r.ResultadoOptometrista || '');
+    buttons += '<div class="clinical-actions"><strong>Marcar resultado:</strong>' +
+      '<button class="' + (resultadoAtual === 'check-in sim veio' ? 'choice-selected' : 'secondary') + '" onclick="marcarResultadoOptometrista(\'' + id + '\', \'Check-in Sim veio\')">Check-in Sim veio</button>' +
+      '<button class="' + (resultadoAtual === 'check-in nao veio' ? 'choice-selected' : 'secondary') + '" onclick="marcarResultadoOptometrista(\'' + id + '\', \'Check-in Não veio\')">Check-in Não veio</button>' +
+      '<button class="' + (resultadoAtual === 'patologia' ? 'choice-selected' : 'secondary') + '" onclick="marcarResultadoOptometrista(\'' + id + '\', \'Patologia\')">Patologia</button></div>';
+  // Admin e gerente mantêm o check-in operacional existente.
+  } else if (['admin', 'gerente de loja'].indexOf(role) > -1 && ['Agendado', 'Confirmado'].indexOf(st) > -1) {
     buttons += '<button onclick="marcarCompareceu(\'' + id + '\')">Check-in Sim</button>';
     buttons += '<button class="secondary" onclick="marcarNaoCompareceu(\'' + id + '\')">Check-in Não</button>';
-  }
-
-  // Patologia — somente o optometrista da loja registra; todos da loja visualizam na tabela.
-  if (role === 'optometrista' && ownStore && ['Agendado', 'Confirmado', 'Compareceu'].indexOf(st) > -1) {
-    buttons += '<div class="clinical-actions"><strong>Patologia:</strong>' +
-      '<button onclick="marcarPatologia(\'' + id + '\', \'Sim\')">Patologia Sim</button>' +
-      '<button class="secondary" onclick="marcarPatologia(\'' + id + '\', \'Não\')">Patologia Não</button></div>';
   }
 
   // Editar — Admin, Central, Gerente (todos), Comprador (todos da loja), Consultor (só os seus)
@@ -2169,7 +2170,7 @@ function gerarRelatorioCSV() {
   var rows = state.agendamentos || [];
   if (!rows.length) { setMsg('msgForm', 'Nenhum dado carregado para exportar.', 'err'); return; }
   var cols = ['ID','DataCadastro','Origem','NomeCompleto','WhatsApp','Email','Loja','Optometrista',
-    'Responsavel','DataAgendamento','Horario','StatusAgenda','Compareceu','Patologia','NumeroOS','StatusOS',
+    'Responsavel','DataAgendamento','Horario','StatusAgenda','Compareceu','ResultadoOptometrista','NumeroOS','StatusOS',
     'DataAberturaOS','DataEntradaOS','DataFinalizacaoOS','DataEntregaOS','ValorVenda','Desconto',
     'VendedorNome','AccessTags','LeadTimeDias','AgendadoPorNome','UltimaAlteracaoPorNome','UltimaAlteracaoEm','Observacao'];
   function esc(v) { var s = String(v === null || v === undefined ? '' : v); return '"' + s.replace(/"/g, '""') + '"'; }

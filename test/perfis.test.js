@@ -760,6 +760,72 @@ test('optometrista: valor de patologia inválido — 400', async function() {
   } finally { restore(); }
 });
 
+test('optometrista: as três escolhas gravam um único resultado e campos compatíveis', async function(t) {
+  const casos = [
+    { valor: 'Check-in Sim veio', status: 'Compareceu', compareceu: 'Sim', patologia: 'Pendente' },
+    { valor: 'Check-in Não veio', status: 'Não Compareceu', compareceu: 'Não', patologia: 'Pendente' },
+    { valor: 'Patologia', status: 'Compareceu', compareceu: 'Sim', patologia: 'Sim' }
+  ];
+  for (const caso of casos) {
+    await t.test(caso.valor, async function() {
+      const restoreQuery = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(E)] } });
+      const originalConnect = pool.connect;
+      let updateParams;
+      pool.connect = async function() {
+        return {
+          query: async function(sql, params) {
+            if (sql.includes('UPDATE agendamentos SET')) {
+              updateParams = params;
+              return { rows: [ag(E, {
+                status: caso.status,
+                compareceu: caso.compareceu,
+                patologia: caso.patologia,
+                resultado_optometrista: caso.valor
+              })] };
+            }
+            return { rows: [] };
+          },
+          release: function() {}
+        };
+      };
+      try {
+        const r = await fetch(baseUrl + '/api/agendamentos/100', {
+          method: 'PATCH', headers: H(tok('optometrista', E)),
+          body: JSON.stringify({ resultadoOptometrista: caso.valor })
+        });
+        assert.equal(r.status, 200);
+        assert.equal(updateParams[9], caso.status);
+        assert.equal(updateParams[10], caso.compareceu);
+        assert.equal(updateParams[28], caso.patologia);
+        assert.equal(updateParams[29], caso.valor);
+      } finally {
+        restoreQuery();
+        pool.connect = originalConnect;
+      }
+    });
+  }
+});
+
+test('gerente visualiza o resultado do optometrista, mas não pode registrá-lo', async function() {
+  const restoreView = withQuery({
+    'SELECT * FROM agendamentos WHERE': { rows: [ag(E, { resultado_optometrista: 'Patologia' })] }
+  });
+  try {
+    const view = await fetch(baseUrl + '/api/agendamentos', { headers: H(tok('gerente de loja', E)) });
+    assert.equal(view.status, 200);
+    assert.equal((await view.json()).agendamentos[0].resultado_optometrista, 'Patologia');
+  } finally { restoreView(); }
+
+  const restorePatch = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(E)] } });
+  try {
+    const patch = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('gerente de loja', E)),
+      body: JSON.stringify({ resultadoOptometrista: 'Patologia' })
+    });
+    assert.equal(patch.status, 403);
+  } finally { restorePatch(); }
+});
+
 test('gerente da loja visualiza patologia, mas não pode registrá-la', async function() {
   const restoreView = withQuery({
     'SELECT * FROM agendamentos WHERE': { rows: [ag(E, { patologia: 'Sim' })] }

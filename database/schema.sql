@@ -10,7 +10,8 @@ ALTER TABLE agendamentos
   ADD COLUMN IF NOT EXISTS ultima_alteracao_por_nome TEXT,
   ADD COLUMN IF NOT EXISTS ultima_alteracao_por_email TEXT,
   ADD COLUMN IF NOT EXISTS ultima_alteracao_em TIMESTAMP,
-  ADD COLUMN IF NOT EXISTS patologia TEXT DEFAULT 'Pendente';
+  ADD COLUMN IF NOT EXISTS patologia TEXT DEFAULT 'Pendente',
+  ADD COLUMN IF NOT EXISTS resultado_optometrista TEXT DEFAULT 'Pendente';
 
 CREATE TABLE IF NOT EXISTS historico_alteracoes_agendamentos (
   id SERIAL PRIMARY KEY,

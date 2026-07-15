@@ -623,6 +623,7 @@ async function initDatabase() {
       status TEXT DEFAULT 'Agendado',
       compareceu TEXT DEFAULT 'Pendente',
       patologia TEXT DEFAULT 'Pendente',
+      resultado_optometrista TEXT DEFAULT 'Pendente',
       responsavel TEXT,
       atendimento_realizado TEXT,
       venda_gerada TEXT,
@@ -805,6 +806,7 @@ async function initDatabase() {
   await addColumnIfMissing("agendamentos", "ultima_alteracao_em", "TIMESTAMP");
   await addColumnIfMissing("agendamentos", "excluido_em", "TIMESTAMP");
   await addColumnIfMissing("agendamentos", "patologia", "TEXT DEFAULT 'Pendente'");
+  await addColumnIfMissing("agendamentos", "resultado_optometrista", "TEXT DEFAULT 'Pendente'");
 
   await addColumnIfMissing("clientes", "gas_id", "TEXT UNIQUE");
   await addColumnIfMissing("clientes", "origem_sync", "TEXT DEFAULT 'postgres'");
@@ -2216,6 +2218,40 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         return res.status(400).json({ ok: false, message: "Patologia deve ser marcada como Sim ou Não." });
       }
     }
+    const hasResultadoOptometrista = Object.prototype.hasOwnProperty.call(b, "resultado_optometrista") ||
+      Object.prototype.hasOwnProperty.call(b, "resultadoOptometrista");
+    let resultadoOptometristaAtualizado = null;
+    let statusResultadoOptometrista = null;
+    let compareceuResultadoOptometrista = null;
+    if (hasResultadoOptometrista) {
+      if (!hasRole(req.session, ["admin", "optometrista"])) {
+        return res.status(403).json({ ok: false, message: "Somente o optometrista pode registrar o resultado do atendimento." });
+      }
+      const valorResultado = clean(b.resultado_optometrista || b.resultadoOptometrista)
+        .toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z]/g, "");
+      const opcoesResultado = {
+        checkinsimveio: "Check-in Sim veio",
+        checkinsim: "Check-in Sim veio",
+        sim: "Check-in Sim veio",
+        checkinnaoveio: "Check-in Não veio",
+        checkinnao: "Check-in Não veio",
+        nao: "Check-in Não veio",
+        patologia: "Patologia"
+      };
+      resultadoOptometristaAtualizado = opcoesResultado[valorResultado] || null;
+      if (!resultadoOptometristaAtualizado) {
+        return res.status(400).json({ ok: false, message: "Resultado deve ser Check-in Sim veio, Check-in Não veio ou Patologia." });
+      }
+      if (resultadoOptometristaAtualizado === "Check-in Não veio") {
+        statusResultadoOptometrista = "Não Compareceu";
+        compareceuResultadoOptometrista = "Não";
+        patologiaAtualizada = "Pendente";
+      } else {
+        statusResultadoOptometrista = "Compareceu";
+        compareceuResultadoOptometrista = "Sim";
+        patologiaAtualizada = resultadoOptometristaAtualizado === "Patologia" ? "Sim" : "Pendente";
+      }
+    }
     // Restaurar da lixeira: somente admin
     if (b.restaurar_lead && !isAdmin(req.session)) {
       return res.status(403).json({ ok: false, message: "Apenas admin pode restaurar leads da lixeira." });
@@ -2227,7 +2263,8 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
     if (roleOf(req.session) === "optometrista") {
       const allowed = new Set([
         "compareceu", "status", "statusAgenda", "atendimento_realizado", "atendimentoRealizado",
-        "observacao", "patologia", "ultima_alteracao_por_nome", "ultima_alteracao_por_email", "ultima_alteracao_em"
+        "observacao", "patologia", "resultado_optometrista", "resultadoOptometrista",
+        "ultima_alteracao_por_nome", "ultima_alteracao_por_email", "ultima_alteracao_em"
       ]);
       const forbidden = Object.keys(b).filter((key) => !allowed.has(key));
       if (forbidden.length) {
@@ -2290,6 +2327,7 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         data_finalizacao_os = COALESCE($26, data_finalizacao_os),
         data_entrega_os = COALESCE($27, data_entrega_os),
         patologia = COALESCE($29, patologia),
+        resultado_optometrista = COALESCE($30, resultado_optometrista),
         agendado_por_nome = COALESCE(NULLIF(agendado_por_nome,''), $19, agendado_por_nome),
         agendado_por_email = COALESCE(NULLIF(agendado_por_email,''), $20, agendado_por_email),
         ultima_alteracao_por_nome = $21,
@@ -2309,8 +2347,8 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         b.data_agendamento || b.dataAgendamento || null,
         b.horario || null,
         b.observacao || null,
-        b.status || b.statusAgenda || null,
-        b.compareceu || null,
+        statusResultadoOptometrista || b.status || b.statusAgenda || null,
+        compareceuResultadoOptometrista || b.compareceu || null,
         b.numero_os || b.numeroOS || null,
         b.status_os || b.statusOS || null,
         b.vendedor_nome || b.vendedorNome || null,
@@ -2328,7 +2366,8 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         b.data_finalizacao_os || b.dataFinalizacaoOS || null,
         b.data_entrega_os || b.dataEntregaOS || null,
         b.excluir_lead ? 'LIXEIRA' : (b.restaurar_lead ? 'RESTAURAR' : null),
-        patologiaAtualizada
+        patologiaAtualizada,
+        resultadoOptometristaAtualizado
         ]
       );
       if (!result.rows.length) {
@@ -2447,6 +2486,7 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         const nc2 = v => String(v||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim();
         if (nc2(before.compareceu) !== nc2(after.compareceu)) mudancas.push(`Compareceu: ${before.compareceu || '—'} → ${after.compareceu || '—'}`);
         if (nc2(before.patologia) !== nc2(after.patologia)) mudancas.push(`Patologia: ${before.patologia || 'Pendente'} → ${after.patologia || 'Pendente'}`);
+        if (nc2(before.resultado_optometrista) !== nc2(after.resultado_optometrista)) mudancas.push(`Resultado optometrista: ${before.resultado_optometrista || 'Pendente'} → ${after.resultado_optometrista || 'Pendente'}`);
         if (!before.numero_os && after.numero_os) mudancas.push(`OS aberta: ${after.numero_os}`);
         if (before.status_os !== after.status_os && after.status_os) mudancas.push(`Status OS: ${after.status_os}`);
         if (before.data_agendamento !== after.data_agendamento || before.horario !== after.horario)
