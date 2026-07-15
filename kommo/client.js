@@ -54,6 +54,10 @@ class KommoClient {
     return this.request("GET", `/leads/${leadId}?with=contacts,tags`);
   }
 
+  async getContact(contactId) {
+    return this.request("GET", `/contacts/${contactId}`);
+  }
+
   async createLead({ nome, contactId, customFields = [] }) {
     const body = [{
       name:      `Agendamento — ${nome}`,

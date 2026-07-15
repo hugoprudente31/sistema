@@ -427,12 +427,18 @@ async function handleTesteVisao(leadId, state, text, talkId) {
   const normalized = normalize(text);
 
   if (isYes(text) || normalized.includes("confirmado")) {
+    const appointment = await scheduling.buscarAgendamentoAtivoPorLead(leadId).catch(() => null);
+    if (!appointment) {
+      await kommo.addNote(leadId, "⚠️ Cliente respondeu CONFIRMADO, mas nenhum agendamento ativo foi encontrado no sistema.").catch(() => {});
+      await send(talkId, leadId, MSG.testeNaoEncontrado(loja));
+      return;
+    }
     SM.setState(leadId, { etapa: "tv_agendado" }, { persist: true });
     await applyFlowLabel(leadId, loja.prefix, "tv", "tv-agendado");
     await labels.applyTrafficLight(leadId, "Agendado");
     await moveStage(leadId, "agendado", loja.prefix);
-    await kommo.addNote(leadId, `Teste de Visão confirmado via SalesBot - ${loja.nome}`);
-    await send(talkId, leadId, MSG.testeConfirmado(loja));
+    await kommo.addNote(leadId, `Teste de Visão confirmado via SalesBot - ${appointment.data_agendamento} às ${appointment.horario} - ${appointment.loja}`);
+    await send(talkId, leadId, MSG.testeConfirmado(appointment));
     return;
   }
 

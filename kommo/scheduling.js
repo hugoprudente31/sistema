@@ -368,8 +368,7 @@ function generateSlots(startHour, endHour) {
     const mm = String(m % 60).padStart(2, "0");
     slots.push(`${hh}:${mm}`);
   }
-  // Bloqueia almoço 13:00–13:45 (1h, 4 slots de 15 min) para todas as lojas exceto Gonzaga
-  return slots.filter(h => h !== "13:00" && h !== "13:15" && h !== "13:30" && h !== "13:45");
+  return slots;
 }
 
 function getHorariosLoja(loja, data) {
@@ -382,9 +381,12 @@ function getHorariosLoja(loja, data) {
 
   let slots = generateSlots(10, day === 6 ? 16 : 18);
   const lojaKey = stripAccents(loja).replace(/[^a-z]/g, "");
-  // Gonzaga: almoço 14:00–14:45 em dias úteis (4 slots de 15 min)
-  if ((lojaKey.includes("gonzaga") || lojaKey.includes("santos")) && day >= 1 && day <= 5) {
+  const isGonzagaSantos = lojaKey.includes("gonzaga") || lojaKey.includes("santos");
+  // Gonzaga: almoço 14:00–14:45 em dias úteis. Demais lojas: 13:00–13:45.
+  if (isGonzagaSantos && day >= 1 && day <= 5) {
     slots = slots.filter((h) => h !== "14:00" && h !== "14:15" && h !== "14:30" && h !== "14:45");
+  } else if (!isGonzagaSantos) {
+    slots = slots.filter((h) => h !== "13:00" && h !== "13:15" && h !== "13:30" && h !== "13:45");
   }
 
   return slots;
@@ -490,14 +492,50 @@ async function criarAgendamento({ nome, whatsapp, email, loja, data, horario, le
   if (!lojaNormalizada) return { ok: false, error: "Loja nao informada." };
   if (!dataPg) return { ok: false, error: "Data do agendamento invalida." };
   if (!/^\d{2}:\d{2}$/.test(horarioNormalizado)) return { ok: false, error: "Horario invalido." };
+  if (!getHorariosLoja(lojaNormalizada, dataPg).includes(horarioNormalizado)) {
+    return { ok: false, error: "Esse horario nao faz parte do atendimento da loja nessa data." };
+  }
+  if (await estaLojaBloqueada(lojaNormalizada, dataPg)) {
+    return { ok: false, error: "A loja nao possui atendimento disponivel nessa data." };
+  }
 
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
 
-    const gasId = leadId
+    const existente = leadId ? await client.query(
+      `SELECT * FROM agendamentos
+       WHERE kommo_lead_id = $1
+         AND status = ANY($2::text[])
+         AND excluido_em IS NULL
+       ORDER BY data_agendamento DESC, horario DESC, id DESC
+       LIMIT 1
+       FOR UPDATE`,
+      [String(leadId), PUBLIC_BLOCKING_STATUSES]
+    ) : { rows: [] };
+    const agendamentoExistente = existente.rows[0] || null;
+
+    if (
+      agendamentoExistente &&
+      normalizeLoja(agendamentoExistente.loja) === lojaNormalizada &&
+      toPgDate(agendamentoExistente.data_agendamento) === dataPg &&
+      clean(agendamentoExistente.horario) === horarioNormalizado
+    ) {
+      await client.query("COMMIT");
+      return {
+        ok: true,
+        unchanged: true,
+        id: agendamentoExistente.id,
+        data_agendamento: toBrDate(dataPg),
+        horario: horarioNormalizado,
+        loja: lojaNormalizada,
+        optometrista: agendamentoExistente.optometrista || "A definir",
+      };
+    }
+
+    const gasId = agendamentoExistente?.gas_id || (leadId
       ? makeId("kommo", String(leadId))
-      : makeId("kommo", stableHash({ nomeNormalizado, whatsappNormalizado, lojaNormalizada, dataPg, horarioNormalizado }));
+      : makeId("kommo", stableHash({ nomeNormalizado, whatsappNormalizado, lojaNormalizada, dataPg, horarioNormalizado })));
 
     const optometristaLivre = await buscarPrimeiroOptometristaLivre(
       client,
@@ -505,7 +543,7 @@ async function criarAgendamento({ nome, whatsapp, email, loja, data, horario, le
       dataPg,
       horarioNormalizado,
       optometrista,
-      gasId
+      agendamentoExistente?.gas_id || gasId
     );
 
     if (!optometristaLivre) {
@@ -537,7 +575,25 @@ async function criarAgendamento({ nome, whatsapp, email, loja, data, horario, le
       ]
     );
 
-    const agendamento = await client.query(
+    const agendamento = agendamentoExistente
+      ? await client.query(
+        `UPDATE agendamentos SET
+          gas_id = COALESCE(gas_id, $1),
+          nome = $2, whatsapp = $3, email = $4, loja = $5, optometrista = $6,
+          data_agendamento = $7, horario = $8, observacao = $9,
+          status = 'Agendado', compareceu = 'Pendente',
+          access_tags = 'origem:kommo;canal:salesbot;fluxo:agendamento',
+          kommo_lead_id = $10, origem_sync = 'kommo_bot', excluido_em = NULL,
+          lembrete_24h_em = NULL, atualizado_em = CURRENT_TIMESTAMP
+        WHERE id = $11
+        RETURNING *`,
+        [
+          gasId, nomeNormalizado, whatsappNormalizado, emailNormalizado || null,
+          lojaNormalizada, optometristaLivre, dataPg, horarioNormalizado,
+          `Agendado pelo bot - Lead Kommo #${leadId}`, String(leadId), agendamentoExistente.id,
+        ]
+      )
+      : await client.query(
       `INSERT INTO agendamentos (
         gas_id, nome, whatsapp, email, loja, optometrista, origem,
         data_agendamento, horario, observacao, status, compareceu,
@@ -599,6 +655,8 @@ async function criarAgendamento({ nome, whatsapp, email, loja, data, horario, le
 
     return {
       ok: true,
+      updated: !!agendamentoExistente,
+      created: !agendamentoExistente,
       id: agendamento.rows[0].id,
       data_agendamento: toBrDate(dataPg),
       horario: horarioNormalizado,
@@ -612,6 +670,22 @@ async function criarAgendamento({ nome, whatsapp, email, loja, data, horario, le
   } finally {
     client.release();
   }
+}
+
+async function buscarAgendamentoAtivoPorLead(leadId) {
+  if (!leadId) return null;
+  const { rows } = await pool.query(
+    `SELECT id, nome, loja, optometrista, horario,
+            TO_CHAR(data_agendamento, 'DD/MM/YYYY') AS data_agendamento
+       FROM agendamentos
+      WHERE kommo_lead_id = $1
+        AND status = ANY($2::text[])
+        AND excluido_em IS NULL
+      ORDER BY data_agendamento DESC, horario DESC, id DESC
+      LIMIT 1`,
+    [String(leadId), PUBLIC_BLOCKING_STATUSES]
+  );
+  return rows[0] || null;
 }
 
 async function getContatoDoLead(kommoClient, leadId) {
@@ -639,6 +713,7 @@ module.exports = {
   getHorariosLoja,
   getHorariosDisponiveis,
   criarAgendamento,
+  buscarAgendamentoAtivoPorLead,
   reagendarAgendamentoPorLead,
   cancelarAgendamentoPorLead,
   getContatoDoLead,
