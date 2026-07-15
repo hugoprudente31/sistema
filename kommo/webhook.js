@@ -6,6 +6,7 @@ const { Pool }    = require("pg");
 const router      = express.Router();
 const kommo       = require("./client");
 const scheduling  = require("./scheduling");
+const { syncLeadAppointment } = require("./appointmentSync");
 const SM          = require("./bot/stateManager");
 const { processMessage, processNewLead } = require("./bot/flowEngine");
 const { adicionarBloqueio, removerBloqueio, listarBloqueios } = require("./scheduling");
@@ -165,51 +166,10 @@ router.post("/webhook/kommo", requireWebhookSecret, async (req, res) => {
       return;
     }
 
-    // Verifica se está no estágio de agendamento manual (via atendente)
-    const stageAgendar = process.env.KOMMO_STAGE_AGENDAR;
-    if (stageAgendar && String(leadEntry.status_id) !== String(stageAgendar)) {
-      console.log(`[Webhook/Kommo] Estágio ${leadEntry.status_id} — sem ação de agendamento`);
-      return;
-    }
-
-    // Se chegou aqui, é um agendamento criado manualmente pelo atendente
     const leadId = leadEntry.id;
-    console.log(`[Webhook/Kommo] 📅 Agendamento manual — lead ${leadId}`);
-
-    const lead   = await kommo.getLead(leadId);
-    const campos = lead?.custom_fields_values || [];
-    const contato = lead?._embedded?.contacts?.[0] || {};
-
-    const loja            = normalizeLoja(getCampo(campos, "LOJA"));
-    const dataAgendamento = getCampo(campos, "DATA_AGENDAMENTO");
-    const horario         = getCampo(campos, "HORARIO");
-    const optometrista    = getCampo(campos, "OPTOMETRISTA");
-
-    if (!dataAgendamento || !horario) {
-      console.log("[Webhook/Kommo] DATA_AGENDAMENTO ou HORARIO não preenchidos — ignorando");
-      await kommo.addNote(leadId, "⚠️ Para agendar, preencha os campos: DATA_AGENDAMENTO e HORARIO no lead.");
-      return;
-    }
-
-    const dbResult = await scheduling.criarAgendamento({
-      nome: contato.name || lead.name || "Sem nome",
-      whatsapp: getCampo(campos, "PHONE") || "",
-      email: getCampo(campos, "EMAIL") || "",
-      loja,
-      optometrista,
-      data: dataAgendamento,
-      horario,
-      leadId,
-    });
+    console.log(`[Webhook/Kommo] 📅 Verificando sincronização — lead ${leadId}`);
+    const dbResult = await syncLeadAppointment(String(leadId), leadEntry);
     console.log("[Webhook/Kommo] PostgreSQL:", JSON.stringify(dbResult).slice(0, 200));
-
-    if (dbResult?.ok) {
-      await kommo.addNote(leadId,
-        `✅ Agendamento criado no sistema\n📅 ${dataAgendamento} às ${horario}\n🏪 ${loja}\n👁 ${optometrista || "A definir"}`
-      );
-    } else {
-      await kommo.addNote(leadId, `⚠️ Erro ao criar agendamento: ${dbResult?.error || "desconhecido"}`);
-    }
 
   } catch (err) {
     console.error("[ERRO][Webhook/Kommo]", err.message);
@@ -287,11 +247,27 @@ router.post("/api/kommo/message", async (req, res) => {
       const lead = payload.leads.add[0];
       trackEvent("add_lead", `lead=${lead?.id} pipeline=${lead?.pipeline_id}`);
       if (lead?.id) {
+        const syncResult = await syncLeadAppointment(String(lead.id), lead).catch((error) => ({ ok: false, error: error.message }));
+        if (!syncResult?.skipped) {
+          trackEvent("agendamento_sync", `lead=${lead.id} ok=${!!syncResult?.ok} id=${syncResult?.id || "-"}`);
+          return;
+        }
         console.log(`[Kommo/Message] 🆕 Novo lead — lead ${lead.id}`);
         await processNewLead(String(lead.id), {
           pipeline_id: lead.pipeline_id ? String(lead.pipeline_id) : null,
         });
       }
+      return;
+    }
+
+    // ── Evento: lead movido/atualizado ─────────────────────────
+    // Este é o webhook ativo no Kommo. Quando o lead entra no estágio de
+    // agendamento, grava no PostgreSQL; a landing passa a enxergar o slot ocupado.
+    const updatedLead = payload?.leads?.status?.[0] || payload?.leads?.update?.[0] || null;
+    if (updatedLead?.id && !payload?.message?.add) {
+      trackEvent("lead_update", `lead=${updatedLead.id} pipeline=${updatedLead.pipeline_id} status=${updatedLead.status_id}`);
+      const syncResult = await syncLeadAppointment(String(updatedLead.id), updatedLead);
+      trackEvent("agendamento_sync", `lead=${updatedLead.id} ok=${!!syncResult?.ok} id=${syncResult?.id || "-"} skipped=${!!syncResult?.skipped}`);
       return;
     }
 
@@ -662,6 +638,7 @@ router.get("/kommo/health", async (req, res) => {
   res.json({
     ok:                        true,
     bot_enabled:               process.env.BOT_ENABLED !== "false",
+    appointment_sync_enabled:  true,
     kommo:                     !!process.env.KOMMO_ACCESS_TOKEN,
     salesbot_mode:             process.env.KOMMO_USE_SALESBOT === "true",
     stages_map_configured:     !!process.env.KOMMO_STAGES_MAP,

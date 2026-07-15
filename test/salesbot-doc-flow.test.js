@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const http = require("node:http");
 const kommo = require("../kommo/client");
+const scheduling = require("../kommo/scheduling");
 
 process.env.SESSION_SECRET = "test-session-secret-with-at-least-32-characters";
 process.env.SESSION_TTL_HOURS = "1";
@@ -14,8 +15,17 @@ const { app } = require("../server");
 
 let server;
 let baseUrl;
+const originalAppointmentLookup = scheduling.buscarAgendamentoAtivoPorLead;
 
 test.before(async () => {
+  scheduling.buscarAgendamentoAtivoPorLead = async (leadId) => ({
+    id: 1,
+    lead_id: leadId,
+    data_agendamento: "20/07/2026",
+    horario: "10:00",
+    loja: "Óticas TGT",
+    optometrista: "Optometrista",
+  });
   await new Promise((resolve) => {
     server = app.listen(0, "127.0.0.1", () => {
       baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -105,6 +115,7 @@ test("SalesBot continua fluxo oficial do Kommo via return_url", async () => {
 });
 
 test.after(async () => {
+  scheduling.buscarAgendamentoAtivoPorLead = originalAppointmentLookup;
   await new Promise((resolve) => server.close(resolve));
 });
 
@@ -159,6 +170,20 @@ for (const loja of lojas) {
     assert.match(endereco.text, new RegExp(loja.whatsapp.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   });
 }
+
+test("SalesBot não confirma quando o agendamento não existe no sistema", async () => {
+  const lookupAtual = scheduling.buscarAgendamentoAtivoPorLead;
+  scheduling.buscarAgendamentoAtivoPorLead = async () => null;
+  try {
+    const leadId = `doc-sem-agendamento-${Date.now()}`;
+    await salesbot({ lead_id: leadId, loja: "Óticas TGT Enseada", message: "oi" });
+    await salesbot({ lead_id: leadId, loja: "Óticas TGT Enseada", message: "2" });
+    const response = await salesbot({ lead_id: leadId, loja: "Óticas TGT Enseada", message: "CONFIRMADO" });
+    assert.match(response.text, /não localizei um agendamento confirmado no sistema/);
+  } finally {
+    scheduling.buscarAgendamentoAtivoPorLead = lookupAtual;
+  }
+});
 
 test("SalesBot executa funis de orçamento, RH e pós-venda", async () => {
   const loja = "Óticas TGT Enseada";
