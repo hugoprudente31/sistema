@@ -168,12 +168,35 @@
     .row-red td { background: #fee2e2 !important; }
     .row-yellow td { background: #fef3c7 !important; }
     .row-green td { background: #dcfce7 !important; }
+    .row-pathology td {
+      background: #dbeafe !important;
+      border-bottom-color: #93c5fd;
+      transition: background-color .2s ease, box-shadow .2s ease;
+    }
+    .row-pathology td:first-child { box-shadow: inset 5px 0 0 #2563eb; }
 
     .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; min-width: 320px; }
     .actions button, .actions select { max-width: 180px; }
     .clinical-actions { flex-basis: 100%; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding-top: 4px; }
     .clinical-actions strong { font-size: 12px; color: var(--muted); }
-    .clinical-actions button.choice-selected { background: #166534; color: #fff; border: 2px solid #14532d; }
+    .clinical-actions .clinical-choice {
+      border: 2px solid transparent;
+      font-weight: 750;
+      transition: transform .15s ease, box-shadow .15s ease, background-color .15s ease, border-color .15s ease;
+    }
+    .clinical-actions .clinical-choice:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 14px rgba(15, 23, 42, .16);
+    }
+    .clinical-actions .clinical-choice:active { transform: translateY(0) scale(.98); }
+    .clinical-actions .clinical-choice:focus-visible { outline: 3px solid rgba(37, 99, 235, .28); outline-offset: 2px; }
+    .clinical-actions .clinical-choice-yes { background: #dcfce7; color: #166534; border-color: #86efac; }
+    .clinical-actions .clinical-choice-no { background: #fee2e2; color: #b91c1c; border-color: #fca5a5; }
+    .clinical-actions .clinical-choice-pathology { background: #dbeafe; color: #1d4ed8; border-color: #93c5fd; }
+    .clinical-actions .clinical-choice-yes.choice-selected { background: #15803d; color: #fff; border-color: #14532d; box-shadow: 0 0 0 3px rgba(21, 128, 61, .18); }
+    .clinical-actions .clinical-choice-no.choice-selected { background: #dc2626; color: #fff; border-color: #991b1b; box-shadow: 0 0 0 3px rgba(220, 38, 38, .18); }
+    .clinical-actions .clinical-choice-pathology.choice-selected { background: #2563eb; color: #fff; border-color: #1e40af; box-shadow: 0 0 0 3px rgba(37, 99, 235, .2); }
+    .clinical-actions .clinical-choice.choice-selected::before { content: '✓ '; font-weight: 900; }
 
     .btn-relatorio {
       max-width: 260px;
@@ -2063,6 +2086,7 @@ function statusClassAtendimentoSemaforo(r) {
 }
 
 function rowClassAtendimento(r) {
+  if (normalizeKey((r && r.ResultadoOptometrista) || '') === 'patologia') return 'row-pathology';
   var sem = String((r && r.AtendimentoSemaforo) || '').trim().toLowerCase();
   if (sem === 'vermelho') return 'row-red';
   if (sem === 'amarelo') return 'row-yellow';
@@ -2135,9 +2159,9 @@ function getActionHtml(r) {
   if (role === 'optometrista' && ownStore && ['Agendado', 'Confirmado', 'Compareceu', 'Não Compareceu'].indexOf(st) > -1) {
     var resultadoAtual = normalizeKey(r.ResultadoOptometrista || '');
     buttons += '<div class="clinical-actions"><strong>Marcar resultado:</strong>' +
-      '<button class="' + (resultadoAtual === 'check-in sim veio' ? 'choice-selected' : 'secondary') + '" onclick="marcarResultadoOptometrista(\'' + id + '\', \'Check-in Sim veio\')">Check-in Sim veio</button>' +
-      '<button class="' + (resultadoAtual === 'check-in nao veio' ? 'choice-selected' : 'secondary') + '" onclick="marcarResultadoOptometrista(\'' + id + '\', \'Check-in Não veio\')">Check-in Não veio</button>' +
-      '<button class="' + (resultadoAtual === 'patologia' ? 'choice-selected' : 'secondary') + '" onclick="marcarResultadoOptometrista(\'' + id + '\', \'Patologia\')">Patologia</button></div>';
+      '<button class="clinical-choice clinical-choice-yes' + (resultadoAtual === 'check-in sim veio' ? ' choice-selected' : '') + '" aria-pressed="' + (resultadoAtual === 'check-in sim veio') + '" onclick="marcarResultadoOptometrista(\'' + id + '\', \'Check-in Sim veio\')">Check-in Sim veio</button>' +
+      '<button class="clinical-choice clinical-choice-no' + (resultadoAtual === 'check-in nao veio' ? ' choice-selected' : '') + '" aria-pressed="' + (resultadoAtual === 'check-in nao veio') + '" onclick="marcarResultadoOptometrista(\'' + id + '\', \'Check-in Não veio\')">Check-in Não veio</button>' +
+      '<button class="clinical-choice clinical-choice-pathology' + (resultadoAtual === 'patologia' ? ' choice-selected' : '') + '" aria-pressed="' + (resultadoAtual === 'patologia') + '" onclick="marcarResultadoOptometrista(\'' + id + '\', \'Patologia\')">Patologia</button></div>';
   // Admin e gerente mantêm o check-in operacional existente.
   } else if (['admin', 'gerente de loja'].indexOf(role) > -1 && ['Agendado', 'Confirmado'].indexOf(st) > -1) {
     buttons += '<button onclick="marcarCompareceu(\'' + id + '\')">Check-in Sim</button>';
