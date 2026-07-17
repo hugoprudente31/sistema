@@ -270,6 +270,7 @@ async function handleBoasVindas(leadId, state, talkId, context) {
   }, { persist: true });
 
   await labels.setBotControl(leadId);
+  await labels.applyStoreLabel(leadId, loja.prefix);
   await addFlowLabel(leadId, loja.prefix, "novo-lead");
   await addFlowLabel(leadId, loja.prefix, "menu-enviado");
   await applyFlowLabel(leadId, loja.prefix, "principal", "aguardando-escolha");

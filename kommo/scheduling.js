@@ -19,23 +19,32 @@ async function ensureBloqueiosTable() {
       id        SERIAL PRIMARY KEY,
       loja      TEXT NOT NULL,
       data      DATE NOT NULL,
+      hora_inicio TIME,
+      hora_fim TIME,
       motivo    TEXT,
       criado_por TEXT,
       criado_em TIMESTAMP DEFAULT NOW(),
       UNIQUE (loja, data)
     )
   `);
+  await pool.query(`ALTER TABLE bloqueios_disponibilidade ADD COLUMN IF NOT EXISTS hora_inicio TIME`);
+  await pool.query(`ALTER TABLE bloqueios_disponibilidade ADD COLUMN IF NOT EXISTS hora_fim TIME`);
   _bloqueiosTableReady = true;
 }
 
-async function estaLojaBloqueada(loja, dataPg) {
+async function estaLojaBloqueada(loja, dataPg, horario = "") {
   try {
     await ensureBloqueiosTable();
+    const horarioNormalizado = clean(horario);
     const { rows } = await pool.query(
       `SELECT 1 FROM bloqueios_disponibilidade
        WHERE LOWER(loja) = LOWER($1) AND data = $2
+         AND (
+           ($3::text = '' AND hora_inicio IS NULL AND hora_fim IS NULL)
+           OR ($3::text <> '' AND (hora_inicio IS NULL OR hora_fim IS NULL OR ($3::time >= hora_inicio AND $3::time < hora_fim)))
+         )
        LIMIT 1`,
-      [loja, dataPg]
+      [loja, dataPg, horarioNormalizado]
     );
     return rows.length > 0;
   } catch {
@@ -43,18 +52,26 @@ async function estaLojaBloqueada(loja, dataPg) {
   }
 }
 
-async function adicionarBloqueio({ loja, data, motivo, criadoPor }) {
+async function adicionarBloqueio({ loja, data, horaInicio, horaFim, motivo, criadoPor }) {
   await ensureBloqueiosTable();
   const dataPg = toPgDate(data);
   if (!dataPg) throw new Error("Data inválida.");
+  const inicio = clean(horaInicio);
+  const fim = clean(horaFim);
+  if ((inicio || fim) && (!/^\d{2}:\d{2}$/.test(inicio) || !/^\d{2}:\d{2}$/.test(fim) || inicio >= fim)) {
+    throw new Error("Faixa de horário inválida.");
+  }
   const lojaNorm = normalizeLoja(loja);
   await pool.query(
-    `INSERT INTO bloqueios_disponibilidade (loja, data, motivo, criado_por)
-     VALUES ($1, $2, $3, $4)
-     ON CONFLICT (loja, data) DO UPDATE SET motivo = EXCLUDED.motivo, criado_por = EXCLUDED.criado_por, criado_em = NOW()`,
-    [lojaNorm, dataPg, motivo || null, criadoPor || null]
+    `INSERT INTO bloqueios_disponibilidade (loja, data, hora_inicio, hora_fim, motivo, criado_por)
+     VALUES ($1, $2, $3::time, $4::time, $5, $6)
+     ON CONFLICT (loja, data) DO UPDATE SET
+       hora_inicio = EXCLUDED.hora_inicio, hora_fim = EXCLUDED.hora_fim,
+       motivo = EXCLUDED.motivo, criado_por = EXCLUDED.criado_por, criado_em = NOW()`,
+    [lojaNorm, dataPg, inicio || null, fim || null, motivo || null, criadoPor || null]
   );
   _cache.delete(`disponibilidade|${lojaNorm}|${dataPg}`);
+  return { loja: lojaNorm, data: dataPg, horaInicio: inicio, horaFim: fim };
 }
 
 async function removerBloqueio({ loja, data }) {
@@ -73,7 +90,10 @@ async function removerBloqueio({ loja, data }) {
 async function listarBloqueios() {
   await ensureBloqueiosTable();
   const { rows } = await pool.query(
-    `SELECT loja, TO_CHAR(data,'DD/MM/YYYY') AS data, motivo, criado_por, criado_em
+    `SELECT loja, TO_CHAR(data,'DD/MM/YYYY') AS data,
+            TO_CHAR(hora_inicio,'HH24:MI') AS hora_inicio,
+            TO_CHAR(hora_fim,'HH24:MI') AS hora_fim,
+            motivo, criado_por, criado_em
      FROM bloqueios_disponibilidade
      ORDER BY data DESC, loja`
   );
@@ -213,9 +233,9 @@ async function reagendarAgendamentoPorLead({ leadId, data, horario }) {
       await client.query("ROLLBACK");
       return { ok: false, error: "Esse horario nao faz parte do atendimento da loja nessa data." };
     }
-    if (await estaLojaBloqueada(loja, dataPg)) {
+    if (await estaLojaBloqueada(loja, dataPg, horarioNormalizado)) {
       await client.query("ROLLBACK");
-      return { ok: false, error: "A loja nao possui atendimento disponivel nessa data." };
+      return { ok: false, error: "Esse horário está bloqueado para atendimento. Escolha outro horário." };
     }
 
     const optometristaLivre = await buscarPrimeiroOptometristaLivre(
@@ -468,6 +488,7 @@ async function getHorariosDisponiveis(loja, data) {
   try {
     const horarios = [];
     for (const horario of getHorariosLoja(lojaNormalizada, dataPg)) {
+      if (await estaLojaBloqueada(lojaNormalizada, dataPg, horario)) continue;
       const optometristaLivre = await buscarPrimeiroOptometristaLivre(client, lojaNormalizada, dataPg, horario);
       if (optometristaLivre) horarios.push(horario);
     }
@@ -495,8 +516,8 @@ async function criarAgendamento({ nome, whatsapp, email, loja, data, horario, le
   if (!getHorariosLoja(lojaNormalizada, dataPg).includes(horarioNormalizado)) {
     return { ok: false, error: "Esse horario nao faz parte do atendimento da loja nessa data." };
   }
-  if (await estaLojaBloqueada(lojaNormalizada, dataPg)) {
-    return { ok: false, error: "A loja nao possui atendimento disponivel nessa data." };
+  if (await estaLojaBloqueada(lojaNormalizada, dataPg, horarioNormalizado)) {
+    return { ok: false, error: "Esse horário está bloqueado para atendimento. Escolha outro horário." };
   }
 
   const client = await pool.connect();

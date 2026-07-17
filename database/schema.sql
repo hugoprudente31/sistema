@@ -13,6 +13,25 @@ ALTER TABLE agendamentos
   ADD COLUMN IF NOT EXISTS patologia TEXT DEFAULT 'Pendente',
   ADD COLUMN IF NOT EXISTS resultado_optometrista TEXT DEFAULT 'Pendente';
 
+ALTER TABLE agendamentos
+  ADD COLUMN IF NOT EXISTS lembrete_2h_em TIMESTAMPTZ;
+
+CREATE TABLE IF NOT EXISTS bloqueios_disponibilidade (
+  id SERIAL PRIMARY KEY,
+  loja TEXT NOT NULL,
+  data DATE NOT NULL,
+  hora_inicio TIME,
+  hora_fim TIME,
+  motivo TEXT,
+  criado_por TEXT,
+  criado_em TIMESTAMP DEFAULT NOW(),
+  UNIQUE (loja, data)
+);
+
+ALTER TABLE bloqueios_disponibilidade
+  ADD COLUMN IF NOT EXISTS hora_inicio TIME,
+  ADD COLUMN IF NOT EXISTS hora_fim TIME;
+
 CREATE TABLE IF NOT EXISTS historico_alteracoes_agendamentos (
   id SERIAL PRIMARY KEY,
   agendamento_id INTEGER,

@@ -325,7 +325,7 @@ router.post("/api/kommo/message", async (req, res) => {
 
 // ── Admin: bloqueios de disponibilidade ─────────────────────────
 // GET  /api/admin/bloqueios           — lista bloqueios ativos
-// POST /api/admin/bloqueios           — adiciona bloqueio { loja, data, motivo }
+// POST /api/admin/bloqueios           — adiciona bloqueio { loja, data, hora_inicio?, hora_fim?, motivo }
 // DELETE /api/admin/bloqueios         — remove bloqueio   { loja, data }
 // Acesso protegido por KOMMO_WEBHOOK_SECRET no header Authorization.
 
@@ -340,11 +340,30 @@ router.get("/api/admin/bloqueios", requireWebhookSecret, async (req, res) => {
 
 router.post("/api/admin/bloqueios", requireWebhookSecret, async (req, res) => {
   const { loja, data, motivo } = req.body || {};
+  const horaInicio = req.body?.hora_inicio || req.body?.horaInicio || "";
+  const horaFim = req.body?.hora_fim || req.body?.horaFim || "";
   if (!loja || !data) return res.status(400).json({ ok: false, error: "Campos obrigatórios: loja, data." });
   try {
-    await adicionarBloqueio({ loja, data, motivo, criadoPor: "admin" });
-    console.log(`[Admin] ⛔ Bloqueio adicionado — ${loja} em ${data}`);
-    res.json({ ok: true, mensagem: `Loja "${loja}" bloqueada em ${data}.` });
+    const bloqueio = await adicionarBloqueio({ loja, data, horaInicio, horaFim, motivo, criadoPor: "admin" });
+    const { rows: conflitos } = await pool.query(
+      `SELECT id, nome, horario, kommo_lead_id
+         FROM agendamentos
+        WHERE LOWER(REGEXP_REPLACE(COALESCE(loja,''), '\\s*-\\s*', ' ', 'g')) = LOWER(REGEXP_REPLACE($1, '\\s*-\\s*', ' ', 'g'))
+          AND data_agendamento = $2
+          AND excluido_em IS NULL
+          AND status IN ('Agendado','Confirmado')
+          AND ($3::text = '' OR (horario >= $3 AND horario < $4))
+        ORDER BY horario, id`,
+      [bloqueio.loja, bloqueio.data, bloqueio.horaInicio, bloqueio.horaFim]
+    );
+    const faixa = horaInicio && horaFim ? ` das ${horaInicio} às ${horaFim}` : " durante todo o dia";
+    console.log(`[Admin] ⛔ Bloqueio adicionado — ${loja} em ${data}${faixa}`);
+    res.json({
+      ok: true,
+      mensagem: `Loja "${loja}" bloqueada em ${data}${faixa}.`,
+      conflitos_existentes: conflitos.length,
+      agendamentos_existentes: conflitos
+    });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
