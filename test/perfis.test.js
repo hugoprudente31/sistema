@@ -303,6 +303,39 @@ test('gerente Gonzaga: PATCH com OS na própria loja — 200', async function() 
   } finally { r1(); r2(); }
 });
 
+for (const loja of LOJAS) {
+  test('gerente [' + loja + ']: venda na própria loja confirma presença — 200', async function() {
+    const restoreQuery = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(loja, { compareceu: 'Não' })] } });
+    const originalConnect = pool.connect;
+    let updateParams;
+    pool.connect = async function() {
+      return {
+        query: async function(sql, params) {
+          if (sql.includes('UPDATE agendamentos SET')) {
+            updateParams = params;
+            return { rows: [ag(loja, { status: 'Compareceu', compareceu: 'Sim', valor_venda: 1300 })] };
+          }
+          return { rows: [] };
+        },
+        release: function() {}
+      };
+    };
+    try {
+      const response = await fetch(baseUrl + '/api/agendamentos/100', {
+        method: 'PATCH', headers: H(tok('gerente de loja', loja)),
+        body: JSON.stringify({ statusAgenda: 'Não Compareceu', valorVenda: '1300' })
+      });
+      assert.equal(response.status, 200);
+      assert.equal(updateParams[9], 'Compareceu', 'venda deve corrigir o status de ausência');
+      assert.equal(updateParams[10], 'Sim', 'venda deve confirmar a presença');
+      assert.equal(updateParams[14], '1300');
+    } finally {
+      pool.connect = originalConnect;
+      restoreQuery();
+    }
+  });
+}
+
 test('gerente Gonzaga: PATCH em agendamento da Enseada — 403 cross-store', async function() {
   const restore = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(E)] } });
   try {

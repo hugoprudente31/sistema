@@ -520,7 +520,8 @@
           <div class="row"><div><label>WhatsApp</label><input id="editWhatsApp" type="text"></div><div><label>Email</label><input id="editEmail" type="email"></div></div>
           <div class="row"><div><label>Loja</label><select id="editLoja"></select></div><div><label>Optometrista</label><input id="editOptometrista" type="text"></div></div>
           <div class="row"><div><label>Data do Agendamento</label><input id="editDataAgendamento" type="date"></div><div><label>Horário</label><input id="editHorario" type="time"></div></div>
-          <div class="row"><div><label>Status do Agendamento</label><select id="editStatusAgenda"><option>Agendado</option><option>Confirmado</option><option>Compareceu</option><option>Não Compareceu</option><option>OS em Andamento</option><option>Concluído</option><option>Cancelado</option></select></div><div><label>Status da OS</label><select id="editStatusOS"><option value=""></option><option>Aberta</option><option>Em produção</option><option>Recebida</option><option>Pronta</option><option>Entregue</option><option>Concluído</option><option>Cancelada</option><option>Cancelado</option><option>Reembolso</option></select></div></div>
+          <div class="row"><div><label>Status do Agendamento</label><select id="editStatusAgenda"><option>Agendado</option><option>Confirmado</option><option>Compareceu</option><option>Não Compareceu</option><option>OS em Andamento</option><option>Concluído</option><option>Cancelado</option></select></div><div><label>Presença</label><select id="editCompareceu"><option value="Pendente">Pendente</option><option value="Sim">Sim — compareceu</option><option value="Não">Não — não compareceu</option></select></div></div>
+          <div class="row"><div><label>Status da OS</label><select id="editStatusOS"><option value=""></option><option>Aberta</option><option>Em produção</option><option>Recebida</option><option>Pronta</option><option>Entregue</option><option>Concluído</option><option>Cancelada</option><option>Cancelado</option><option>Reembolso</option></select></div><div></div></div>
           <div class="row"><div><label>Número da OS</label><input id="editNumeroOS" type="text"></div><div><label>Data de Abertura da OS</label><input id="editDataAberturaOS" type="date"></div></div>
           <div class="row"><div><label>Data de Entrada da OS</label><input id="editDataEntradaOS" type="date"></div><div><label>Data prevista de entrega</label><input id="editDataEntregaOS" type="date"></div></div>
           <div class="row"><div><label>Data de Finalização da OS</label><input id="editDataFinalizacaoOS" type="date"></div><div><label>Vendedor Nome</label><input id="editVendedorNome" type="text"></div></div>
@@ -776,14 +777,14 @@ function mapAgendamentoDb(r) {
   var valorVenda = Number(String(r.valor_venda || 0).replace(',', '.')) || 0;
   var semaforo = '';
   var semaforoLabel = '';
-  if (compareceu === 'nao' || compareceu === 'nao compareceu' || status === 'nao compareceu') {
+  var statusOS = normalizeKey(r.status_os || '');
+  var cancelado = status === 'cancelado' || statusOS === 'cancelada' || statusOS === 'cancelado' || statusOS === 'reembolso';
+  if (!cancelado && (venda === 'sim' || valorVenda > 0)) {
+    semaforo = 'verde'; semaforoLabel = 'Compareceu e comprou';
+  } else if (compareceu === 'nao' || compareceu === 'nao compareceu' || status === 'nao compareceu') {
     semaforo = 'vermelho'; semaforoLabel = 'Não compareceu';
   } else if (compareceu === 'sim' || compareceu === 'compareceu' || status === 'compareceu' || status === 'concluido') {
-    if (venda === 'sim' || valorVenda > 0) {
-      semaforo = 'verde'; semaforoLabel = 'Compareceu e comprou';
-    } else {
-      semaforo = 'amarelo'; semaforoLabel = 'Compareceu sem compra';
-    }
+    semaforo = 'amarelo'; semaforoLabel = 'Compareceu sem compra';
   }
   return {
     ID: r.id,
@@ -1764,6 +1765,7 @@ function abrirModalEdicao(id) {
   byId('editDataAgendamento').value = row.DataAgendamento || '';
   byId('editHorario').value = row.Horario || '';
   byId('editStatusAgenda').value = row.StatusAgenda || 'Agendado';
+  byId('editCompareceu').value = row.Compareceu || 'Pendente';
   byId('editStatusOS').value = row.StatusOS || '';
   byId('editNumeroOS').value = row.NumeroOS || '';
   byId('editDataAberturaOS').value = row.DataAberturaOS || '';
@@ -1787,7 +1789,7 @@ function fecharModalEdicao() {
 
 function aplicarPermissoesModal() {
   var role = roleName();
-  var main = ['editOrigem', 'editNomeCompleto', 'editWhatsApp', 'editEmail', 'editLoja', 'editOptometrista', 'editDataAgendamento', 'editHorario', 'editStatusAgenda', 'editObservacao'];
+  var main = ['editOrigem', 'editNomeCompleto', 'editWhatsApp', 'editEmail', 'editLoja', 'editOptometrista', 'editDataAgendamento', 'editHorario', 'editStatusAgenda', 'editCompareceu', 'editObservacao'];
   var os = ['editNumeroOS', 'editDataAberturaOS', 'editDataEntradaOS', 'editDataEntregaOS', 'editDataFinalizacaoOS', 'editStatusOS', 'editVendedorNome', 'editValorVenda', 'editDesconto'];
 
   // Habilita tudo por padrão
@@ -1808,7 +1810,11 @@ function aplicarPermissoesModal() {
   if (role === 'optometrista') {
     main.concat(os).forEach(function(id) { byId(id).disabled = true; });
     byId('editStatusAgenda').disabled = false;
+    byId('editCompareceu').disabled = false;
   }
+
+  // Atendimento central não registra presença; essa correção é feita pela loja.
+  if (role === 'atendimento central') byId('editCompareceu').disabled = true;
 
   // Financeiro só para admin, gerente, comprador
   if (['admin', 'gerente de loja', 'comprador'].indexOf(role) === -1) {
@@ -1846,6 +1852,7 @@ function salvarEdicaoLinha() {
     desconto: byId('editDesconto').value.trim(),
     observacao: byId('editObservacao').value.trim()
   };
+  if (!byId('editCompareceu').disabled) payload.compareceu = byId('editCompareceu').value;
 
   if (!id) {
     setMsg('msgEdit', 'ID do agendamento não encontrado.', 'err');

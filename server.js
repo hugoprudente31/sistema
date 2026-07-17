@@ -970,6 +970,15 @@ async function initDatabase() {
       NEW.agendado_por_nome := COALESCE(NULLIF(NEW.agendado_por_nome, ''), responsavel_registro);
       NEW.ultima_alteracao_por_nome := responsavel_registro;
       NEW.ultima_alteracao_em := NOW();
+      IF COALESCE(NEW.valor_venda, 0) > 0
+        AND LOWER(COALESCE(NEW.status, '')) <> 'cancelado'
+        AND LOWER(COALESCE(NEW.status_os, '')) NOT IN ('cancelada', 'cancelado', 'reembolso') THEN
+        NEW.compareceu := 'Sim';
+        IF TRANSLATE(LOWER(COALESCE(NEW.status, '')), 'ãáàâäéèêëíìîïóòôöõúùûüç', 'aaaaaeeeeiiiiooooouuuuc')
+          IN ('agendado', 'confirmado', 'nao compareceu') THEN
+          NEW.status := 'Compareceu';
+        END IF;
+      END IF;
       RETURN NEW;
     END;
     $$ LANGUAGE plpgsql;
@@ -979,6 +988,30 @@ async function initDatabase() {
     BEFORE INSERT OR UPDATE ON agendamentos
     FOR EACH ROW EXECUTE FUNCTION validar_agendamento_tgt();
   `);
+
+  const comprasCorrigidas = await pool.query(`
+    UPDATE agendamentos
+    SET compareceu = 'Sim',
+        status = CASE
+          WHEN TRANSLATE(LOWER(COALESCE(status, '')), 'ãáàâäéèêëíìîïóòôöõúùûüç', 'aaaaaeeeeiiiiooooouuuuc')
+            IN ('agendado', 'confirmado', 'nao compareceu') THEN 'Compareceu'
+          ELSE status
+        END,
+        atualizado_em = CURRENT_TIMESTAMP
+    WHERE COALESCE(valor_venda, 0) > 0
+      AND LOWER(COALESCE(status, '')) <> 'cancelado'
+      AND LOWER(COALESCE(status_os, '')) NOT IN ('cancelada', 'cancelado', 'reembolso')
+      AND (
+        TRANSLATE(LOWER(COALESCE(compareceu, '')), 'ãáàâäéèêëíìîïóòôöõúùûüç', 'aaaaaeeeeiiiiooooouuuuc') <> 'sim'
+        OR TRANSLATE(LOWER(COALESCE(status, '')), 'ãáàâäéèêëíìîïóòôöõúùûüç', 'aaaaaeeeeiiiiooooouuuuc')
+          IN ('agendado', 'confirmado', 'nao compareceu')
+      )
+    RETURNING id
+  `);
+  if (comprasCorrigidas.rowCount) {
+    const ids = comprasCorrigidas.rows.slice(0, 30).map((row) => row.id).join(", ");
+    console.log(`[Semáforo] ${comprasCorrigidas.rowCount} compra(s) corrigida(s) automaticamente. IDs: ${ids}`);
+  }
 
   await negociacaoRoutes.initNegociacaoTables(pool);
   await pool.query(`ALTER TABLE agendamentos ADD COLUMN IF NOT EXISTS lembrete_24h_em TIMESTAMPTZ`);
@@ -2355,6 +2388,26 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
     const actorNome = clean(req.session.nome || "Usuário autenticado");
     const actorEmail = clean(req.session.email);
 
+    // Uma venda válida é evidência definitiva de que o cliente compareceu.
+    // Mantemos cancelamentos/reembolsos fora desta regra para não transformar
+    // uma OS desfeita em compra concluída.
+    const valorVendaRecebido = Object.prototype.hasOwnProperty.call(b, "valor_venda")
+      ? b.valor_venda
+      : (Object.prototype.hasOwnProperty.call(b, "valorVenda") ? b.valorVenda : current.rows[0].valor_venda);
+    const valorVendaFinal = Number(String(valorVendaRecebido ?? 0).replace(",", ".")) || 0;
+    const statusAgendaSolicitado = clean(statusResultadoOptometrista || b.status || b.statusAgenda || current.rows[0].status);
+    const statusOSSolicitado = clean(b.status_os || b.statusOS || current.rows[0].status_os);
+    const normalizarStatus = (valor) => clean(valor).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const statusAgendaNormalizado = normalizarStatus(statusAgendaSolicitado);
+    const statusOSNormalizado = normalizarStatus(statusOSSolicitado);
+    const compraAtiva = valorVendaFinal > 0 &&
+      statusAgendaNormalizado !== "cancelado" &&
+      !["cancelada", "cancelado", "reembolso"].includes(statusOSNormalizado);
+    const compareceuVenda = compraAtiva ? "Sim" : null;
+    const statusVenda = compraAtiva && ["agendado", "confirmado", "nao compareceu"].includes(statusAgendaNormalizado)
+      ? "Compareceu"
+      : null;
+
     const client = await pool.connect();
     let result;
     try {
@@ -2422,8 +2475,8 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         b.data_agendamento || b.dataAgendamento || null,
         b.horario || null,
         b.observacao || null,
-        statusResultadoOptometrista || b.status || b.statusAgenda || null,
-        compareceuResultadoOptometrista || b.compareceu || null,
+        statusVenda || statusResultadoOptometrista || b.status || b.statusAgenda || null,
+        compareceuVenda || compareceuResultadoOptometrista || b.compareceu || null,
         b.numero_os || b.numeroOS || null,
         b.status_os || b.statusOS || null,
         b.vendedor_nome || b.vendedorNome || null,
