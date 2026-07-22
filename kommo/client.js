@@ -65,7 +65,6 @@ class KommoClient {
       return data?._embedded?.contacts || [];
     } catch { return []; }
   }
-
   async createLead({ nome, contactId, customFields = [] }) {
     const body = [{
       name:      `Agendamento — ${nome}`,

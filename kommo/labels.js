@@ -28,6 +28,12 @@ const LABELS = {
   FECHADO_GANHO:     "fechado-ganho",
   FECHADO_PERDIDO:   "fechado-perdido",
   EM_RECUPERACAO:    "em-recuperacao",
+
+  // Loja de origem — somente uma por lead
+  LOJA_GONZAGA:       "loja-gonzaga",
+  LOJA_ENSEADA:       "loja-enseada",
+  LOJA_PITANGUEIRAS:  "loja-pitangueiras",
+  LOJA_ADEMAR:        "loja-ademar-de-barros",
 };
 
 // Labels do semáforo — apenas 1 pode estar ativo por vez
@@ -43,6 +49,13 @@ const TEMPERATURE_LABELS = [
   LABELS.LEAD_QUENTE,
   LABELS.LEAD_MORNO,
   LABELS.LEAD_FRIO,
+];
+
+const STORE_LABELS = [
+  LABELS.LOJA_GONZAGA,
+  LABELS.LOJA_ENSEADA,
+  LABELS.LOJA_PITANGUEIRAS,
+  LABELS.LOJA_ADEMAR,
 ];
 
 // ── Funções principais ───────────────────────────────────────────
@@ -113,6 +126,18 @@ async function applyTemperature(leadId, temperature) {
   await swapLabel(leadId, TEMPERATURE_LABELS, label);
 }
 
+async function applyStoreLabel(leadId, storePrefix) {
+  const map = {
+    gon: LABELS.LOJA_GONZAGA,
+    ens: LABELS.LOJA_ENSEADA,
+    pit: LABELS.LOJA_PITANGUEIRAS,
+    tgt: LABELS.LOJA_ADEMAR,
+  };
+  const label = map[String(storePrefix || "").toLowerCase()];
+  if (!label) return;
+  await swapLabel(leadId, STORE_LABELS, label);
+}
+
 // Troca bot-ativo ↔ atendimento-humano
 async function setHumanControl(leadId) {
   await swapLabel(leadId, [LABELS.BOT_ATIVO], LABELS.ATENDIMENTO_HUMANO);
@@ -126,11 +151,13 @@ module.exports = {
   LABELS,
   SEMAPHORE_LABELS,
   TEMPERATURE_LABELS,
+  STORE_LABELS,
   applyLabel,
   removeLabel,
   swapLabel,
   applyTrafficLight,
   applyTemperature,
+  applyStoreLabel,
   setHumanControl,
   setBotControl,
 };

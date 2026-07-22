@@ -111,9 +111,17 @@ module.exports = {
     `🔗 ${LINK_TESTE_VISAO}\n\n` +
     `Após agendar, responda aqui com CONFIRMADO para finalizarmos seu atendimento! 😊`,
 
-  testeConfirmado: (loja) =>
-    `✅ Perfeito! Seu interesse no Teste de Visão Grátis foi registrado para ${loja.titulo}.\n\n` +
-    `Se já concluiu o agendamento pelo link, nossa equipe acompanhará pelo sistema. Qualquer dúvida, estamos por aqui.`,
+  testeConfirmado: (agendamento) =>
+    `✅ Perfeito! Seu agendamento do Teste de Visão foi confirmado e registrado no sistema.\n\n` +
+    `📅 ${agendamento.data_agendamento} às ${agendamento.horario}\n` +
+    `🏪 ${agendamento.loja}\n` +
+    `👁 ${agendamento.optometrista || "A definir"}\n\n` +
+    `Esse horário agora está reservado para você.`,
+
+  testeNaoEncontrado: (loja) =>
+    `Ainda não localizei um agendamento confirmado no sistema para ${loja.titulo}. ⚠️\n\n` +
+    `Conclua a escolha da data e do horário pelo link e depois responda CONFIRMADO novamente. ` +
+    `Se você já concluiu, escreva ESPECIALISTA para nossa equipe verificar.`,
 
   orcamentoMenu: () =>
     `Ótimo! Como posso te ajudar com o orçamento? 😊\n\n` +

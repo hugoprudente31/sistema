@@ -169,12 +169,35 @@
     .row-yellow td { background: #fef3c7 !important; }
     .row-green td { background: #dcfce7 !important; }
     .row-blue td { background: #dbeafe !important; border-bottom-color: #93c5fd; }
+    .row-pathology td {
+      background: #dbeafe !important;
+      border-bottom-color: #93c5fd;
+      transition: background-color .2s ease, box-shadow .2s ease;
+    }
+    .row-pathology td:first-child { box-shadow: inset 5px 0 0 #2563eb; }
 
     .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; min-width: 320px; }
     .actions button, .actions select { max-width: 180px; }
     .clinical-actions { flex-basis: 100%; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding-top: 4px; }
     .clinical-actions strong { font-size: 12px; color: var(--muted); }
-    .clinical-actions button.choice-selected { background: #166534; color: #fff; border: 2px solid #14532d; }
+    .clinical-actions .clinical-choice {
+      border: 2px solid transparent;
+      font-weight: 750;
+      transition: transform .15s ease, box-shadow .15s ease, background-color .15s ease, border-color .15s ease;
+    }
+    .clinical-actions .clinical-choice:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 14px rgba(15, 23, 42, .16);
+    }
+    .clinical-actions .clinical-choice:active { transform: translateY(0) scale(.98); }
+    .clinical-actions .clinical-choice:focus-visible { outline: 3px solid rgba(37, 99, 235, .28); outline-offset: 2px; }
+    .clinical-actions .clinical-choice-yes { background: #dcfce7; color: #166534; border-color: #86efac; }
+    .clinical-actions .clinical-choice-no { background: #fee2e2; color: #b91c1c; border-color: #fca5a5; }
+    .clinical-actions .clinical-choice-pathology { background: #dbeafe; color: #1d4ed8; border-color: #93c5fd; }
+    .clinical-actions .clinical-choice-yes.choice-selected { background: #15803d; color: #fff; border-color: #14532d; box-shadow: 0 0 0 3px rgba(21, 128, 61, .18); }
+    .clinical-actions .clinical-choice-no.choice-selected { background: #dc2626; color: #fff; border-color: #991b1b; box-shadow: 0 0 0 3px rgba(220, 38, 38, .18); }
+    .clinical-actions .clinical-choice-pathology.choice-selected { background: #2563eb; color: #fff; border-color: #1e40af; box-shadow: 0 0 0 3px rgba(37, 99, 235, .2); }
+    .clinical-actions .clinical-choice.choice-selected::before { content: '✓ '; font-weight: 900; }
 
     .btn-relatorio {
       max-width: 260px;
@@ -506,7 +529,8 @@
           <div class="row"><div><label>WhatsApp</label><input id="editWhatsApp" type="text"></div><div><label>Email</label><input id="editEmail" type="email"></div></div>
           <div class="row"><div><label>Loja</label><select id="editLoja"></select></div><div><label>Optometrista</label><input id="editOptometrista" type="text"></div></div>
           <div class="row"><div><label>Data do Agendamento</label><input id="editDataAgendamento" type="date"></div><div><label>Horário</label><input id="editHorario" type="time"></div></div>
-          <div class="row"><div><label>Status do Agendamento</label><select id="editStatusAgenda"><option>Agendado</option><option>Confirmado</option><option>Compareceu</option><option>Não Compareceu</option><option>OS em Andamento</option><option>Concluído</option><option>Cancelado</option></select></div><div><label>Status da OS</label><select id="editStatusOS"><option value=""></option><option>Aberta</option><option>Em produção</option><option>Recebida</option><option>Pronta</option><option>Entregue</option><option>Concluído</option><option>Cancelada</option><option>Cancelado</option><option>Reembolso</option></select></div></div>
+          <div class="row"><div><label>Status do Agendamento</label><select id="editStatusAgenda"><option>Agendado</option><option>Confirmado</option><option>Compareceu</option><option>Não Compareceu</option><option>OS em Andamento</option><option>Concluído</option><option>Cancelado</option></select></div><div><label>Presença</label><select id="editCompareceu"><option value="Pendente">Pendente</option><option value="Sim">Sim — compareceu</option><option value="Não">Não — não compareceu</option></select></div></div>
+          <div class="row"><div><label>Status da OS</label><select id="editStatusOS"><option value=""></option><option>Aberta</option><option>Em produção</option><option>Recebida</option><option>Pronta</option><option>Entregue</option><option>Concluído</option><option>Cancelada</option><option>Cancelado</option><option>Reembolso</option></select></div><div></div></div>
           <div class="row"><div><label>Número da OS</label><input id="editNumeroOS" type="text"></div><div><label>Data de Abertura da OS</label><input id="editDataAberturaOS" type="date"></div></div>
           <div class="row"><div><label>Data de Entrada da OS</label><input id="editDataEntradaOS" type="date"></div><div><label>Data prevista de entrega</label><input id="editDataEntregaOS" type="date"></div></div>
           <div class="row"><div><label>Data de Finalização da OS</label><input id="editDataFinalizacaoOS" type="date"></div><div><label>Vendedor Nome</label><input id="editVendedorNome" type="text"></div></div>
@@ -811,18 +835,18 @@ function mapAgendamentoDb(r) {
   var valorVenda = Number(String(r.valor_venda || 0).replace(',', '.')) || 0;
   var semaforo = normalizeKey(r.atendimento_semaforo || '');
   var semaforoLabel = r.atendimento_semaforo_label || '';
-  if (semaforo) {
+  var statusOS = normalizeKey(r.status_os || '');
+  var cancelado = status === 'cancelado' || statusOS === 'cancelada' || statusOS === 'cancelado' || statusOS === 'reembolso';
+  if (!cancelado && (venda === 'sim' || valorVenda > 0)) {
+    semaforo = 'verde'; semaforoLabel = 'Compareceu e comprou';
+  } else if (semaforo) {
     semaforo = semaforo === 'azul' ? 'azul' : semaforo;
   } else if (resultadoOptometrista === 'patologia' || patologia === 'sim') {
     semaforo = 'azul'; semaforoLabel = 'Patologia';
   } else if (compareceu === 'nao' || compareceu === 'nao compareceu' || status === 'nao compareceu') {
     semaforo = 'vermelho'; semaforoLabel = 'Não compareceu';
   } else if (compareceu === 'sim' || compareceu === 'compareceu' || status === 'compareceu' || status === 'concluido') {
-    if (venda === 'sim' || valorVenda > 0) {
-      semaforo = 'verde'; semaforoLabel = 'Compareceu e comprou';
-    } else {
-      semaforo = 'amarelo'; semaforoLabel = 'Compareceu sem compra';
-    }
+    semaforo = 'amarelo'; semaforoLabel = 'Compareceu sem compra';
   }
   return {
     ID: r.id,
@@ -1816,6 +1840,7 @@ function abrirModalEdicao(id) {
   byId('editDataAgendamento').value = row.DataAgendamento || '';
   byId('editHorario').value = row.Horario || '';
   byId('editStatusAgenda').value = row.StatusAgenda || 'Agendado';
+  byId('editCompareceu').value = row.Compareceu || 'Pendente';
   byId('editStatusOS').value = row.StatusOS || '';
   byId('editNumeroOS').value = row.NumeroOS || '';
   byId('editDataAberturaOS').value = row.DataAberturaOS || '';
@@ -1839,7 +1864,7 @@ function fecharModalEdicao() {
 
 function aplicarPermissoesModal() {
   var role = roleName();
-  var main = ['editOrigem', 'editNomeCompleto', 'editWhatsApp', 'editEmail', 'editLoja', 'editOptometrista', 'editDataAgendamento', 'editHorario', 'editStatusAgenda', 'editObservacao'];
+  var main = ['editOrigem', 'editNomeCompleto', 'editWhatsApp', 'editEmail', 'editLoja', 'editOptometrista', 'editDataAgendamento', 'editHorario', 'editStatusAgenda', 'editCompareceu', 'editObservacao'];
   var os = ['editNumeroOS', 'editDataAberturaOS', 'editDataEntradaOS', 'editDataEntregaOS', 'editDataFinalizacaoOS', 'editStatusOS', 'editVendedorNome', 'editValorVenda', 'editDesconto'];
 
   // Habilita tudo por padrão
@@ -1860,7 +1885,11 @@ function aplicarPermissoesModal() {
   if (role === 'optometrista') {
     main.concat(os).forEach(function(id) { byId(id).disabled = true; });
     byId('editStatusAgenda').disabled = false;
+    byId('editCompareceu').disabled = false;
   }
+
+  // Atendimento central não registra presença; essa correção é feita pela loja.
+  if (role === 'atendimento central') byId('editCompareceu').disabled = true;
 
   // Financeiro só para admin, gerente, comprador
   if (['admin', 'gerente de loja', 'comprador'].indexOf(role) === -1) {
@@ -1898,6 +1927,7 @@ function salvarEdicaoLinha() {
     desconto: byId('editDesconto').value.trim(),
     observacao: byId('editObservacao').value.trim()
   };
+  if (!byId('editCompareceu').disabled) payload.compareceu = byId('editCompareceu').value;
 
   if (!id) {
     setMsg('msgEdit', 'ID do agendamento não encontrado.', 'err');
@@ -2153,6 +2183,7 @@ function statusClassAtendimentoSemaforo(r) {
 }
 
 function rowClassAtendimento(r) {
+  if (normalizeKey((r && r.ResultadoOptometrista) || '') === 'patologia') return 'row-pathology';
   var sem = String((r && r.AtendimentoSemaforo) || '').trim().toLowerCase();
   if (sem === 'vermelho') return 'row-red';
   if (sem === 'amarelo') return 'row-yellow';
@@ -2226,9 +2257,9 @@ function getActionHtml(r) {
   if (role === 'optometrista' && ownStore && ['Agendado', 'Confirmado', 'Compareceu', 'Não Compareceu'].indexOf(st) > -1) {
     var resultadoAtual = normalizeKey(r.ResultadoOptometrista || '');
     buttons += '<div class="clinical-actions"><strong>Marcar resultado:</strong>' +
-      '<button class="' + (resultadoAtual === 'check-in sim veio' ? 'choice-selected' : 'secondary') + '" onclick="marcarResultadoOptometrista(\'' + id + '\', \'Check-in Sim veio\')">Check-in Sim veio</button>' +
-      '<button class="' + (resultadoAtual === 'check-in nao veio' ? 'choice-selected' : 'secondary') + '" onclick="marcarResultadoOptometrista(\'' + id + '\', \'Check-in Não veio\')">Check-in Não veio</button>' +
-      '<button class="' + (resultadoAtual === 'patologia' ? 'choice-selected' : 'secondary') + '" onclick="marcarResultadoOptometrista(\'' + id + '\', \'Patologia\')">Patologia</button></div>';
+      '<button class="clinical-choice clinical-choice-yes' + (resultadoAtual === 'check-in sim veio' ? ' choice-selected' : '') + '" aria-pressed="' + (resultadoAtual === 'check-in sim veio') + '" onclick="marcarResultadoOptometrista(\'' + id + '\', \'Check-in Sim veio\')">Check-in Sim veio</button>' +
+      '<button class="clinical-choice clinical-choice-no' + (resultadoAtual === 'check-in nao veio' ? ' choice-selected' : '') + '" aria-pressed="' + (resultadoAtual === 'check-in nao veio') + '" onclick="marcarResultadoOptometrista(\'' + id + '\', \'Check-in Não veio\')">Check-in Não veio</button>' +
+      '<button class="clinical-choice clinical-choice-pathology' + (resultadoAtual === 'patologia' ? ' choice-selected' : '') + '" aria-pressed="' + (resultadoAtual === 'patologia') + '" onclick="marcarResultadoOptometrista(\'' + id + '\', \'Patologia\')">Patologia</button></div>';
   // Admin e gerente mantêm o check-in operacional existente.
   } else if (['admin', 'gerente de loja'].indexOf(role) > -1 && ['Agendado', 'Confirmado'].indexOf(st) > -1) {
     buttons += '<button onclick="marcarCompareceu(\'' + id + '\')">Check-in Sim</button>';

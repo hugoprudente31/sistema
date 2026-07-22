@@ -22,3 +22,19 @@ test('perfil optometrista recebe exatamente as três escolhas clínicas', functi
   assert.match(html, /class="clinical-actions"/);
   assert.match(html, /choice-selected/);
 });
+
+test('as três escolhas clínicas têm cores próprias antes e depois do clique', function() {
+  assert.match(html, /clinical-choice-yes/);
+  assert.match(html, /clinical-choice-no/);
+  assert.match(html, /clinical-choice-pathology/);
+  assert.match(html, /clinical-choice-yes\.choice-selected/);
+  assert.match(html, /clinical-choice-no\.choice-selected/);
+  assert.match(html, /clinical-choice-pathology\.choice-selected/);
+  assert.match(html, /aria-pressed=/);
+});
+
+test('resultado Patologia sinaliza toda a linha do cliente em azul', function() {
+  assert.match(html, /ResultadoOptometrista[^\n]+patologia[^\n]+row-pathology/);
+  assert.match(html, /\.row-pathology td/);
+  assert.match(html, /#dbeafe !important/);
+});

@@ -8,7 +8,7 @@ const { Pool } = require("pg");
 require("dotenv").config();
 
 const { startRecoveryCron } = require("./kommo/recovery");
-const { startReminderCron, runReminders } = require("./kommo/reminder");
+const { startReminderCron, runReminders, runTwoHourReminders } = require("./kommo/reminder");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -498,6 +498,22 @@ function gerarHorariosBase(data, loja = "") {
   }
 
   return horarios;
+}
+
+async function buscarBloqueioDisponibilidade(client, loja, data, horario = "") {
+  const hr = clean(horario);
+  const result = await client.query(
+    `SELECT motivo, TO_CHAR(hora_inicio,'HH24:MI') AS hora_inicio, TO_CHAR(hora_fim,'HH24:MI') AS hora_fim
+       FROM bloqueios_disponibilidade
+      WHERE LOWER(loja) = LOWER($1) AND data = $2
+        AND (
+          ($3::text = '' AND hora_inicio IS NULL AND hora_fim IS NULL)
+          OR ($3::text <> '' AND (hora_inicio IS NULL OR hora_fim IS NULL OR ($3::time >= hora_inicio AND $3::time < hora_fim)))
+        )
+      LIMIT 1`,
+    [loja, data, hr]
+  );
+  return result.rows[0] || null;
 }
 
 async function buscarOptometristasAtivosPorLoja(client, loja) {
@@ -1126,6 +1142,15 @@ async function initDatabase() {
       NEW.agendado_por_nome := COALESCE(NULLIF(NEW.agendado_por_nome, ''), responsavel_registro);
       NEW.ultima_alteracao_por_nome := responsavel_registro;
       NEW.ultima_alteracao_em := NOW();
+      IF COALESCE(NEW.valor_venda, 0) > 0
+        AND LOWER(COALESCE(NEW.status, '')) <> 'cancelado'
+        AND LOWER(COALESCE(NEW.status_os, '')) NOT IN ('cancelada', 'cancelado', 'reembolso') THEN
+        NEW.compareceu := 'Sim';
+        IF TRANSLATE(LOWER(COALESCE(NEW.status, '')), 'ãáàâäéèêëíìîïóòôöõúùûüç', 'aaaaaeeeeiiiiooooouuuuc')
+          IN ('agendado', 'confirmado', 'nao compareceu') THEN
+          NEW.status := 'Compareceu';
+        END IF;
+      END IF;
       RETURN NEW;
     END;
     $$ LANGUAGE plpgsql;
@@ -1136,8 +1161,48 @@ async function initDatabase() {
     FOR EACH ROW EXECUTE FUNCTION validar_agendamento_tgt();
   `);
 
+  const comprasCorrigidas = await pool.query(`
+    UPDATE agendamentos
+    SET compareceu = 'Sim',
+        status = CASE
+          WHEN TRANSLATE(LOWER(COALESCE(status, '')), 'ãáàâäéèêëíìîïóòôöõúùûüç', 'aaaaaeeeeiiiiooooouuuuc')
+            IN ('agendado', 'confirmado', 'nao compareceu') THEN 'Compareceu'
+          ELSE status
+        END,
+        atualizado_em = CURRENT_TIMESTAMP
+    WHERE COALESCE(valor_venda, 0) > 0
+      AND LOWER(COALESCE(status, '')) <> 'cancelado'
+      AND LOWER(COALESCE(status_os, '')) NOT IN ('cancelada', 'cancelado', 'reembolso')
+      AND (
+        TRANSLATE(LOWER(COALESCE(compareceu, '')), 'ãáàâäéèêëíìîïóòôöõúùûüç', 'aaaaaeeeeiiiiooooouuuuc') <> 'sim'
+        OR TRANSLATE(LOWER(COALESCE(status, '')), 'ãáàâäéèêëíìîïóòôöõúùûüç', 'aaaaaeeeeiiiiooooouuuuc')
+          IN ('agendado', 'confirmado', 'nao compareceu')
+      )
+    RETURNING id
+  `);
+  if (comprasCorrigidas.rowCount) {
+    const ids = comprasCorrigidas.rows.slice(0, 30).map((row) => row.id).join(", ");
+    console.log(`[Semáforo] ${comprasCorrigidas.rowCount} compra(s) corrigida(s) automaticamente. IDs: ${ids}`);
+  }
+
   await negociacaoRoutes.initNegociacaoTables(pool);
   await pool.query(`ALTER TABLE agendamentos ADD COLUMN IF NOT EXISTS lembrete_24h_em TIMESTAMPTZ`);
+  await pool.query(`ALTER TABLE agendamentos ADD COLUMN IF NOT EXISTS lembrete_2h_em TIMESTAMPTZ`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS bloqueios_disponibilidade (
+      id SERIAL PRIMARY KEY,
+      loja TEXT NOT NULL,
+      data DATE NOT NULL,
+      hora_inicio TIME,
+      hora_fim TIME,
+      motivo TEXT,
+      criado_por TEXT,
+      criado_em TIMESTAMP DEFAULT NOW(),
+      UNIQUE (loja, data)
+    )
+  `);
+  await pool.query(`ALTER TABLE bloqueios_disponibilidade ADD COLUMN IF NOT EXISTS hora_inicio TIME`);
+  await pool.query(`ALTER TABLE bloqueios_disponibilidade ADD COLUMN IF NOT EXISTS hora_fim TIME`);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS kommo_bot_states (
@@ -1924,14 +1989,16 @@ app.get("/api/public/horarios-disponiveis", validarLandingApiKey, async (req, re
 
     // Verifica bloqueio administrativo (ex: falta de optometrista)
     const bloqueio = await client.query(
-      `SELECT motivo FROM bloqueios_disponibilidade
+      `SELECT motivo, TO_CHAR(hora_inicio,'HH24:MI') AS hora_inicio, TO_CHAR(hora_fim,'HH24:MI') AS hora_fim
+       FROM bloqueios_disponibilidade
        WHERE LOWER(loja) = LOWER($1) AND data = $2 LIMIT 1`,
       [loja, data]
     ).catch(() => ({ rows: [] }));
-    if (bloqueio.rows.length) {
+    const bloqueioAgenda = bloqueio.rows[0] || null;
+    if (bloqueioAgenda && (!bloqueioAgenda.hora_inicio || !bloqueioAgenda.hora_fim)) {
       return res.json({
         ok: true, loja, data, horarios: [],
-        message: `Sem disponibilidade nesta data. ${bloqueio.rows[0].motivo || ""}`.trim(),
+        message: `Sem disponibilidade nesta data. ${bloqueioAgenda.motivo || ""}`.trim(),
         bloqueado: true,
       });
     }
@@ -1944,6 +2011,9 @@ app.get("/api/public/horarios-disponiveis", validarLandingApiKey, async (req, re
     const isGonzagaSantos = lojaKey.includes("gonzaga") || lojaKey.includes("santos");
     if (isGonzagaSantos && diaRef >= 1 && diaRef <= 5) {
       horariosBase = horariosBase.filter(h => h !== "14:00" && h !== "14:15" && h !== "14:30" && h !== "14:45");
+    }
+    if (bloqueioAgenda?.hora_inicio && bloqueioAgenda?.hora_fim) {
+      horariosBase = horariosBase.filter(h => h < bloqueioAgenda.hora_inicio || h >= bloqueioAgenda.hora_fim);
     }
 
     if (!horariosBase.length) {
@@ -2040,6 +2110,14 @@ app.post("/api/public/agendamentos", validarLandingApiKey, async (req, res) => {
     const regraHorario = horarioValidoPorRegra(dataAgendamento, horario, loja);
     if (!regraHorario.ok) {
       return res.status(400).json(regraHorario);
+    }
+
+    const bloqueioHorario = await buscarBloqueioDisponibilidade(client, loja, dataAgendamento, horario);
+    if (bloqueioHorario) {
+      return res.status(409).json({
+        ok: false,
+        message: `Horário indisponível. ${bloqueioHorario.motivo || "Escolha outro horário."}`.trim()
+      });
     }
 
     // Unidade Santos/Gonzaga: almoço 14:00-14:45 em dias úteis (4 slots de 15 min)
@@ -2235,6 +2313,19 @@ app.post("/api/agendamentos", async (req, res) => {
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
+      const bloqueioHorario = await buscarBloqueioDisponibilidade(
+        client,
+        b.loja || "",
+        b.data_agendamento || b.dataAgendamento || b.data || "",
+        b.horario || ""
+      );
+      if (bloqueioHorario) {
+        await client.query("ROLLBACK");
+        return res.status(409).json({
+          ok: false,
+          message: `Horário indisponível. ${bloqueioHorario.motivo || "Escolha outro horário."}`.trim()
+        });
+      }
       await client.query(`SELECT set_config('app.audit_managed', 'true', true)`);
       const result = await client.query(
         `INSERT INTO agendamentos (
@@ -2469,10 +2560,47 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
     const actorNome = clean(req.session.nome || "Usuário autenticado");
     const actorEmail = clean(req.session.email);
 
+    // Uma venda válida é evidência definitiva de que o cliente compareceu.
+    // Mantemos cancelamentos/reembolsos fora desta regra para não transformar
+    // uma OS desfeita em compra concluída.
+    const valorVendaRecebido = Object.prototype.hasOwnProperty.call(b, "valor_venda")
+      ? b.valor_venda
+      : (Object.prototype.hasOwnProperty.call(b, "valorVenda") ? b.valorVenda : current.rows[0].valor_venda);
+    const valorVendaFinal = Number(String(valorVendaRecebido ?? 0).replace(",", ".")) || 0;
+    const statusAgendaSolicitado = clean(statusResultadoOptometrista || b.status || b.statusAgenda || current.rows[0].status);
+    const statusOSSolicitado = clean(b.status_os || b.statusOS || current.rows[0].status_os);
+    const normalizarStatus = (valor) => clean(valor).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const statusAgendaNormalizado = normalizarStatus(statusAgendaSolicitado);
+    const statusOSNormalizado = normalizarStatus(statusOSSolicitado);
+    const compraAtiva = valorVendaFinal > 0 &&
+      statusAgendaNormalizado !== "cancelado" &&
+      !["cancelada", "cancelado", "reembolso"].includes(statusOSNormalizado);
+    const compareceuVenda = compraAtiva ? "Sim" : null;
+    const statusVenda = compraAtiva && ["agendado", "confirmado", "nao compareceu"].includes(statusAgendaNormalizado)
+      ? "Compareceu"
+      : null;
+
     const client = await pool.connect();
     let result;
     try {
       await client.query("BEGIN");
+      const alteraHorarioAgenda = ["loja", "data_agendamento", "dataAgendamento", "horario"]
+        .some((key) => Object.prototype.hasOwnProperty.call(b, key));
+      if (alteraHorarioAgenda) {
+        const bloqueioHorario = await buscarBloqueioDisponibilidade(
+          client,
+          b.loja || current.rows[0].loja || "",
+          b.data_agendamento || b.dataAgendamento || current.rows[0].data_agendamento || "",
+          b.horario || current.rows[0].horario || ""
+        );
+        if (bloqueioHorario) {
+          await client.query("ROLLBACK");
+          return res.status(409).json({
+            ok: false,
+            message: `Horário indisponível. ${bloqueioHorario.motivo || "Escolha outro horário."}`.trim()
+          });
+        }
+      }
       await client.query(`SELECT set_config('app.audit_managed', 'true', true)`);
       result = await client.query(
         `UPDATE agendamentos SET
@@ -2519,8 +2647,8 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         b.data_agendamento || b.dataAgendamento || null,
         b.horario || null,
         b.observacao || null,
-        statusResultadoOptometrista || b.status || b.statusAgenda || null,
-        compareceuResultadoOptometrista || b.compareceu || null,
+        statusVenda || statusResultadoOptometrista || b.status || b.statusAgenda || null,
+        compareceuVenda || compareceuResultadoOptometrista || b.compareceu || null,
         b.numero_os || b.numeroOS || null,
         b.status_os || b.statusOS || null,
         b.vendedor_nome || b.vendedorNome || null,
@@ -4258,6 +4386,16 @@ async function sincronizarAgendamentoKommo(ag) {
 
     if (!leadId) return null;
 
+    // Identifica visualmente no Kommo a unidade responsável pelo lead.
+    const labels = require('./kommo/labels');
+    const pipelineIdDaLoja = resolverPipelineId(ag.loja);
+    const prefixoLoja = pipelineIdDaLoja === PIPELINE_POR_LOJA.gonzaga ? 'gon'
+      : pipelineIdDaLoja === PIPELINE_POR_LOJA.enseada ? 'ens'
+      : pipelineIdDaLoja === PIPELINE_POR_LOJA.pitangueiras ? 'pit'
+      : pipelineIdDaLoja === PIPELINE_POR_LOJA.ademar ? 'tgt'
+      : '';
+    if (prefixoLoja) await labels.applyStoreLabel(leadId, prefixoLoja);
+
     // 5. Nota com detalhes do agendamento
     const nota = [
       `📅 Agendamento registrado no sistema Óticas TGT:`,
@@ -4432,6 +4570,11 @@ async function disparadorLembretes24h() {
 // Endpoint para disparar manualmente (admin)
 app.post('/api/admin/lembretes/disparar', requireSuperAdmin, async (req, res) => {
   const resultado = await runReminders();
+  res.json({ ok: true, ...resultado });
+});
+
+app.post('/api/admin/lembretes/2h/disparar', requireAdmin, async (req, res) => {
+  const resultado = await runTwoHourReminders();
   res.json({ ok: true, ...resultado });
 });
 
