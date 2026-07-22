@@ -31,8 +31,8 @@ test('dashboard executivo consolida grupo, lojas, consultores, origens, setores,
     if (text.includes('FROM metas_desempenho')) return { rows: [{ tipo_escopo: 'grupo', meta_faturamento: 5000 }] };
     if (text.includes('DATE_TRUNC')) return { rows: [{ competencia: '2026-07', ...base }] };
     if (text.includes('GROUP BY a.vendedor_consultor_id')) return { rows: [{ id: 12, consultor: 'Ana', loja: 'Gonzaga', ...base }] };
-    if (text.includes('GROUP BY a.origem')) return { rows: [{ origem: 'Instagram', ...base }] };
-    if (text.includes('GROUP BY a.loja')) return { rows: [{ loja: 'Gonzaga', ...base }] };
+    if (text.includes('AS origem') && text.includes('GROUP BY CASE')) return { rows: [{ origem: 'Redes sociais', ...base }] };
+    if (text.includes('AS loja') && text.includes('GROUP BY CASE')) return { rows: [{ loja: 'Gonzaga', ...base }] };
     return { rows: [base] };
   };
   try {
@@ -44,11 +44,21 @@ test('dashboard executivo consolida grupo, lojas, consultores, origens, setores,
     assert.equal(body.resumo.ticket_medio, 1000);
     assert.equal(body.lojas.length, 1);
     assert.equal(body.consultores[0].id, 12);
-    assert.equal(body.origens[0].origem, 'Instagram');
+    assert.equal(body.origens[0].origem, 'Redes sociais');
+    assert.equal(body.marketing.clientes, 8);
+    assert.equal(body.marketing.vendas, 3);
     assert.equal(body.setores.length, 5);
     assert.equal(body.metas.length, 1);
     assert.ok(body.alertas.some((a) => a.area === 'Atendimento'));
   } finally { pool.query = original; }
+});
+
+test('dashboard normaliza Atendimento Central, canais de marketing e a loja Target', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  assert.match(source, /maria cristina[\s\S]*Atendimento Central/i);
+  for (const canal of ['Kommo', 'Landing Page', 'WhatsApp', 'Redes sociais']) assert.match(source, new RegExp(canal));
+  assert.match(source, /LIKE '%target%' THEN 'Óticas Target'/);
+  assert.match(source, /Clientes dos canais rastreados/);
 });
 
 test('interface Admin contém todas as áreas empresariais e uma fonte executiva única', () => {
