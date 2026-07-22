@@ -308,7 +308,24 @@
     .technical-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px; margin-top:16px; }
     .technical-grid button { min-width:0; width:100%; }
     .user-filter-bar { display:grid; grid-template-columns:minmax(240px,2fr) minmax(180px,1fr) minmax(160px,1fr); gap:10px; margin:12px 0 16px; }
+    .executive-filters { display:grid; grid-template-columns:repeat(4,minmax(150px,1fr)); gap:10px; align-items:end; margin:14px 0; }
+    .executive-tabs { display:flex; flex-wrap:wrap; gap:8px; margin:16px 0; }
+    .executive-tabs button { width:auto; min-width:130px; background:#fff7ed; color:#9a3412; border:1px solid #fed7aa; }
+    .executive-tabs button.active { background:#ea580c; color:#fff; }
+    .executive-panel { display:none; }
+    .executive-panel.active { display:block; }
+    .executive-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(175px,1fr)); gap:12px; }
+    .executive-kpi { border:1px solid #fed7aa; border-radius:14px; padding:14px; background:linear-gradient(145deg,#fff,#fff7ed); }
+    .executive-kpi span { display:block; color:#78716c; font-size:12px; margin-bottom:6px; }
+    .executive-kpi strong { font-size:22px; color:#c2410c; }
+    .alert-list { display:grid; gap:8px; margin-top:14px; }
+    .business-alert { padding:12px 14px; border-radius:12px; background:#f0fdf4; color:#166534; border-left:5px solid #22c55e; }
+    .business-alert.alto { background:#fef2f2; color:#991b1b; border-left-color:#ef4444; }
+    .business-alert.medio { background:#fffbeb; color:#92400e; border-left-color:#f59e0b; }
+    .goal-progress { min-width:120px; height:8px; background:#e5e7eb; border-radius:999px; overflow:hidden; margin-top:5px; }
+    .goal-progress i { display:block; height:100%; background:#f97316; }
     @media (max-width:760px) { .user-filter-bar { grid-template-columns:1fr; } }
+    @media (max-width:760px) { .executive-filters { grid-template-columns:1fr; } }
   </style>
   <script>
     (function({d=document,s='script',id='bacrmtrk', cKey, oKey}){
@@ -629,6 +646,34 @@
       </div>
     </div>
 
+    <div class="card hidden" id="cardDashboardExecutivo">
+      <div class="topbar">
+        <div><h3 style="margin:0;">Dashboard Executivo do Grupo TGT</h3><p class="legend-mini">Clientes, lojas, setores, consultores e metas calculados pela mesma fonte.</p></div>
+        <button class="btn-relatorio secondary" onclick="carregarDashboardExecutivo()">Atualizar indicadores</button>
+      </div>
+      <div class="executive-filters">
+        <div><label>Início</label><input id="execInicio" type="date"></div>
+        <div><label>Fim</label><input id="execFim" type="date"></div>
+        <div><label>Loja</label><select id="execLoja"><option value="">Grupo TGT — todas</option></select></div>
+        <div><button onclick="carregarDashboardExecutivo()">Aplicar período</button></div>
+      </div>
+      <div id="execAtualizado" class="legend-mini"></div>
+      <div class="executive-tabs">
+        <button class="active" data-exec-tab="grupo" onclick="abrirAbaExecutiva('grupo',this)">Visão do grupo</button>
+        <button data-exec-tab="lojas" onclick="abrirAbaExecutiva('lojas',this)">Lojas</button>
+        <button data-exec-tab="clientes" onclick="abrirAbaExecutiva('clientes',this)">Clientes</button>
+        <button data-exec-tab="setores" onclick="abrirAbaExecutiva('setores',this)">Setores</button>
+        <button data-exec-tab="consultores" onclick="abrirAbaExecutiva('consultores',this)">Consultores</button>
+        <button data-exec-tab="metas" onclick="abrirAbaExecutiva('metas',this)">Metas e alertas</button>
+      </div>
+      <div id="execGrupo" class="executive-panel active"><div id="execKpis" class="executive-kpis"></div><div id="execAlertas" class="alert-list"></div><div class="scroll-x"><table><thead><tr><th>Mês</th><th>Clientes</th><th>Agendamentos</th><th>Comparecimento</th><th>Vendas</th><th>Faturamento</th></tr></thead><tbody id="execTendenciaBody"></tbody></table></div></div>
+      <div id="execLojas" class="executive-panel"><div class="scroll-x"><table><thead><tr><th>Loja</th><th>Clientes</th><th>Agendamentos</th><th>Comparecimento</th><th>Conversão</th><th>Vendas</th><th>Ticket</th><th>Faturamento</th><th>OS atrasadas</th></tr></thead><tbody id="execLojasBody"></tbody></table></div></div>
+      <div id="execClientes" class="executive-panel"><div class="executive-kpis" id="execClientesKpis"></div><div class="scroll-x"><table><thead><tr><th>Origem</th><th>Clientes</th><th>Agendamentos</th><th>Comparecimento</th><th>Conversão</th><th>Faturamento</th></tr></thead><tbody id="execOrigensBody"></tbody></table></div></div>
+      <div id="execSetores" class="executive-panel"><div class="scroll-x"><table><thead><tr><th>Setor</th><th>Indicador principal</th><th>Realizado</th><th>Base operacional</th><th>Leitura empresarial</th></tr></thead><tbody id="execSetoresBody"></tbody></table></div></div>
+      <div id="execConsultores" class="executive-panel"><div class="scroll-x"><table><thead><tr><th>ID</th><th>Consultor</th><th>Loja</th><th>Atendimentos</th><th>Conversão</th><th>Vendas</th><th>Ticket</th><th>Faturamento</th></tr></thead><tbody id="execConsultoresBody"></tbody></table></div></div>
+      <div id="execMetas" class="executive-panel"><div class="scroll-x"><table><thead><tr><th>Competência</th><th>Escopo</th><th>Meta faturamento</th><th>Meta vendas</th><th>Meta agendamentos</th><th>Meta conversão</th><th>Meta prazo OS</th></tr></thead><tbody id="execMetasBody"></tbody></table></div><p class="legend-mini">As metas são cadastradas no módulo “Registro de Metas” logo abaixo.</p></div>
+    </div>
+
     <div class="card hidden" id="cardMetasAdmin">
       <div class="topbar" style="margin-bottom:14px;">
         <div><h3 style="margin:0;">Registro de Metas</h3><span class="legend-mini">Exclusivo para Admin e Super Admin</span></div>
@@ -744,7 +789,8 @@ var state = {
   owners: [],
   accessTags: [],
   editingRow: null,
-  reloadTimer: null
+  reloadTimer: null,
+  dashboardExecutivo: null
 };
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -1182,6 +1228,8 @@ function fazerLogin() {
           return carregarMetasAdmin();
         }
       }).then(function() {
+        if (state.user && state.user.permissions && state.user.permissions.isAdmin) return carregarDashboardExecutivo();
+      }).then(function() {
         return carregarAgendaEDashboard();
       }).then(function() {
         iniciarAutoRefreshPostgres();
@@ -1207,6 +1255,7 @@ function aplicarPermissoesTela() {
   var p = state.user.permissions || {};
   if (p.isAdmin) byId('areaAdministracao').classList.remove('hidden');
   if (p.isAdmin) byId('cardMetasAdmin').classList.remove('hidden');
+  if (p.isAdmin) byId('cardDashboardExecutivo').classList.remove('hidden');
   if (p.isSuperAdmin) byId('areaTecnica').classList.remove('hidden');
   if (p.isAdmin) byId('btnLixeira').classList.remove('hidden');
   if (p.isAdmin) byId('cardUsuarios').classList.remove('hidden');
@@ -2698,6 +2747,52 @@ function sincronizarSistema() {
     .then(function() { toast('Dados recarregados com sucesso.', 'ok'); })
     .catch(function(err) { setMsg('msgForm', err.message || String(err), 'err'); })
     .finally(function() { showLoading(false); });
+}
+
+function iniciarPeriodoExecutivo() {
+  var hoje = new Date().toISOString().slice(0,10);
+  if (!byId('execInicio').value) byId('execInicio').value = hoje.slice(0,7) + '-01';
+  if (!byId('execFim').value) byId('execFim').value = hoje;
+  var select = byId('execLoja');
+  if (select.options.length === 1) (state.lojas || []).forEach(function(l) {
+    var nome = l.Loja || l.nome || ''; if (!nome) return;
+    var op = document.createElement('option'); op.value = nome; op.textContent = nome; select.appendChild(op);
+  });
+}
+function abrirAbaExecutiva(nome, botao) {
+  document.querySelectorAll('.executive-panel').forEach(function(el) { el.classList.remove('active'); });
+  document.querySelectorAll('[data-exec-tab]').forEach(function(el) { el.classList.remove('active'); });
+  var alvo = byId('exec' + nome.charAt(0).toUpperCase() + nome.slice(1));
+  if (alvo) alvo.classList.add('active'); if (botao) botao.classList.add('active');
+}
+function pctExecutivo(v) { return Number(v || 0).toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1}) + '%'; }
+function numExecutivo(v) { return Number(v || 0).toLocaleString('pt-BR'); }
+function leituraSetor(x) {
+  if (x.unidade === '%' && Number(x.realizado) < 50) return 'Abaixo do esperado — criar plano de ação';
+  if (String(x.setor).indexOf('Laboratório') > -1 && Number(x.realizado) > 10) return 'Prazo alto — revisar produção e fornecedores';
+  return 'Acompanhar evolução e manter rotina';
+}
+function linhaVazia(colunas, texto) { return '<tr><td colspan="' + colunas + '">' + texto + '</td></tr>'; }
+function renderDashboardExecutivo(data) {
+  state.dashboardExecutivo = data; var r = data.resumo || {};
+  var kpis = [['Clientes no período',numExecutivo(r.clientes)],['Agendamentos',numExecutivo(r.agendamentos)],['Comparecimento',pctExecutivo(r.taxa_comparecimento)],['Conversão',pctExecutivo(r.taxa_conversao)],['Vendas',numExecutivo(r.vendas)],['Ticket médio',money(r.ticket_medio)],['Faturamento',money(r.faturamento)],['Descontos',money(r.descontos)],['OS ativas',numExecutivo(r.os_ativas)],['OS atrasadas',numExecutivo(r.os_atrasadas)],['Prazo médio OS',Number(r.lead_time_medio||0).toFixed(1)+' dias'],['Desconto / faturamento',pctExecutivo(r.desconto_percentual)]];
+  byId('execKpis').innerHTML = kpis.map(function(k){return '<div class="executive-kpi"><span>'+escapeHtml(k[0])+'</span><strong>'+escapeHtml(k[1])+'</strong></div>';}).join('');
+  byId('execClientesKpis').innerHTML = [['Clientes únicos',r.clientes],['Compareceram',r.comparecimentos],['Não compareceram',r.faltas],['Compraram',r.vendas]].map(function(k){return '<div class="executive-kpi"><span>'+k[0]+'</span><strong>'+numExecutivo(k[1])+'</strong></div>';}).join('');
+  byId('execAlertas').innerHTML = (data.alertas||[]).map(function(a){return '<div class="business-alert '+escapeHtml(a.nivel)+'"><strong>'+escapeHtml(a.area)+':</strong> '+escapeHtml(a.mensagem)+'</div>';}).join('');
+  byId('execTendenciaBody').innerHTML = (data.tendencia||[]).map(function(x){return '<tr><td>'+escapeHtml(x.competencia)+'</td><td>'+numExecutivo(x.clientes)+'</td><td>'+numExecutivo(x.agendamentos)+'</td><td>'+pctExecutivo(x.taxa_comparecimento)+'</td><td>'+numExecutivo(x.vendas)+'</td><td>'+money(x.faturamento)+'</td></tr>';}).join('') || linhaVazia(6,'Sem dados no período.');
+  byId('execLojasBody').innerHTML = (data.lojas||[]).map(function(x){return '<tr><td><strong>'+escapeHtml(x.loja)+'</strong></td><td>'+numExecutivo(x.clientes)+'</td><td>'+numExecutivo(x.agendamentos)+'</td><td>'+pctExecutivo(x.taxa_comparecimento)+'</td><td>'+pctExecutivo(x.taxa_conversao)+'</td><td>'+numExecutivo(x.vendas)+'</td><td>'+money(x.ticket_medio)+'</td><td>'+money(x.faturamento)+'</td><td>'+numExecutivo(x.os_atrasadas)+'</td></tr>';}).join('') || linhaVazia(9,'Sem dados.');
+  byId('execOrigensBody').innerHTML = (data.origens||[]).map(function(x){return '<tr><td>'+escapeHtml(x.origem)+'</td><td>'+numExecutivo(x.clientes)+'</td><td>'+numExecutivo(x.agendamentos)+'</td><td>'+pctExecutivo(x.taxa_comparecimento)+'</td><td>'+pctExecutivo(x.taxa_conversao)+'</td><td>'+money(x.faturamento)+'</td></tr>';}).join('') || linhaVazia(6,'Sem dados.');
+  byId('execSetoresBody').innerHTML = (data.setores||[]).map(function(x){var realizado=x.unidade==='%'?pctExecutivo(x.realizado):numExecutivo(x.realizado)+' '+x.unidade;return '<tr><td><strong>'+escapeHtml(x.setor)+'</strong></td><td>'+escapeHtml(x.indicador)+'</td><td>'+escapeHtml(realizado)+'</td><td>'+numExecutivo(x.base)+'</td><td>'+escapeHtml(leituraSetor(x))+'</td></tr>';}).join('');
+  byId('execConsultoresBody').innerHTML = (data.consultores||[]).map(function(x){return '<tr><td>'+escapeHtml(x.id||'—')+'</td><td><strong>'+escapeHtml(x.consultor)+'</strong></td><td>'+escapeHtml(x.loja)+'</td><td>'+numExecutivo(x.comparecimentos)+'</td><td>'+pctExecutivo(x.taxa_conversao)+'</td><td>'+numExecutivo(x.vendas)+'</td><td>'+money(x.ticket_medio)+'</td><td>'+money(x.faturamento)+'</td></tr>';}).join('') || linhaVazia(8,'Sem consultores vinculados no período.');
+  byId('execMetasBody').innerHTML = (data.metas||[]).map(function(x){var esc=x.tipo_escopo==='grupo'?'Grupo TGT':(x.vendedor_consultor_nome||x.loja||x.tipo_escopo);return '<tr><td>'+escapeHtml(String(x.competencia||'').slice(0,7))+'</td><td>'+escapeHtml(esc)+'</td><td>'+money(x.meta_faturamento)+'</td><td>'+numExecutivo(x.meta_vendas)+'</td><td>'+numExecutivo(x.meta_agendamentos)+'</td><td>'+pctExecutivo(x.meta_conversao)+'</td><td>'+numExecutivo(x.meta_prazo_os_dias)+' dias</td></tr>';}).join('') || linhaVazia(7,'Nenhuma meta cadastrada para o período.');
+  byId('execAtualizado').textContent = 'Período: '+data.periodo.inicio.split('-').reverse().join('/')+' a '+data.periodo.fim.split('-').reverse().join('/')+(data.periodo.loja?' · '+data.periodo.loja:' · Grupo TGT')+' · atualizado agora';
+}
+function carregarDashboardExecutivo() {
+  if (!(state.user && state.user.permissions && state.user.permissions.isAdmin)) return Promise.resolve();
+  iniciarPeriodoExecutivo(); var p=['inicio='+encodeURIComponent(byId('execInicio').value),'fim='+encodeURIComponent(byId('execFim').value)];
+  if (byId('execLoja').value) p.push('loja='+encodeURIComponent(byId('execLoja').value));
+  byId('execAtualizado').textContent='Carregando indicadores...';
+  return apiGet('/api/admin/dashboard-executivo?'+p.join('&')).then(function(res){if(!res.ok)throw new Error(res.message||'Erro ao carregar dashboard.');renderDashboardExecutivo(res);}).catch(function(err){byId('execAtualizado').textContent=err.message||String(err);toast(err.message||String(err),'err');});
 }
 
 var metasAdminCache = [];
