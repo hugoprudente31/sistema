@@ -168,6 +168,7 @@
     .row-red td { background: #fee2e2 !important; }
     .row-yellow td { background: #fef3c7 !important; }
     .row-green td { background: #dcfce7 !important; }
+    .row-blue td { background: #dbeafe !important; border-bottom-color: #93c5fd; }
 
     .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; min-width: 320px; }
     .actions button, .actions select { max-width: 180px; }
@@ -270,6 +271,10 @@
     }
 
     .page-loading.show { display: flex; }
+    .area-heading { border-left: 5px solid var(--p); background: linear-gradient(90deg,#fff7ed,#fff); }
+    .area-heading h3 { margin: 0 0 4px; }
+    .area-heading p { margin: 0; color: #6b7280; font-size: 13px; }
+    .creator-badge { display:inline-block; margin-top:6px; padding:5px 10px; border-radius:999px; background:#7f1d1d; color:#fff; font-size:12px; font-weight:800; }
   </style>
   <script>
     (function({d=document,s='script',id='bacrmtrk', cKey, oKey}){
@@ -330,6 +335,10 @@
     </div>
 
     <div class="card">
+      <div class="area-heading" style="padding:12px 14px;margin-bottom:14px;">
+        <h3>Visão Operacional do Grupo TGT</h3>
+        <p>Indicadores, prioridades do dia e acompanhamento das lojas em um único fluxo.</p>
+      </div>
       <h3>Dashboard Operacional</h3>
       <div class="row-4">
         <div class="kpi"><div class="label">Agendados/Confirmados</div><div class="value" id="kAgendados">0</div></div>
@@ -580,6 +589,11 @@
       </div>
     </div>
 
+    <div class="card area-heading hidden" id="areaAdministracao">
+      <h3>Administração do Grupo</h3>
+      <p>Usuários, auditoria e recuperação de registros, separados da rotina operacional.</p>
+    </div>
+
     <div class="card hidden" id="cardUsuarios">
       <div class="topbar" style="margin-bottom:14px;">
         <h3 style="margin:0;">Gerenciar Usuários</h3>
@@ -613,6 +627,12 @@
     </div>
 
     <div class="card hidden" id="cardDiagnostico"><h3>Diagnóstico Admin</h3><button onclick="executarDiagnostico()">Testar backend</button><div style="height:12px"></div><pre id="diagnosticoOut">Aguardando...</pre></div>
+
+    <div class="card area-heading hidden" id="areaTecnica">
+      <h3>Central Técnica do Criador</h3>
+      <p>Responsabilidade integral de Hugo: sistema, banco de dados, Kommo e landing page do Teste de Visão.</p>
+      <span class="creator-badge">SUPER ADMIN · CRIADOR DO SISTEMA</span>
+    </div>
 
     <div class="card hidden" id="cardKommoDiag">
       <div class="topbar" style="flex-wrap:wrap;gap:10px;">
@@ -652,7 +672,10 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function byId(id) { return document.getElementById(id); }
-function roleName() { return String(state.user && state.user.perfil || '').toLowerCase(); }
+function roleName() {
+  var role = String(state.user && state.user.perfil || '').toLowerCase();
+  return role === 'super_admin' ? 'admin' : role;
+}
 function canFinance() { return !!(state.user && state.user.permissions && state.user.permissions.canViewFinance); }
 function canManageOS() { return !!(state.user && state.user.permissions && state.user.permissions.canManageOS); }
 
@@ -750,10 +773,16 @@ function mapAgendamentoDb(r) {
   var compareceu = normalizeKey(r.compareceu || '');
   var status = normalizeKey(r.status || '');
   var venda = normalizeKey(r.venda_gerada || '');
+  var resultadoOptometrista = normalizeKey(r.resultado_optometrista || '');
+  var patologia = normalizeKey(r.patologia || '');
   var valorVenda = Number(String(r.valor_venda || 0).replace(',', '.')) || 0;
-  var semaforo = '';
-  var semaforoLabel = '';
-  if (compareceu === 'nao' || compareceu === 'nao compareceu' || status === 'nao compareceu') {
+  var semaforo = normalizeKey(r.atendimento_semaforo || '');
+  var semaforoLabel = r.atendimento_semaforo_label || '';
+  if (semaforo) {
+    semaforo = semaforo === 'azul' ? 'azul' : semaforo;
+  } else if (resultadoOptometrista === 'patologia' || patologia === 'sim') {
+    semaforo = 'azul'; semaforoLabel = 'Patologia';
+  } else if (compareceu === 'nao' || compareceu === 'nao compareceu' || status === 'nao compareceu') {
     semaforo = 'vermelho'; semaforoLabel = 'Não compareceu';
   } else if (compareceu === 'sim' || compareceu === 'compareceu' || status === 'compareceu' || status === 'concluido') {
     if (venda === 'sim' || valorVenda > 0) {
@@ -1057,7 +1086,7 @@ function fazerLogin() {
       byId('app').classList.remove('hidden');
 
       byId('nomeUsuario').textContent = res.user.nome || '';
-      byId('perfilUsuario').textContent = 'Perfil: ' + (res.user.perfil || '');
+      byId('perfilUsuario').textContent = 'Perfil: ' + (res.user.permissions && res.user.permissions.isSuperAdmin ? 'Super Admin · Criador do Sistema' : (res.user.perfil || ''));
       byId('emailUsuario').textContent = 'E-mail: ' + (res.user.email || '');
       byId('lojaUsuario').textContent = 'Loja: ' + ((res.user.loja && res.user.loja !== '') ? res.user.loja : 'Todas');
       byId('versaoServidor').textContent = 'Versão do servidor: ' + (res.serverVersion || '');
@@ -1089,14 +1118,16 @@ function logout() {
 
 function aplicarPermissoesTela() {
   var p = state.user.permissions || {};
-  if (p.isAdmin) byId('cardDiagnostico').classList.remove('hidden');
+  if (p.isAdmin) byId('areaAdministracao').classList.remove('hidden');
+  if (p.isSuperAdmin) byId('areaTecnica').classList.remove('hidden');
+  if (p.isSuperAdmin) byId('cardDiagnostico').classList.remove('hidden');
   if (p.isAdmin) byId('btnUsuarios').classList.remove('hidden');
   if (p.isAdmin) byId('btnLixeira').classList.remove('hidden');
   if (p.isAdmin) byId('cardUsuarios').classList.remove('hidden');
-  if (p.isAdmin) byId('btnKommoDiag').classList.remove('hidden');
-  if (p.isAdmin) byId('btnGerarNotifRetro').classList.remove('hidden');
-  if (p.isAdmin) byId('btnDispararLembretes').classList.remove('hidden');
-  if (p.isAdmin) byId('btnSyncKommo').classList.remove('hidden');
+  if (p.isSuperAdmin) byId('btnKommoDiag').classList.remove('hidden');
+  if (p.isSuperAdmin) byId('btnGerarNotifRetro').classList.remove('hidden');
+  if (p.isSuperAdmin) byId('btnDispararLembretes').classList.remove('hidden');
+  if (p.isSuperAdmin) byId('btnSyncKommo').classList.remove('hidden');
   if (p.canCreateAgendamento) byId('cardAgendamento').classList.remove('hidden');
   if (p.canViewFinance) {
     byId('cardFinanceiro').classList.remove('hidden');
@@ -1105,7 +1136,7 @@ function aplicarPermissoesTela() {
   if (p.canExportFinance) byId('btnExportFinance').classList.remove('hidden');
   if (['admin', 'atendimento central', 'gerente de loja'].indexOf(roleName()) > -1) byId('btnLeadTime').classList.remove('hidden');
   if (p.isAdmin || roleName() === 'gerente de loja') byId('btnHistorico').classList.remove('hidden');
-  if (p.isAdmin) byId('btnSyncSistema').classList.remove('hidden');
+  if (p.isSuperAdmin) byId('btnSyncSistema').classList.remove('hidden');
   byId('filtroMeus').checked = false;
 }
 
@@ -2059,6 +2090,7 @@ function statusClassAtendimentoSemaforo(r) {
   if (sem === 'vermelho') return 'red';
   if (sem === 'amarelo') return 'yellow';
   if (sem === 'verde') return 'green';
+  if (sem === 'azul') return 'blue';
   return 'gray';
 }
 
@@ -2067,6 +2099,7 @@ function rowClassAtendimento(r) {
   if (sem === 'vermelho') return 'row-red';
   if (sem === 'amarelo') return 'row-yellow';
   if (sem === 'verde') return 'row-green';
+  if (sem === 'azul') return 'row-blue';
   return '';
 }
 
@@ -2569,6 +2602,11 @@ function carregarUsuarios() {
       byId('usuariosBody').innerHTML = rows.map(function(u) {
         var fin = u.can_view_finance ? '<span class="status green">Sim</span>' : '<span class="status gray">Não</span>';
         var nomeEsc = escapeHtml(u.nome||'').replace(/'/g, "\\'");
+        var actions = u.protected
+          ? '<span class="creator-badge">Conta protegida</span>'
+          : '<button class="secondary icon-btn" onclick="abrirModalEditarUsuario(' + u.id + ')">Editar</button>' +
+            (u.ativo === false ? '<button class="secondary icon-btn" onclick="toggleUsuario(' + u.id + ', true)">Ativar</button>' : '<button class="danger icon-btn" onclick="toggleUsuario(' + u.id + ', false)">Desativar</button>') +
+            '<button class="danger icon-btn" style="background:#7f1d1d" onclick="deletarUsuario(' + u.id + ',\'' + nomeEsc + '\')">Excluir</button>';
         return '<tr>' +
           '<td><strong>' + escapeHtml(u.nome||'') + '</strong></td>' +
           '<td>' + escapeHtml(u.email||'') + '</td>' +
@@ -2576,11 +2614,7 @@ function carregarUsuarios() {
           '<td>' + escapeHtml(u.loja||'Todas') + '</td>' +
           '<td>' + fin + '</td>' +
           '<td><span class="status ' + (u.ativo === false ? 'red' : 'green') + '">' + (u.ativo === false ? 'Inativo' : 'Ativo') + '</span></td>' +
-          '<td style="display:flex;gap:6px">' +
-          '<button class="secondary icon-btn" onclick="abrirModalEditarUsuario(' + u.id + ')">Editar</button>' +
-          (u.ativo === false ? '<button class="secondary icon-btn" onclick="toggleUsuario(' + u.id + ', true)">Ativar</button>' : '<button class="danger icon-btn" onclick="toggleUsuario(' + u.id + ', false)">Desativar</button>') +
-          '<button class="danger icon-btn" style="background:#7f1d1d" onclick="deletarUsuario(' + u.id + ',\'' + nomeEsc + '\')">Excluir</button>' +
-          '</td></tr>';
+          '<td style="display:flex;gap:6px">' + actions + '</td></tr>';
       }).join('');
     })
     .catch(function(err) {

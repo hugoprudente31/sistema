@@ -205,8 +205,20 @@ function roleOf(session) {
   return clean(session?.perfil).toLowerCase();
 }
 
+// Identidade reservada do criador. A senha nunca deve existir no código.
+const HUGO_SUPER_ADMIN_EMAIL = "hugoprudente.marketing@gmail.com";
+
+function isHugoAccount(user) {
+  return clean(user?.email).toLowerCase() === HUGO_SUPER_ADMIN_EMAIL;
+}
+
+function isSuperAdmin(session) {
+  return isHugoAccount(session) && roleOf(session) === "super_admin";
+}
+
 function hasRole(session, roles) {
-  return roles.includes(roleOf(session));
+  const role = roleOf(session);
+  return roles.includes(role) || (isSuperAdmin(session) && roles.includes("admin"));
 }
 
 function isAdmin(session) {
@@ -230,8 +242,10 @@ function storeSql(column, parameter = "$1") {
 }
 
 function buildPermissions(user) {
-  const role = clean(user?.cargo || user?.perfil).toLowerCase();
-  const admin = role === "admin";
+  const storedRole = clean(user?.cargo || user?.perfil).toLowerCase();
+  const superAdmin = isHugoAccount(user);
+  const role = superAdmin ? "super_admin" : storedRole;
+  const admin = role === "admin" || superAdmin;
   const central = role === "atendimento central";
   const manager = role === "gerente de loja";
   const buyer = role === "comprador";
@@ -239,7 +253,11 @@ function buildPermissions(user) {
   const canViewFinance = admin || manager || buyer || Boolean(user?.can_view_finance);
 
   return {
+    isSuperAdmin: superAdmin,
     isAdmin: admin,
+    canManageSystem: superAdmin,
+    canManageKommo: superAdmin,
+    canManageLandingPages: superAdmin,
     canViewAll: admin || central,
     canCreateAgendamento: admin || central || manager || buyer || seller,
     canManageOS: admin || manager || buyer,
@@ -250,12 +268,13 @@ function buildPermissions(user) {
 
 function publicUser(user) {
   const permissions = buildPermissions(user);
+  const effectiveRole = permissions.isSuperAdmin ? "super_admin" : user.cargo;
   return {
     id: user.id,
     nome: user.nome,
     email: user.email,
-    perfil: user.cargo,
-    cargo: user.cargo,
+    perfil: effectiveRole,
+    cargo: effectiveRole,
     loja: user.loja || "",
     accessTags: clean(user.access_tags).split(/[;,|]/).map((tag) => tag.trim()).filter(Boolean),
     permissions,
@@ -266,6 +285,13 @@ function publicUser(user) {
 function requireAdmin(req, res, next) {
   if (!isAdmin(req.session)) {
     return res.status(403).json({ ok: false, message: "Acesso restrito ao administrador." });
+  }
+  next();
+}
+
+function requireSuperAdmin(req, res, next) {
+  if (!isSuperAdmin(req.session)) {
+    return res.status(403).json({ ok: false, message: "Acesso exclusivo do criador do sistema." });
   }
   next();
 }
@@ -807,6 +833,52 @@ async function initDatabase() {
   await addColumnIfMissing("agendamentos", "excluido_em", "TIMESTAMP");
   await addColumnIfMissing("agendamentos", "patologia", "TEXT DEFAULT 'Pendente'");
   await addColumnIfMissing("agendamentos", "resultado_optometrista", "TEXT DEFAULT 'Pendente'");
+  await addColumnIfMissing("agendamentos", "atendimento_semaforo", "TEXT DEFAULT ''");
+  await addColumnIfMissing("agendamentos", "atendimento_semaforo_label", "TEXT DEFAULT ''");
+
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION atualizar_atendimento_semaforo_tgt()
+    RETURNS trigger AS $$
+    DECLARE
+      comp TEXT := replace(lower(coalesce(NEW.compareceu, '')), 'ã', 'a');
+      status_agenda TEXT := replace(lower(coalesce(NEW.status, '')), 'ã', 'a');
+      venda TEXT := replace(lower(coalesce(NEW.venda_gerada, '')), 'ã', 'a');
+      resultado TEXT := replace(lower(coalesce(NEW.resultado_optometrista, '')), 'ã', 'a');
+      pat TEXT := replace(lower(coalesce(NEW.patologia, '')), 'ã', 'a');
+      valor NUMERIC := coalesce(NEW.valor_venda, 0);
+    BEGIN
+      IF resultado = 'patologia' OR pat = 'sim' THEN
+        NEW.atendimento_semaforo := 'azul';
+        NEW.atendimento_semaforo_label := 'Patologia';
+      ELSIF status_agenda IN ('nao compareceu', 'não compareceu') OR comp IN ('nao', 'não', 'nao compareceu', 'não compareceu') THEN
+        NEW.atendimento_semaforo := 'vermelho';
+        NEW.atendimento_semaforo_label := 'Não compareceu';
+      ELSIF comp IN ('sim', 'compareceu') OR status_agenda IN ('compareceu', 'concluido', 'concluído') THEN
+        IF venda = 'sim' OR valor > 0 THEN
+          NEW.atendimento_semaforo := 'verde';
+          NEW.atendimento_semaforo_label := 'Compareceu e comprou';
+        ELSE
+          NEW.atendimento_semaforo := 'amarelo';
+          NEW.atendimento_semaforo_label := 'Compareceu e não comprou';
+        END IF;
+      ELSE
+        NEW.atendimento_semaforo := '';
+        NEW.atendimento_semaforo_label := '';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS trg_atualizar_atendimento_semaforo_tgt ON agendamentos;
+    CREATE TRIGGER trg_atualizar_atendimento_semaforo_tgt
+    BEFORE INSERT OR UPDATE OF compareceu, status, venda_gerada, valor_venda, patologia, resultado_optometrista
+    ON agendamentos
+    FOR EACH ROW EXECUTE FUNCTION atualizar_atendimento_semaforo_tgt();
+
+    UPDATE agendamentos
+    SET compareceu = compareceu
+    WHERE atendimento_semaforo IS NULL OR atendimento_semaforo = '';
+  `);
 
   await addColumnIfMissing("clientes", "gas_id", "TEXT UNIQUE");
   await addColumnIfMissing("clientes", "origem_sync", "TEXT DEFAULT 'postgres'");
@@ -1628,8 +1700,8 @@ app.post("/api/gas", async (req, res) => {
       getLeadTimeReport: () => hasRole(req.session, ["admin", "atendimento central", "gerente de loja"]),
       getHistoricoOperacional: () => hasRole(req.session, ["admin", "gerente de loja"]),
       exportFinanceCSV: () => canViewFinanceSession(req.session),
-      atualizarPlanilhaSistemaCompleto: () => isAdmin(req.session),
-      testarBackend: () => isAdmin(req.session)
+      atualizarPlanilhaSistemaCompleto: () => isSuperAdmin(req.session),
+      testarBackend: () => isSuperAdmin(req.session)
     };
 
     if (!allowedByRole[fn] || !allowedByRole[fn]()) {
@@ -1666,8 +1738,8 @@ app.post("/api/gas", async (req, res) => {
 
 app.post("/api/sync/gas-to-postgres", async (req, res) => {
   try {
-    if (!isAdmin(req.session)) {
-      return res.status(403).json({ ok: false, message: "Sincronização restrita ao administrador." });
+    if (!isSuperAdmin(req.session)) {
+      return res.status(403).json({ ok: false, message: "Sincronização exclusiva do responsável técnico do sistema." });
     }
     const result = await syncGasToPostgres(req.body || {});
     res.json(result);
@@ -2510,7 +2582,7 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
 });
 
 // Gera notificações retroativas para agendamentos existentes com resultado de visita
-app.post("/api/admin/notificacoes/gerar-retroativo", requireAdmin, async (req, res) => {
+app.post("/api/admin/notificacoes/gerar-retroativo", requireSuperAdmin, async (req, res) => {
   try {
     const nc = v => String(v || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim();
     const dtBR = v => {
@@ -2868,7 +2940,10 @@ app.get("/api/usuarios", requireSession, async (req, res) => {
     }
 
     const result = await pool.query(query, params);
-    res.json({ ok: true, usuarios: result.rows });
+    const usuarios = result.rows.map((usuario) => isHugoAccount(usuario)
+      ? { ...usuario, cargo: "super_admin", protected: true }
+      : usuario);
+    res.json({ ok: true, usuarios });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });
   }
@@ -2881,6 +2956,12 @@ app.post("/api/usuarios", requireAdmin, async (req, res) => {
     const email = clean(b.email).toLowerCase();
     const cargo = clean(b.cargo);
     const password = String(b.password || b.senha || "");
+    if (cargo.toLowerCase() === "super_admin") {
+      return res.status(403).json({ ok: false, message: "O perfil Super Admin é exclusivo e não pode ser atribuído pelo painel." });
+    }
+    if (email === HUGO_SUPER_ADMIN_EMAIL) {
+      return res.status(403).json({ ok: false, message: "A conta do criador é protegida e não pode ser recriada pelo painel." });
+    }
     if (!nome || !email || !cargo) {
       return res.status(400).json({ ok: false, message: "Nome, e-mail e perfil são obrigatórios." });
     }
@@ -2918,6 +2999,14 @@ app.patch("/api/usuarios/:id", requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const b = req.body || {};
+    const target = await pool.query('SELECT id, email, cargo FROM usuarios WHERE id = $1', [id]);
+    if (!target.rows.length) return res.status(404).json({ ok: false, message: "Usuário não encontrado." });
+    if (isHugoAccount(target.rows[0])) {
+      return res.status(403).json({ ok: false, message: "A conta do criador é protegida contra alterações pelo painel." });
+    }
+    if (clean(b.cargo).toLowerCase() === "super_admin") {
+      return res.status(403).json({ ok: false, message: "O perfil Super Admin é exclusivo e não pode ser atribuído pelo painel." });
+    }
     const password = String(b.password || b.senha || "");
     if (password && password.length < 12) {
       return res.status(400).json({ ok: false, message: "A senha deve ter pelo menos 12 caracteres." });
@@ -2956,6 +3045,9 @@ app.delete("/api/usuarios/:id", requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const check = await pool.query('SELECT id, email FROM usuarios WHERE id = $1', [id]);
+    if (check.rows.length && isHugoAccount(check.rows[0])) {
+      return res.status(403).json({ ok: false, message: "A conta do criador é permanente e não pode ser excluída." });
+    }
     if (!check.rows.length) return res.status(404).json({ ok: false, message: "Usuário não encontrado." });
     if (check.rows[0].email === (req.session && req.session.email)) {
       return res.status(400).json({ ok: false, message: "Você não pode excluir sua própria conta." });
@@ -3152,7 +3244,7 @@ async function obterTodosContatosKommo(kommoClient) {
 
 // ── GET /api/admin/kommo/diagnostico ─────────────────────────────────────────
 // Mostra: duplicatas, leads novos com mensagem, tempo médio de resposta
-app.get("/api/admin/kommo/diagnostico", requireAdmin, async (req, res) => {
+app.get("/api/admin/kommo/diagnostico", requireSuperAdmin, async (req, res) => {
   try {
     const kommoClient = require('./kommo/client');
     const agora = Math.floor(Date.now() / 1000);
@@ -3252,7 +3344,7 @@ async function obterTodosKommo(kommoClient) {
 
 // ── POST /api/admin/kommo/dedup ───────────────────────────────────────────────
 // Mescla contatos duplicados: move leads para o contato principal e exclui os extras
-app.post("/api/admin/kommo/dedup", requireAdmin, async (req, res) => {
+app.post("/api/admin/kommo/dedup", requireSuperAdmin, async (req, res) => {
   try {
     const kommoClient = require('./kommo/client');
     const contatos = await obterTodosKommo(kommoClient);
@@ -3311,7 +3403,7 @@ app.post("/api/admin/kommo/dedup", requireAdmin, async (req, res) => {
 
 // ── GET /api/admin/kommo/inspect ─────────────────────────────────────────────
 // Inspeciona a configuração real do Kommo: pipelines, estágios, webhooks, leads recentes
-app.get("/api/admin/kommo/inspect", requireAdmin, async (req, res) => {
+app.get("/api/admin/kommo/inspect", requireSuperAdmin, async (req, res) => {
   try {
     const kommoClient = require('./kommo/client');
     const PIPELINE_TARGET = 9511355;
@@ -3355,7 +3447,7 @@ app.get("/api/admin/kommo/inspect", requireAdmin, async (req, res) => {
 
 // ── GET /api/admin/kommo/bot-states ──────────────────────────────────────────
 // Lista os estados do bot salvos no PostgreSQL — útil para debug
-app.get("/api/admin/kommo/bot-states", requireAdmin, async (req, res) => {
+app.get("/api/admin/kommo/bot-states", requireSuperAdmin, async (req, res) => {
   try {
     const limit  = Math.min(Number(req.query.limit  || 50), 200);
     const etapa  = clean(req.query.etapa  || "");
@@ -3404,7 +3496,7 @@ app.get("/api/admin/kommo/bot-states", requireAdmin, async (req, res) => {
 // ── GET /api/admin/kommo/pipelines ────────────────────────────────────────────
 // Retorna todos os pipelines do Kommo com seus estágios atuais
 // Diagnóstico: mostra os valores exatos de loja em usuarios e agendamentos
-app.get("/api/admin/diag/loja-mismatch", requireAdmin, async (req, res) => {
+app.get("/api/admin/diag/loja-mismatch", requireSuperAdmin, async (req, res) => {
   try {
     // Valores distintos de loja em agendamentos
     const ag = await pool.query(`
@@ -3447,7 +3539,7 @@ app.get("/api/admin/diag/loja-mismatch", requireAdmin, async (req, res) => {
   }
 });
 
-app.get("/api/admin/kommo/pipelines", requireAdmin, async (req, res) => {
+app.get("/api/admin/kommo/pipelines", requireSuperAdmin, async (req, res) => {
   try {
     const kommoClient = require('./kommo/client');
     const data = await kommoClient.request('GET', '/leads/pipelines?with=statuses');
@@ -3474,7 +3566,7 @@ app.get("/api/admin/kommo/pipelines", requireAdmin, async (req, res) => {
 
 // ── POST /api/admin/kommo/setup-stages ───────────────────────────────────────
 // Cria os estágios padrão do bot em todos os 4 pipelines e retorna o mapa de IDs
-app.post("/api/admin/kommo/setup-stages", requireAdmin, async (req, res) => {
+app.post("/api/admin/kommo/setup-stages", requireSuperAdmin, async (req, res) => {
   try {
     const kommoClient = require('./kommo/client');
 
@@ -3550,7 +3642,7 @@ app.post("/api/admin/kommo/setup-stages", requireAdmin, async (req, res) => {
   }
 });
 
-app.post("/api/admin/kommo/update-stage-colors", requireAdmin, async (req, res) => {
+app.post("/api/admin/kommo/update-stage-colors", requireSuperAdmin, async (req, res) => {
   try {
     const kommoClient = require('./kommo/client');
 
@@ -3954,7 +4046,7 @@ async function adicionarNotaKommo(leadId, texto) {
 }
 
 // Sync retroativo: vincula agendamentos existentes sem kommo_lead_id ao Kommo
-app.post('/api/admin/sync/agendamentos-para-kommo', requireAdmin, async (req, res) => {
+app.post('/api/admin/sync/agendamentos-para-kommo', requireSuperAdmin, async (req, res) => {
   try {
     const { rows } = await pool.query(`
       SELECT id, nome, whatsapp, email, loja, optometrista, origem, data_agendamento, horario, agendado_por_nome
@@ -4091,7 +4183,7 @@ async function disparadorLembretes24h() {
 }
 
 // Endpoint para disparar manualmente (admin)
-app.post('/api/admin/lembretes/disparar', requireAdmin, async (req, res) => {
+app.post('/api/admin/lembretes/disparar', requireSuperAdmin, async (req, res) => {
   const resultado = await runReminders();
   res.json({ ok: true, ...resultado });
 });
@@ -4133,6 +4225,8 @@ module.exports = {
   signSession,
   verifySession,
   requireSession,
+  requireSuperAdmin,
+  isSuperAdmin,
   buildPermissions,
   publicUser
 };
