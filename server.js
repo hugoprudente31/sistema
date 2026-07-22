@@ -4205,6 +4205,8 @@ app.get("/api/admin/dashboard-executivo", requireAdmin, async (req, res) => {
     const executiveStoreSql = `CASE
       WHEN LOWER(COALESCE(a.loja,'')) LIKE '%target%' THEN 'Óticas Target'
       ELSE COALESCE(NULLIF(a.loja,''),'Sem loja') END`;
+    const executiveProfileSql = `COALESCE(NULLIF(u.cargo,''), 'Não informado')`;
+    const executiveLojaStaffSql = `(u.cargo IS NOT NULL AND LOWER(u.cargo) NOT LIKE '%central%' AND LOWER(u.cargo) NOT LIKE '%admin%')`;
     const executiveChannelSql = `CASE
       WHEN LOWER(COALESCE(a.agendado_por_nome,'')) LIKE '%maria cristina%' THEN 'Atendimento Central'
       WHEN LOWER(COALESCE(a.origem_sync,'')) = 'landing_page'
@@ -4213,15 +4215,12 @@ app.get("/api/admin/dashboard-executivo", requireAdmin, async (req, res) => {
         OR LOWER(COALESCE(a.access_tags,'')) LIKE '%origem:site%' THEN 'Landing Page (Teste de Visão)'
       WHEN LOWER(COALESCE(a.origem,'')) LIKE '%whatsapp%'
         OR LOWER(COALESCE(a.access_tags,'')) LIKE '%origem:whatsapp%' THEN 'Atendimento Central'
-      WHEN LOWER(COALESCE(a.origem,'')) SIMILAR TO '%(instagram|facebook|rede social|meta)%'
-        OR LOWER(COALESCE(a.access_tags,'')) SIMILAR TO '%(origem:instagram|origem:facebook|origem:trafego-pago)%' THEN 'Redes sociais'
       WHEN LOWER(COALESCE(a.origem_sync,'')) = 'kommo_bot'
-        OR a.kommo_lead_id IS NOT NULL
         OR LOWER(COALESCE(a.access_tags,'')) LIKE '%origem:kommo%' THEN 'Atendimento Central'
+      WHEN ${executiveLojaStaffSql} THEN 'Loja'
+      WHEN a.kommo_lead_id IS NOT NULL THEN 'Atendimento Central'
       WHEN NULLIF(TRIM(a.origem),'') IS NULL THEN 'Não informada'
       ELSE a.origem END`;
-
-    const executiveProfileSql = `COALESCE(NULLIF(u.cargo,''), 'Não informado')`;
 
     const [resumoResult, lojasResult, consultoresResult, origensResult, tendenciaResult, metasResult, lojaPerfilResult] = await Promise.all([
       pool.query(`SELECT ${metricSql} FROM agendamentos a WHERE ${baseWhere}`, params),
@@ -4232,7 +4231,8 @@ app.get("/api/admin/dashboard-executivo", requireAdmin, async (req, res) => {
         FROM agendamentos a LEFT JOIN vendedores_consultores v ON v.id = a.vendedor_consultor_id
         WHERE ${baseWhere} GROUP BY a.vendedor_consultor_id, a.loja ORDER BY faturamento DESC`, params),
       pool.query(`SELECT ${executiveChannelSql} AS origem, ${metricSql}
-        FROM agendamentos a WHERE ${baseWhere} GROUP BY ${executiveChannelSql} ORDER BY agendamentos DESC`, params),
+        FROM agendamentos a LEFT JOIN usuarios u ON LOWER(u.email) = LOWER(NULLIF(a.agendado_por_email,''))
+        WHERE ${baseWhere} GROUP BY ${executiveChannelSql} ORDER BY agendamentos DESC`, params),
       pool.query(`SELECT TO_CHAR(DATE_TRUNC('month', COALESCE(a.data_agendamento,a.criado_em::date)), 'YYYY-MM') AS competencia,
           ${metricSql} FROM agendamentos a WHERE ${baseWhere}
         GROUP BY DATE_TRUNC('month', COALESCE(a.data_agendamento,a.criado_em::date)) ORDER BY competencia`, params),
@@ -4244,10 +4244,11 @@ app.get("/api/admin/dashboard-executivo", requireAdmin, async (req, res) => {
 
     const resumo = executiveMetricRow(resumoResult.rows[0]);
     const origensMedidas = origensResult.rows.map(executiveMetricRow);
-    const nomesCanaisMarketing = ["Atendimento Central", "Landing Page (Teste de Visão)", "Redes sociais"];
-    const canaisMarketing = new Set(nomesCanaisMarketing);
-    const origens = nomesCanaisMarketing.map((nome) => origensMedidas.find((row) => row.origem === nome)
-      || executiveMetricRow({ origem: nome })).concat(origensMedidas.filter((row) => !canaisMarketing.has(row.origem)));
+    const nomesCanaisSempreExibidos = ["Atendimento Central", "Landing Page (Teste de Visão)", "Loja"];
+    const canaisSempreExibidos = new Set(nomesCanaisSempreExibidos);
+    const canaisMarketing = new Set(["Atendimento Central", "Landing Page (Teste de Visão)"]);
+    const origens = nomesCanaisSempreExibidos.map((nome) => origensMedidas.find((row) => row.origem === nome)
+      || executiveMetricRow({ origem: nome })).concat(origensMedidas.filter((row) => !canaisSempreExibidos.has(row.origem)));
     const marketing = origens.filter((row) => canaisMarketing.has(row.origem)).reduce((acc, row) => ({
       clientes: acc.clientes + row.clientes,
       agendamentos: acc.agendamentos + row.agendamentos,
