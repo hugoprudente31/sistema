@@ -4210,18 +4210,20 @@ app.get("/api/admin/dashboard-executivo", requireAdmin, async (req, res) => {
       WHEN LOWER(COALESCE(a.origem_sync,'')) = 'landing_page'
         OR LOWER(COALESCE(a.origem,'')) LIKE '%landing%'
         OR LOWER(COALESCE(a.origem,'')) LIKE '%site%'
-        OR LOWER(COALESCE(a.access_tags,'')) LIKE '%origem:site%' THEN 'Landing Page'
+        OR LOWER(COALESCE(a.access_tags,'')) LIKE '%origem:site%' THEN 'Landing Page (Teste de Visão)'
       WHEN LOWER(COALESCE(a.origem,'')) LIKE '%whatsapp%'
-        OR LOWER(COALESCE(a.access_tags,'')) LIKE '%origem:whatsapp%' THEN 'WhatsApp'
+        OR LOWER(COALESCE(a.access_tags,'')) LIKE '%origem:whatsapp%' THEN 'Atendimento Central'
       WHEN LOWER(COALESCE(a.origem,'')) SIMILAR TO '%(instagram|facebook|rede social|meta)%'
         OR LOWER(COALESCE(a.access_tags,'')) SIMILAR TO '%(origem:instagram|origem:facebook|origem:trafego-pago)%' THEN 'Redes sociais'
       WHEN LOWER(COALESCE(a.origem_sync,'')) = 'kommo_bot'
         OR a.kommo_lead_id IS NOT NULL
-        OR LOWER(COALESCE(a.access_tags,'')) LIKE '%origem:kommo%' THEN 'Kommo'
+        OR LOWER(COALESCE(a.access_tags,'')) LIKE '%origem:kommo%' THEN 'Atendimento Central'
       WHEN NULLIF(TRIM(a.origem),'') IS NULL THEN 'Não informada'
       ELSE a.origem END`;
 
-    const [resumoResult, lojasResult, consultoresResult, origensResult, tendenciaResult, metasResult] = await Promise.all([
+    const executiveProfileSql = `COALESCE(NULLIF(u.cargo,''), 'Não informado')`;
+
+    const [resumoResult, lojasResult, consultoresResult, origensResult, tendenciaResult, metasResult, lojaPerfilResult] = await Promise.all([
       pool.query(`SELECT ${metricSql} FROM agendamentos a WHERE ${baseWhere}`, params),
       pool.query(`SELECT ${executiveStoreSql} AS loja, ${metricSql} FROM agendamentos a WHERE ${baseWhere} GROUP BY ${executiveStoreSql} ORDER BY faturamento DESC`, params),
       pool.query(`SELECT a.vendedor_consultor_id AS id,
@@ -4234,12 +4236,18 @@ app.get("/api/admin/dashboard-executivo", requireAdmin, async (req, res) => {
       pool.query(`SELECT TO_CHAR(DATE_TRUNC('month', COALESCE(a.data_agendamento,a.criado_em::date)), 'YYYY-MM') AS competencia,
           ${metricSql} FROM agendamentos a WHERE ${baseWhere}
         GROUP BY DATE_TRUNC('month', COALESCE(a.data_agendamento,a.criado_em::date)) ORDER BY competencia`, params),
-      pool.query(`${META_SELECT} WHERE m.ativo = true AND m.competencia BETWEEN DATE_TRUNC('month',$1::date) AND DATE_TRUNC('month',$2::date) ORDER BY m.tipo_escopo,m.loja,v.nome`, [inicio, fim])
+      pool.query(`${META_SELECT} WHERE m.ativo = true AND m.competencia BETWEEN DATE_TRUNC('month',$1::date) AND DATE_TRUNC('month',$2::date) ORDER BY m.tipo_escopo,m.loja,v.nome`, [inicio, fim]),
+      pool.query(`SELECT ${executiveStoreSql} AS loja, ${executiveProfileSql} AS perfil, ${metricSql}
+        FROM agendamentos a LEFT JOIN usuarios u ON LOWER(u.email) = LOWER(NULLIF(a.agendado_por_email,''))
+        WHERE ${baseWhere} GROUP BY ${executiveStoreSql}, ${executiveProfileSql} ORDER BY ${executiveStoreSql}, faturamento DESC`, params)
     ]);
 
     const resumo = executiveMetricRow(resumoResult.rows[0]);
-    const origens = origensResult.rows.map(executiveMetricRow);
-    const canaisMarketing = new Set(["Redes sociais", "WhatsApp", "Kommo", "Landing Page"]);
+    const origensMedidas = origensResult.rows.map(executiveMetricRow);
+    const nomesCanaisMarketing = ["Atendimento Central", "Landing Page (Teste de Visão)", "Redes sociais"];
+    const canaisMarketing = new Set(nomesCanaisMarketing);
+    const origens = nomesCanaisMarketing.map((nome) => origensMedidas.find((row) => row.origem === nome)
+      || executiveMetricRow({ origem: nome })).concat(origensMedidas.filter((row) => !canaisMarketing.has(row.origem)));
     const marketing = origens.filter((row) => canaisMarketing.has(row.origem)).reduce((acc, row) => ({
       clientes: acc.clientes + row.clientes,
       agendamentos: acc.agendamentos + row.agendamentos,
@@ -4268,6 +4276,7 @@ app.get("/api/admin/dashboard-executivo", requireAdmin, async (req, res) => {
       lojas: lojasResult.rows.map(executiveMetricRow),
       consultores: consultoresResult.rows.map(executiveMetricRow),
       origens,
+      lojaPerfil: lojaPerfilResult.rows.map(executiveMetricRow),
       marketing,
       tendencia: tendenciaResult.rows.map(executiveMetricRow),
       setores,

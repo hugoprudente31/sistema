@@ -44,7 +44,8 @@ test('dashboard executivo consolida grupo, lojas, consultores, origens, setores,
     assert.equal(body.resumo.ticket_medio, 1000);
     assert.equal(body.lojas.length, 1);
     assert.equal(body.consultores[0].id, 12);
-    assert.equal(body.origens[0].origem, 'Redes sociais');
+    assert.equal(body.origens[0].origem, 'Atendimento Central');
+    for (const canal of ['Atendimento Central', 'Landing Page (Teste de Visão)', 'Redes sociais']) assert.ok(body.origens.some((row) => row.origem === canal));
     assert.equal(body.marketing.clientes, 8);
     assert.equal(body.marketing.vendas, 3);
     assert.equal(body.setores.length, 5);
@@ -53,13 +54,16 @@ test('dashboard executivo consolida grupo, lojas, consultores, origens, setores,
   } finally { pool.query = original; }
 });
 
-test('dashboard normaliza Atendimento Central, canais de marketing e a loja Target', () => {
+test('dashboard normaliza Atendimento Central (Kommo+WhatsApp+Central), Landing Page, Redes sociais e a loja Target', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
   assert.match(source, /maria cristina[\s\S]*Atendimento Central/i);
-  for (const canal of ['Kommo', 'Landing Page', 'WhatsApp', 'Redes sociais']) assert.match(source, new RegExp(canal));
+  for (const canal of ['Atendimento Central', 'Landing Page', 'Redes sociais']) assert.match(source, new RegExp(canal));
   const channelRule = source.slice(source.indexOf('const executiveChannelSql'), source.indexOf('const [resumoResult'));
-  assert.ok(channelRule.indexOf("THEN 'WhatsApp'") < channelRule.indexOf("THEN 'Kommo'"), 'canal original deve ter prioridade sobre vínculo Kommo');
-  assert.ok(channelRule.indexOf("THEN 'Landing Page'") < channelRule.indexOf("THEN 'Kommo'"), 'landing page deve ter prioridade sobre vínculo Kommo');
+  const landingPos = channelRule.indexOf("THEN 'Landing Page");
+  const kommoLinkPos = channelRule.indexOf('a.kommo_lead_id IS NOT NULL');
+  assert.ok(landingPos > -1 && kommoLinkPos > -1 && landingPos < kommoLinkPos, 'landing page deve ter prioridade sobre vínculo Kommo');
+  assert.match(channelRule, /LIKE '%whatsapp%'[\s\S]*THEN 'Atendimento Central'/, 'WhatsApp deve ser unificado em Atendimento Central');
+  assert.match(channelRule, /kommo_lead_id IS NOT NULL[\s\S]*THEN 'Atendimento Central'/, 'Kommo deve ser unificado em Atendimento Central');
   assert.match(source, /LIKE '%target%' THEN 'Óticas Target'/);
   assert.match(source, /Clientes dos canais rastreados/);
 });
