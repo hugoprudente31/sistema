@@ -4183,7 +4183,10 @@ app.get("/api/admin/dashboard-executivo", requireAdmin, async (req, res) => {
       return res.status(400).json({ ok: false, message: "Período inválido." });
     }
     const params = [inicio, fim];
-    const lojaCondition = loja ? (params.push(loja), `AND ${storeSql("a.loja", `$${params.length}`)}`) : "";
+    const isTargetGroup = normalizeStoreKey(loja) === "oticas target";
+    const lojaCondition = loja ? (params.push(loja), isTargetGroup
+      ? `AND LOWER(COALESCE(a.loja,'')) LIKE '%target%'`
+      : `AND ${storeSql("a.loja", `$${params.length}`)}`) : "";
     const baseWhere = `a.excluido_em IS NULL AND a.nome NOT ILIKE '%teste%'
       AND COALESCE(a.loja,'') NOT ILIKE '%teste%'
       AND COALESCE(a.data_agendamento, a.criado_em::date) BETWEEN $1::date AND $2::date ${lojaCondition}`;
@@ -4199,16 +4202,34 @@ app.get("/api/admin/dashboard-executivo", requireAdmin, async (req, res) => {
       COUNT(*) FILTER (WHERE a.data_entrega_os < CURRENT_DATE AND LOWER(COALESCE(a.status_os,'')) NOT IN ('concluído','concluido','entregue','cancelada','cancelado','reembolso'))::int AS os_atrasadas,
       COALESCE(AVG(COALESCE(a.lead_time_dias, a.data_finalizacao_os - a.data_abertura_os)) FILTER (WHERE a.data_finalizacao_os IS NOT NULL),0)::numeric AS lead_time_medio`;
 
+    const executiveStoreSql = `CASE
+      WHEN LOWER(COALESCE(a.loja,'')) LIKE '%target%' THEN 'Óticas Target'
+      ELSE COALESCE(NULLIF(a.loja,''),'Sem loja') END`;
+    const executiveChannelSql = `CASE
+      WHEN LOWER(COALESCE(a.agendado_por_nome,'')) LIKE '%maria cristina%' THEN 'Atendimento Central'
+      WHEN LOWER(COALESCE(a.origem_sync,'')) = 'kommo_bot'
+        OR a.kommo_lead_id IS NOT NULL
+        OR LOWER(COALESCE(a.access_tags,'')) LIKE '%origem:kommo%' THEN 'Kommo'
+      WHEN LOWER(COALESCE(a.origem_sync,'')) = 'landing_page'
+        OR LOWER(COALESCE(a.origem,'')) LIKE '%landing%'
+        OR LOWER(COALESCE(a.access_tags,'')) LIKE '%origem:site%' THEN 'Landing Page'
+      WHEN LOWER(COALESCE(a.origem,'')) LIKE '%whatsapp%'
+        OR LOWER(COALESCE(a.access_tags,'')) LIKE '%origem:whatsapp%' THEN 'WhatsApp'
+      WHEN LOWER(COALESCE(a.origem,'')) SIMILAR TO '%(instagram|facebook|rede social|meta)%'
+        OR LOWER(COALESCE(a.access_tags,'')) SIMILAR TO '%(origem:instagram|origem:facebook|origem:trafego-pago)%' THEN 'Redes sociais'
+      WHEN NULLIF(TRIM(a.origem),'') IS NULL THEN 'Não informada'
+      ELSE a.origem END`;
+
     const [resumoResult, lojasResult, consultoresResult, origensResult, tendenciaResult, metasResult] = await Promise.all([
       pool.query(`SELECT ${metricSql} FROM agendamentos a WHERE ${baseWhere}`, params),
-      pool.query(`SELECT COALESCE(NULLIF(a.loja,''),'Sem loja') AS loja, ${metricSql} FROM agendamentos a WHERE ${baseWhere} GROUP BY a.loja ORDER BY faturamento DESC`, params),
+      pool.query(`SELECT ${executiveStoreSql} AS loja, ${metricSql} FROM agendamentos a WHERE ${baseWhere} GROUP BY ${executiveStoreSql} ORDER BY faturamento DESC`, params),
       pool.query(`SELECT a.vendedor_consultor_id AS id,
           COALESCE(NULLIF(MAX(v.nome),''), NULLIF(MAX(a.vendedor_nome),''), NULLIF(MAX(a.consultor_responsavel),''), 'Não informado') AS consultor,
           COALESCE(NULLIF(a.loja,''),'Sem loja') AS loja, ${metricSql}
         FROM agendamentos a LEFT JOIN vendedores_consultores v ON v.id = a.vendedor_consultor_id
         WHERE ${baseWhere} GROUP BY a.vendedor_consultor_id, a.loja ORDER BY faturamento DESC`, params),
-      pool.query(`SELECT COALESCE(NULLIF(a.origem,''),'Não informada') AS origem, ${metricSql}
-        FROM agendamentos a WHERE ${baseWhere} GROUP BY a.origem ORDER BY agendamentos DESC`, params),
+      pool.query(`SELECT ${executiveChannelSql} AS origem, ${metricSql}
+        FROM agendamentos a WHERE ${baseWhere} GROUP BY ${executiveChannelSql} ORDER BY agendamentos DESC`, params),
       pool.query(`SELECT TO_CHAR(DATE_TRUNC('month', COALESCE(a.data_agendamento,a.criado_em::date)), 'YYYY-MM') AS competencia,
           ${metricSql} FROM agendamentos a WHERE ${baseWhere}
         GROUP BY DATE_TRUNC('month', COALESCE(a.data_agendamento,a.criado_em::date)) ORDER BY competencia`, params),
@@ -4216,12 +4237,20 @@ app.get("/api/admin/dashboard-executivo", requireAdmin, async (req, res) => {
     ]);
 
     const resumo = executiveMetricRow(resumoResult.rows[0]);
+    const origens = origensResult.rows.map(executiveMetricRow);
+    const canaisMarketing = new Set(["Redes sociais", "WhatsApp", "Kommo", "Landing Page"]);
+    const marketing = origens.filter((row) => canaisMarketing.has(row.origem)).reduce((acc, row) => ({
+      clientes: acc.clientes + row.clientes,
+      agendamentos: acc.agendamentos + row.agendamentos,
+      vendas: acc.vendas + row.vendas,
+      faturamento: acc.faturamento + row.faturamento
+    }), { clientes: 0, agendamentos: 0, vendas: 0, faturamento: 0 });
     const setores = [
       { setor: "Atendimento e agenda", indicador: "Comparecimento", realizado: resumo.taxa_comparecimento, unidade: "%", base: resumo.agendamentos },
       { setor: "Optometria", indicador: "Atendimentos realizados", realizado: resumo.comparecimentos, unidade: "clientes", base: resumo.clientes },
       { setor: "Comercial", indicador: "Conversão em vendas", realizado: resumo.taxa_conversao, unidade: "%", base: resumo.vendas },
       { setor: "Laboratório e OS", indicador: "Prazo médio", realizado: resumo.lead_time_medio, unidade: "dias", base: resumo.os_ativas },
-      { setor: "Marketing", indicador: "Clientes gerados", realizado: resumo.clientes, unidade: "clientes", base: origensResult.rows.length }
+      { setor: "Marketing", indicador: "Clientes dos canais rastreados", realizado: marketing.clientes, unidade: "clientes", base: marketing.agendamentos }
     ];
     const alertas = [];
     if (resumo.taxa_comparecimento < 70) alertas.push({ nivel: "alto", area: "Atendimento", mensagem: "Comparecimento abaixo de 70%. Reforçar confirmação e lembretes." });
@@ -4237,7 +4266,8 @@ app.get("/api/admin/dashboard-executivo", requireAdmin, async (req, res) => {
       resumo,
       lojas: lojasResult.rows.map(executiveMetricRow),
       consultores: consultoresResult.rows.map(executiveMetricRow),
-      origens: origensResult.rows.map(executiveMetricRow),
+      origens,
+      marketing,
       tendencia: tendenciaResult.rows.map(executiveMetricRow),
       setores,
       metas: metasResult.rows,
