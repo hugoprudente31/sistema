@@ -97,34 +97,14 @@ router.post("/webhook/kommo", requireWebhookSecret, async (req, res) => {
     if (payload?.message?.add) {
       const entry = extractMessageEntry(payload);
 
-      // No modo Salesbot, o Kommo chama /api/salesbot para mensagens do cliente.
-      // Mas ainda precisamos rastrear mensagens de ATENDENTES para o handoff bot↔humano.
+      // No modo Salesbot, todas as mensagens de cliente são processadas via /api/salesbot.
+      // Aqui só rastreamos mensagens de atendentes (authorType="user") para desativar o bot.
       if (process.env.KOMMO_USE_SALESBOT === "true") {
         if (entry?.leadId && entry.authorType === "user") {
           SM.markHumanActivity(String(entry.leadId));
           console.log(`[Webhook/Kommo] 👤 Atendente registrado — lead ${entry.leadId}`);
-        } else if (entry?.leadId) {
-          const reminderState = await SM.getState(String(entry.leadId));
-          const reminderSteps = new Set([
-            "lembrete_resposta",
-            "reagendamento_data",
-            "reagendamento_horario",
-          ]);
-          if (reminderSteps.has(reminderState.etapa)) {
-            console.log(`[Webhook/Kommo] 📅 Resposta do lembrete — lead ${entry.leadId}, etapa ${reminderState.etapa}`);
-            await processMessage({
-              leadId: String(entry.leadId),
-              talkId: entry.talkId ? String(entry.talkId) : null,
-              chatId: entry.chatId ? String(entry.chatId) : null,
-              text: entry.text,
-              authorType: entry.authorType,
-              pipeline_id: entry.pipeline_id,
-            });
-          } else {
-            console.log("[Webhook/Kommo] Modo Salesbot — mensagem tratada pelo Salesbot nativo");
-          }
         } else {
-          console.log("[Webhook/Kommo] Modo Salesbot — message.add sem lead ignorado");
+          console.log("[Webhook/Kommo] Modo Salesbot — mensagem de cliente ignorada");
         }
         return;
       }
@@ -319,17 +299,11 @@ router.post("/api/kommo/message", async (req, res) => {
     trackEvent("add_message_cliente", `lead=${entry.leadId} talk=${entry.talkId} chat=${entry.chatId} text="${entry.text.slice(0,40)}"`);
     console.log(`[Kommo/Message] 💬 Contato — lead ${entry.leadId} talk=${entry.talkId} — "${entry.text.slice(0, 60)}"`);
 
-    // Em modo Salesbot, mensagens regulares de clientes são processadas pelo /api/salesbot —
-    // processá-las aqui também causaria duplo processamento com avanço indevido de estado.
-    // Exceção: estados de lembrete (onde o Salesbot nativo não atua diretamente).
+    // Em modo Salesbot, TODAS as mensagens de cliente são processadas via /api/salesbot.
+    // Este webhook só rastreia eventos estruturais (atendente, add_talk, add_lead).
     if (process.env.KOMMO_USE_SALESBOT === "true") {
-      const currentState = await SM.getState(String(entry.leadId));
-      const reminderSteps = new Set(["lembrete_resposta", "reagendamento_data", "reagendamento_horario"]);
-      if (!reminderSteps.has(currentState.etapa)) {
-        console.log(`[Kommo/Message] Modo Salesbot — mensagem ignorada (tratada pelo /api/salesbot), etapa atual: ${currentState.etapa}`);
-        return;
-      }
-      console.log(`[Kommo/Message] 📅 Modo Salesbot — processando resposta de lembrete (etapa: ${currentState.etapa})`);
+      console.log(`[Kommo/Message] Modo Salesbot — add_message ignorado (processado pelo Salesbot)`);
+      return;
     }
 
     await processMessage({

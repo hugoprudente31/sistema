@@ -58,7 +58,18 @@ module.exports = {
     `Desculpe, não entendi sua resposta. 😅\nPor favor, responda com o número da opção desejada.`,
 
   menuPrincipal,
-  boasVindas: (_nome, loja) => menuPrincipal(loja),
+  boasVindas: (nome, loja) => {
+    const primeiro = nome ? nome.trim().split(" ")[0] : "";
+    return `Olá${primeiro ? ", " + primeiro : ""}! Seja bem-vindo(a) à ${loja.titulo}! 😊\n\n` +
+      `É um prazer ter você aqui! Como podemos te ajudar hoje?\n\n` +
+      `Escolha uma das opções abaixo:\n\n` +
+      `1️⃣ Informações\n` +
+      `2️⃣ Teste de Visão Grátis\n` +
+      `3️⃣ Orçamento\n` +
+      `4️⃣ Trabalhe Conosco\n` +
+      `5️⃣ Pós Venda\n\n` +
+      `Digite o número da opção desejada. 👓`;
+  },
 
   infoMenu: () =>
     `Ótimo! Sobre o que você gostaria de saber mais? 😊\n\n` +
@@ -104,11 +115,20 @@ module.exports = {
     `✅ Perfeito! Seu interesse no Teste de Visão Grátis foi registrado para ${loja.titulo}.\n\n` +
     `Se já concluiu o agendamento pelo link, nossa equipe acompanhará pelo sistema. Qualquer dúvida, estamos por aqui.`,
 
-  orcamento: () =>
-    `Olá! Ficamos felizes em preparar um orçamento especial para você! 😊\n\n` +
-    `Para agilizar seu atendimento, por favor envie sua receita (foto ou arquivo) aqui mesmo pelo WhatsApp.\n\n` +
-    `📋 Estamos com uma grande demanda de atendimentos no momento, mas fique tranquilo(a)! Em menos de 5 minutos um de nossos especialistas estará com você. ⏱️\n\n` +
-    `Obrigado pela sua paciência! 🙏`,
+  orcamentoMenu: () =>
+    `Ótimo! Como posso te ajudar com o orçamento? 😊\n\n` +
+    `1️⃣ Tenho receita (foto ou arquivo)\n` +
+    `2️⃣ Quero armação\n` +
+    `3️⃣ Quero lente\n` +
+    `4️⃣ Falar com especialista\n\n` +
+    `Digite o número da opção desejada.`,
+
+  orcamentoReceita: () =>
+    `Perfeito! Envie sua receita aqui (foto ou PDF) e em breve um especialista irá te atender com o orçamento. 📋`,
+
+  orcamentoLente: () =>
+    `Certo! Me diga que tipo de lente você está procurando:\n\n` +
+    `Simples, multifocal, antirreflexo, blue control, solar ou outro?`,
 
   trabalheConosco: () =>
     `Que incrível! Adoramos receber talentos que queiram fazer parte da nossa família Óticas TGT! 😊🤝\n\n` +
@@ -117,30 +137,23 @@ module.exports = {
     `💼 O cargo que você está buscando\n\n` +
     `Nossa equipe vai analisar com carinho e entrar em contato em breve! 🌟`,
 
+  trabalheConoscoMenu: () =>
+    `Que ótimo interesse em fazer parte da nossa equipe! 🤝\n\n` +
+    `1️⃣ Enviar currículo\n` +
+    `2️⃣ Informar experiência\n` +
+    `3️⃣ Falar com atendimento\n\n` +
+    `Digite o número da opção desejada.`,
+
+  trabalheConoscoExperiencia: () =>
+    `Ótimo! Conte-nos sobre sua experiência profissional e a área de interesse. 💼`,
+
   posVendaMenu: () =>
-    `Olá! Como podemos te ajudar com seu pós-venda? 😊\n\n` +
-    `Escolha uma das opções abaixo:\n\n` +
-    `1️⃣ Nota Fiscal\n` +
-    `2️⃣ Garantia\n` +
-    `3️⃣ Reembolso\n` +
-    `4️⃣ Falar com um Especialista\n\n` +
-    `Digite o número da sua escolha:`,
-
-  posVendaNotaFiscal: () =>
-    `Entendido! Vamos resolver a questão da sua nota fiscal rapidinho! 🧾\n\n` +
-    `Um de nossos especialistas vai te atender agora para verificar e enviar sua nota fiscal. Aguarde um momento! 😊`,
-
-  posVendaGarantia: () =>
-    `Entendido! Vamos verificar a garantia do seu produto! 🛡️\n\n` +
-    `Nosso especialista vai te atender agora com todas as informações sobre a garantia. Aguarde um momento! 😊`,
-
-  posVendaReembolso: () =>
-    `Entendido! Vamos tratar o seu reembolso com toda a atenção que você merece! 💙\n\n` +
-    `Um especialista vai te atender agora para resolver isso da melhor forma possível. Aguarde um momento! 😊`,
-
-  posVendaEspecialista: () =>
-    `Perfeito! Vou te conectar agora com um de nossos especialistas de pós-venda. 😊\n\n` +
-    `Aguarde um momento, em breve alguém da nossa equipe estará com você!`,
+    `Como podemos te ajudar no pós-venda? 😊\n\n` +
+    `1️⃣ Garantia\n` +
+    `2️⃣ Ajuste de armação\n` +
+    `3️⃣ Problema com lente\n` +
+    `4️⃣ Falar com atendimento\n\n` +
+    `Digite o número da opção desejada.`,
 
   foraDoHorario: (nome) =>
     `Olá${nome ? `, ${nome}` : ""}! 🌙\nSua mensagem foi registrada e responderemos em breve!`,

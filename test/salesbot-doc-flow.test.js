@@ -166,21 +166,25 @@ test("SalesBot executa funis de orçamento, RH e pós-venda", async () => {
   const orcLead = `doc-orc-${Date.now()}`;
   await salesbot({ lead_id: orcLead, loja, message: "oi" });
   const orc = await salesbot({ lead_id: orcLead, loja, message: "3" });
-  assert.match(orc.text, /envie sua receita/);
+  assert.match(orc.text, /Tenho receita/);
+  const escolhaReceita = await salesbot({ lead_id: orcLead, loja, message: "1" });
+  assert.match(escolhaReceita.text, /Envie sua receita/);
   const receita = await salesbot({ lead_id: orcLead, loja, message: "segue receita em foto" });
   assert.match(receita.text, /conectar agora/);
 
   const rhLead = `doc-rh-${Date.now()}`;
   await salesbot({ lead_id: rhLead, loja, message: "oi" });
   const rh = await salesbot({ lead_id: rhLead, loja, message: "4" });
-  assert.match(rh.text, /currículo/);
+  assert.match(rh.text, /Enviar currículo/);
+  const enviarCurriculo = await salesbot({ lead_id: rhLead, loja, message: "1" });
+  assert.match(enviarCurriculo.text, /currículo/);
   const curriculo = await salesbot({ lead_id: rhLead, loja, message: "curriculo enviado" });
   assert.match(curriculo.text, /conectar agora/);
 
   const pvLead = `doc-pv-${Date.now()}`;
   await salesbot({ lead_id: pvLead, loja, message: "oi" });
   const pv = await salesbot({ lead_id: pvLead, loja, message: "5" });
-  assert.match(pv.text, /Nota Fiscal/);
-  const nf = await salesbot({ lead_id: pvLead, loja, message: "1" });
-  assert.match(nf.text, /nota fiscal/);
+  assert.match(pv.text, /Garantia/);
+  const garantia = await salesbot({ lead_id: pvLead, loja, message: "1" });
+  assert.match(garantia.text, /conectar agora/);
 });
