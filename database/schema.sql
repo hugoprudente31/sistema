@@ -11,7 +11,51 @@ ALTER TABLE agendamentos
   ADD COLUMN IF NOT EXISTS ultima_alteracao_por_email TEXT,
   ADD COLUMN IF NOT EXISTS ultima_alteracao_em TIMESTAMP,
   ADD COLUMN IF NOT EXISTS patologia TEXT DEFAULT 'Pendente',
-  ADD COLUMN IF NOT EXISTS resultado_optometrista TEXT DEFAULT 'Pendente';
+  ADD COLUMN IF NOT EXISTS resultado_optometrista TEXT DEFAULT 'Pendente',
+  ADD COLUMN IF NOT EXISTS atendimento_semaforo TEXT DEFAULT '',
+  ADD COLUMN IF NOT EXISTS atendimento_semaforo_label TEXT DEFAULT '';
+
+CREATE OR REPLACE FUNCTION atualizar_atendimento_semaforo_tgt()
+RETURNS trigger AS $$
+DECLARE
+  comp TEXT := replace(lower(coalesce(NEW.compareceu, '')), 'ã', 'a');
+  status_agenda TEXT := replace(lower(coalesce(NEW.status, '')), 'ã', 'a');
+  venda TEXT := replace(lower(coalesce(NEW.venda_gerada, '')), 'ã', 'a');
+  resultado TEXT := replace(lower(coalesce(NEW.resultado_optometrista, '')), 'ã', 'a');
+  pat TEXT := replace(lower(coalesce(NEW.patologia, '')), 'ã', 'a');
+  valor NUMERIC := coalesce(NEW.valor_venda, 0);
+BEGIN
+  IF resultado = 'patologia' OR pat = 'sim' THEN
+    NEW.atendimento_semaforo := 'azul';
+    NEW.atendimento_semaforo_label := 'Patologia';
+  ELSIF status_agenda IN ('nao compareceu', 'não compareceu') OR comp IN ('nao', 'não', 'nao compareceu', 'não compareceu') THEN
+    NEW.atendimento_semaforo := 'vermelho';
+    NEW.atendimento_semaforo_label := 'Não compareceu';
+  ELSIF comp IN ('sim', 'compareceu') OR status_agenda IN ('compareceu', 'concluido', 'concluído') THEN
+    IF venda = 'sim' OR valor > 0 THEN
+      NEW.atendimento_semaforo := 'verde';
+      NEW.atendimento_semaforo_label := 'Compareceu e comprou';
+    ELSE
+      NEW.atendimento_semaforo := 'amarelo';
+      NEW.atendimento_semaforo_label := 'Compareceu e não comprou';
+    END IF;
+  ELSE
+    NEW.atendimento_semaforo := '';
+    NEW.atendimento_semaforo_label := '';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_atualizar_atendimento_semaforo_tgt ON agendamentos;
+CREATE TRIGGER trg_atualizar_atendimento_semaforo_tgt
+BEFORE INSERT OR UPDATE OF compareceu, status, venda_gerada, valor_venda, patologia, resultado_optometrista
+ON agendamentos
+FOR EACH ROW EXECUTE FUNCTION atualizar_atendimento_semaforo_tgt();
+
+UPDATE agendamentos
+SET compareceu = compareceu
+WHERE atendimento_semaforo IS NULL OR atendimento_semaforo = '';
 
 CREATE TABLE IF NOT EXISTS historico_alteracoes_agendamentos (
   id SERIAL PRIMARY KEY,
