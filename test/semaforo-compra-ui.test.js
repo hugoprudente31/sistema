@@ -25,3 +25,19 @@ test('servidor normaliza compras novas e corrige compras antigas', function() {
   assert.match(server, /SET compareceu = 'Sim'/);
   assert.match(server, /CREATE OR REPLACE FUNCTION validar_agendamento_tgt\(\)[^]*NEW\.compareceu := 'Sim'/);
 });
+
+test('IsConcluidaVisual e IsOverdue são calculados (não ficam undefined) e realmente ligados ao selo Status Ag.', function() {
+  // statusClassAgendamento lê r.IsConcluidaVisual/r.IsOverdue para colorir o
+  // primeiro selo (verde/vermelho) — sem isso ser calculado em algum lugar,
+  // o selo nunca muda de cor mesmo quando o atendimento está concluído ou
+  // atrasado. Já existiu um bug em que essas duas flags eram lidas, mas
+  // nunca calculadas em mapAgendamentoDb (sempre undefined).
+  assert.match(html, /if \(r\.IsConcluidaVisual\) return 'green';/, 'statusClassAgendamento deve continuar lendo a flag');
+  assert.match(html, /if \(r\.IsOverdue\) return 'red';/, 'statusClassAgendamento deve continuar lendo a flag');
+  const mapFnStart = html.indexOf('function mapAgendamentoDb');
+  const mapFn = html.slice(mapFnStart, html.indexOf('\nfunction ', mapFnStart + 20));
+  assert.match(mapFn, /var isConcluidaVisual = semaforo === 'verde';/, 'IsConcluidaVisual precisa ser calculado dentro de mapAgendamentoDb');
+  assert.match(mapFn, /var isOverdue = /, 'IsOverdue precisa ser calculado dentro de mapAgendamentoDb');
+  assert.match(mapFn, /IsConcluidaVisual: isConcluidaVisual,/, 'o valor calculado precisa ser retornado no objeto do agendamento');
+  assert.match(mapFn, /IsOverdue: isOverdue,/, 'o valor calculado precisa ser retornado no objeto do agendamento');
+});

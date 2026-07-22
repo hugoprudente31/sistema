@@ -940,6 +940,10 @@ function mapAgendamentoDb(r) {
   } else if (compareceu === 'sim' || compareceu === 'compareceu' || status === 'compareceu' || status === 'concluido') {
     semaforo = 'amarelo'; semaforoLabel = 'Compareceu sem compra';
   }
+  var dataEntregaOS = r.data_entrega_os ? String(r.data_entrega_os).slice(0, 10) : '';
+  var osStatusFinalizado = ['concluido', 'concluído', 'entregue', 'cancelada', 'cancelado', 'reembolso'].indexOf(statusOS) > -1;
+  var isOverdue = !!dataEntregaOS && dataEntregaOS < hojeBrasil() && !osStatusFinalizado;
+  var isConcluidaVisual = semaforo === 'verde';
   return {
     ID: r.id,
     DataCadastro: r.criado_em,
@@ -985,6 +989,8 @@ function mapAgendamentoDb(r) {
     UltimaAlteracaoEm: r.ultima_alteracao_em || r.atualizado_em || '',
     AtendimentoSemaforo: semaforo,
     AtendimentoSemaforoLabel: semaforoLabel,
+    IsConcluidaVisual: isConcluidaVisual,
+    IsOverdue: isOverdue,
     GasId: r.gas_id || ''
   };
 }
@@ -1192,6 +1198,13 @@ function normalize(v) {
 
 function normalizeKey(v) {
   return String(v == null ? '' : v).trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ');
+}
+
+// new Date().toISOString() sempre devolve a data em UTC, ignorando o fuso do
+// navegador do usuário — perto/depois das 21h em Brasília isso já é "amanhã"
+// em UTC. Use esta função sempre que precisar da data corrente no fuso local.
+function hojeBrasil() {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
 }
 
 function formatDateBR(value) {
@@ -2204,7 +2217,7 @@ function abrirModalOS(id, row) {
     '<div class="topbar"><h3 style="margin:0">Registrar / Atualizar OS</h3><button class="secondary icon-btn" onclick="document.getElementById(\'osModalBackdrop\').remove()">Fechar</button></div>' +
     '<div class="row"><div><label>Número da OS *</label><input id="osNumero" type="text" value="' + escapeHtml(row.NumeroOS||'') + '"></div>' +
     '<div><label>Status da OS</label><select id="osStatus"><option value="">Selecione</option><option>Aberta</option><option>Em produção</option><option>Recebida</option><option>Pronta</option><option>Entregue</option><option>Concluído</option><option>Cancelada</option><option>Reembolso</option></select></div></div>' +
-    '<div class="row"><div><label>Data de abertura</label><input id="osAbertura" type="date" value="' + escapeHtml(row.DataAberturaOS||new Date().toISOString().slice(0,10)) + '"></div>' +
+    '<div class="row"><div><label>Data de abertura</label><input id="osAbertura" type="date" value="' + escapeHtml(row.DataAberturaOS||hojeBrasil()) + '"></div>' +
     '<div><label>Data de entrada (lab.)</label><input id="osEntrada" type="date" value="' + escapeHtml(row.DataEntradaOS||'') + '"></div></div>' +
     '<div class="row"><div><label>Previsão de entrega</label><input id="osEntrega" type="date" value="' + escapeHtml(row.DataEntregaOS||'') + '"></div>' +
     '<div><label>Data de finalização</label><input id="osFinal" type="date" value="' + escapeHtml(row.DataFinalizacaoOS||'') + '"></div></div>' +
@@ -2417,7 +2430,7 @@ function gerarRelatorioCSV() {
   var csv = cols.join(';') + '\n' + rows.map(function(r) {
     return cols.map(function(c) { return esc(r[c]); }).join(';');
   }).join('\n');
-  downloadCsv('relatorio_tgt_' + new Date().toISOString().slice(0,10) + '.csv', csv);
+  downloadCsv('relatorio_tgt_' + hojeBrasil() + '.csv', csv);
   setMsg('msgForm', 'Relatório exportado com ' + rows.length + ' registros.', 'ok');
 }
 
@@ -2431,7 +2444,7 @@ function exportarFaturamentoCSV() {
     var csv = cols.join(';') + '\n' + rows.map(function(r) {
       return cols.map(function(c) { return esc(r[c]); }).join(';');
     }).join('\n');
-    downloadCsv('faturamento_tgt_' + new Date().toISOString().slice(0,10) + '.csv', csv);
+    downloadCsv('faturamento_tgt_' + hojeBrasil() + '.csv', csv);
     setMsg('msgForm', 'Faturamento exportado: ' + rows.length + ' registros.', 'ok');
   }).catch(function(err) {
     setMsg('msgForm', err.message || String(err), 'err');
@@ -2797,7 +2810,7 @@ function sincronizarSistema() {
 }
 
 function iniciarPeriodoExecutivo() {
-  var hoje = new Date().toISOString().slice(0,10);
+  var hoje = hojeBrasil();
   if (!byId('execInicio').value) byId('execInicio').value = hoje.slice(0,7) + '-01';
   if (!byId('execFim').value) byId('execFim').value = hoje;
   var select = byId('execLoja');

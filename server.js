@@ -121,6 +121,18 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL
 });
 
+// O Postgres gerenciado usa UTC por padrão para CURRENT_TIMESTAMP/NOW().
+// Como as colunas de data/hora são TIMESTAMP sem fuso, isso fazia qualquer
+// registro após ~21h (horário de Brasília) gravar e exibir a data do dia
+// seguinte. Fixamos o fuso da sessão do Postgres para bater com o fuso do
+// processo Node (TZ=America/Sao_Paulo), corrigindo isso em todo o sistema
+// de uma vez, sem precisar tocar em cada query que usa CURRENT_TIMESTAMP.
+pool.on("connect", (client) => {
+  client.query("SET TIME ZONE 'America/Sao_Paulo'").catch((err) => {
+    console.error("[pool] Falha ao definir fuso horário da sessão:", err.message);
+  });
+});
+
 const GAS_URL =
   process.env.GAS_URL ||
   process.env.GAS_DEPLOY_URL ||
@@ -602,6 +614,14 @@ function montarObservacaoPublica(b, req) {
 function clean(v) {
   if (v === null || v === undefined) return "";
   return String(v).trim();
+}
+
+// new Date().toISOString() sempre devolve a data em UTC, ignorando o fuso do
+// processo — perto/depois das 21h em Brasília (horário de verão à parte) isso
+// já é "amanhã" em UTC, quebrando qualquer filtro de "hoje"/período padrão.
+// Use esta função sempre que precisar da data corrente no fuso de Brasília.
+function hojeBrasil() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
 }
 
 function boolFromPt(v) {
@@ -1772,7 +1792,7 @@ app.post("/api/auth/logout", (req, res) => {
 // Aggregated PostgreSQL metrics for AdAnalyzer; no customer PII is returned.
 app.get("/api/internal/marketing-performance", validarAdAnalyzerKey, async (req, res) => {
   try {
-    const hoje = new Date().toISOString().slice(0, 10);
+    const hoje = hojeBrasil();
     const start = clean(req.query.start) || hoje.slice(0, 8) + "01";
     const end = clean(req.query.end) || hoje;
     const datePattern = /^\d{4}-\d{2}-\d{2}$/;
@@ -2403,7 +2423,7 @@ app.get("/api/agendamentos", async (req, res) => {
     let dataAte = String(q.ate || q.dataAte || "").trim();
 
     if (periodoDias > 0 && !dataDe && !dataAte) {
-      const hoje = new Date().toISOString().slice(0, 10);
+      const hoje = hojeBrasil();
       const inicio = new Date(hoje + "T12:00:00");
       inicio.setDate(inicio.getDate() - (periodoDias - 1));
       dataDe = inicio.toISOString().slice(0, 10);
@@ -4192,7 +4212,7 @@ function executiveMetricRow(row = {}) {
 
 app.get("/api/admin/dashboard-executivo", requireAdmin, async (req, res) => {
   try {
-    const hoje = new Date().toISOString().slice(0, 10);
+    const hoje = hojeBrasil();
     const inicio = clean(req.query.inicio) || `${hoje.slice(0, 7)}-01`;
     const fim = clean(req.query.fim) || hoje;
     const loja = clean(req.query.loja);
@@ -4384,7 +4404,7 @@ app.post("/api/admin/ads-performance/sync", validarAdAnalyzerKey, async (req, re
 // Leitura para os dashboards (github-sistema e fase2) — sessão de usuário OU chave do fase2
 app.get("/api/dashboard/ads-performance", requireSessionOuFase2Key, async (req, res) => {
   try {
-    const hoje = new Date().toISOString().slice(0, 10);
+    const hoje = hojeBrasil();
     const start = clean(req.query.start) || hoje.slice(0, 8) + "01";
     const end = clean(req.query.end) || hoje;
 
