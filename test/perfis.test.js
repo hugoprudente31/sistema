@@ -627,23 +627,48 @@ test('vendedor: NÃO acessa lead-time — 403', async function() {
   assert.equal(r.status, 403);
 });
 
-test('vendedor Gonzaga: PATCH status_os — 403 (campo bloqueado)', async function() {
-  const restore = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(G)] } });
+test('vendedor Gonzaga: PATCH status_os — 200 (OS liberada)', async function() {
+  const r1 = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(G)] } });
+  const r2 = withConnect(ag(G, { status_os: 'Finalizada' }));
   try {
     const r = await fetch(baseUrl + '/api/agendamentos/100', {
       method: 'PATCH', headers: H(tok('vendedor', G)),
       body: JSON.stringify({ status_os: 'Finalizada' })
     });
-    assert.equal(r.status, 403);
-  } finally { restore(); }
+    assert.equal(r.status, 200);
+  } finally { r1(); r2(); }
 });
 
-test('vendedor Gonzaga: PATCH data_abertura_os — 403 (campo bloqueado)', async function() {
-  const restore = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(G)] } });
+test('vendedor Gonzaga: PATCH data_abertura_os — 200 (OS liberada)', async function() {
+  const r1 = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(G)] } });
+  const r2 = withConnect(ag(G, { data_abertura_os: '2026-07-10' }));
   try {
     const r = await fetch(baseUrl + '/api/agendamentos/100', {
       method: 'PATCH', headers: H(tok('vendedor', G)),
       body: JSON.stringify({ data_abertura_os: '2026-07-10' })
+    });
+    assert.equal(r.status, 200);
+  } finally { r1(); r2(); }
+});
+
+test('consultor Gonzaga: PATCH numero_os — 200 (OS liberada)', async function() {
+  const r1 = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(G)] } });
+  const r2 = withConnect(ag(G, { numero_os: 'OS-GONZAGA-1' }));
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('consultor de vendas', G)),
+      body: JSON.stringify({ numero_os: 'OS-GONZAGA-1' })
+    });
+    assert.equal(r.status, 200);
+  } finally { r1(); r2(); }
+});
+
+test('vendedor Gonzaga: valor_venda continua bloqueado — 403', async function() {
+  const restore = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(G)] } });
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('vendedor', G)),
+      body: JSON.stringify({ valor_venda: 500 })
     });
     assert.equal(r.status, 403);
   } finally { restore(); }

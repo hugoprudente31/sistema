@@ -237,6 +237,10 @@ function normalizeStoreKey(value) {
   return clean(value).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim();
 }
 
+function isGonzagaSantosStore(value) {
+  return normalizeStoreKey(value).includes("gonzaga");
+}
+
 function storeSql(column, parameter = "$1") {
   return `TRANSLATE(LOWER(TRIM(COALESCE(${column},''))), 'áàâãäéèêëíìîïóòôõöúùûüç', 'aaaaaeeeeiiiiooooouuuuc') = TRANSLATE(LOWER(TRIM(${parameter})), 'áàâãäéèêëíìîïóòôõöúùûüç', 'aaaaaeeeeiiiiooooouuuuc')`;
 }
@@ -250,6 +254,7 @@ function buildPermissions(user) {
   const manager = role === "gerente de loja";
   const buyer = role === "comprador";
   const seller = ["consultor de vendas", "vendedor"].includes(role);
+  const sellerGonzaga = seller && isGonzagaSantosStore(user?.loja);
   const canViewFinance = admin || manager || buyer || Boolean(user?.can_view_finance);
 
   return {
@@ -260,7 +265,7 @@ function buildPermissions(user) {
     canManageLandingPages: superAdmin,
     canViewAll: admin || central,
     canCreateAgendamento: admin || central || manager || buyer || seller,
-    canManageOS: admin || manager || buyer,
+    canManageOS: admin || central || manager || buyer || sellerGonzaga,
     canViewFinance,
     canExportFinance: canViewFinance
   };
@@ -2535,13 +2540,16 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
       }
     }
     if (["consultor de vendas", "vendedor"].includes(roleOf(req.session))) {
-      const blocked = [
-        "numero_os", "numeroOS", "status_os", "statusOS", "valor_venda", "valorVenda", "desconto",
-        "vendedor_nome", "vendedorNome", "data_abertura_os", "dataAberturaOS", "data_entrada_os",
-        "dataEntradaOS", "data_finalizacao_os", "dataFinalizacaoOS", "data_entrega_os", "dataEntregaOS"
-      ];
+      const blocked = ["valor_venda", "valorVenda", "desconto", "vendedor_nome", "vendedorNome"];
+      if (!isGonzagaSantosStore(req.session.loja)) {
+        blocked.push(
+          "numero_os", "numeroOS", "status_os", "statusOS", "data_abertura_os", "dataAberturaOS",
+          "data_entrada_os", "dataEntradaOS", "data_finalizacao_os", "dataFinalizacaoOS",
+          "data_entrega_os", "dataEntregaOS"
+        );
+      }
       if (blocked.some((key) => Object.prototype.hasOwnProperty.call(b, key))) {
-        return res.status(403).json({ ok: false, message: "Este perfil não pode alterar OS ou valores financeiros." });
+        return res.status(403).json({ ok: false, message: "Este perfil não pode alterar estes dados de OS ou valores financeiros." });
       }
     }
     if (String(b.nome || b.nomeCompleto || "").toLowerCase().includes("teste")) {

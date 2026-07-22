@@ -2096,6 +2096,11 @@ function runAction(fn, id) {
 
 function abrirModalOS(id, row) {
   row = row || {};
+  var podeVerFinanceiroOS = !!(state.user && state.user.permissions && state.user.permissions.canViewFinance);
+  var camposFinanceirosOS = podeVerFinanceiroOS ?
+    ('<div class="row"><div><label>Valor da OS (R$)</label><input id="osValor" type="number" min="0" step="0.01" value="' + escapeHtml(String(row.ValorVenda||'')) + '"></div>' +
+    '<div><label>Desconto (R$)</label><input id="osDesconto" type="number" min="0" step="0.01" value="' + escapeHtml(String(row.Desconto||'')) + '"></div></div>' +
+    '<div><label>Vendedor responsável</label><input id="osVendedor" type="text" value="' + escapeHtml(row.VendedorNome||row.AgendadoPorNome||row.ProprietarioNome||'') + '"></div>') : '';
   var backdrop = document.createElement('div');
   backdrop.id = 'osModalBackdrop';
   backdrop.className = 'modal-backdrop';
@@ -2107,9 +2112,7 @@ function abrirModalOS(id, row) {
     '<div><label>Data de entrada (lab.)</label><input id="osEntrada" type="date" value="' + escapeHtml(row.DataEntradaOS||'') + '"></div></div>' +
     '<div class="row"><div><label>Previsão de entrega</label><input id="osEntrega" type="date" value="' + escapeHtml(row.DataEntregaOS||'') + '"></div>' +
     '<div><label>Data de finalização</label><input id="osFinal" type="date" value="' + escapeHtml(row.DataFinalizacaoOS||'') + '"></div></div>' +
-    '<div class="row"><div><label>Valor da OS (R$)</label><input id="osValor" type="number" min="0" step="0.01" value="' + escapeHtml(String(row.ValorVenda||'')) + '"></div>' +
-    '<div><label>Desconto (R$)</label><input id="osDesconto" type="number" min="0" step="0.01" value="' + escapeHtml(String(row.Desconto||'')) + '"></div></div>' +
-    '<div><label>Vendedor responsável</label><input id="osVendedor" type="text" value="' + escapeHtml(row.VendedorNome||row.AgendadoPorNome||row.ProprietarioNome||'') + '"></div>' +
+    camposFinanceirosOS +
     '<div style="margin-top:14px;display:flex;gap:10px"><button onclick="salvarOS_Modal(\'' + escapeJs(id) + '\')">Salvar OS</button><button class="secondary" onclick="document.getElementById(\'osModalBackdrop\').remove()">Cancelar</button></div>' +
     '<div id="msgOSModal" class="msg" style="margin-top:8px"></div>' +
     '</div>';
@@ -2131,11 +2134,13 @@ function salvarOS_Modal(id) {
     dataAberturaOS: (document.getElementById('osAbertura')||{}).value || '',
     dataEntradaOS: (document.getElementById('osEntrada')||{}).value || '',
     dataEntregaOS: (document.getElementById('osEntrega')||{}).value || '',
-    dataFinalizacaoOS: (document.getElementById('osFinal')||{}).value || '',
-    valorVenda: (document.getElementById('osValor')||{}).value || '',
-    desconto: (document.getElementById('osDesconto')||{}).value || '',
-    vendedorNome: (document.getElementById('osVendedor')||{}).value || ''
+    dataFinalizacaoOS: (document.getElementById('osFinal')||{}).value || ''
   };
+  if (document.getElementById('osValor')) {
+    payload.valorVenda = document.getElementById('osValor').value || '';
+    payload.desconto = (document.getElementById('osDesconto')||{}).value || '';
+    payload.vendedorNome = (document.getElementById('osVendedor')||{}).value || '';
+  }
   showLoading(true);
   apiPatch('/api/agendamentos/' + encodeURIComponent(id), payload)
     .then(function(res) {
@@ -2283,17 +2288,17 @@ function getActionHtml(r) {
     buttons += '<button class="secondary" onclick="marcarNaoCompareceu(\'' + id + '\')">Check-in Não</button>';
   }
 
-  // Editar — Admin, Central, Gerente (todos), Comprador (todos da loja), Consultor (só os seus)
+  // Corrigir — Gonzaga pode corrigir registros operacionais da própria loja.
   if (central || gerente) {
     buttons += '<button class="secondary" onclick="abrirModalEdicao(\'' + id + '\')">Editar</button>';
     options += '<option value="editar">Editar/Reagendar</option>';
-  } else if (comprador || (consultor && isOwner)) {
-    buttons += '<button class="secondary" onclick="abrirModalEdicao(\'' + id + '\')">Editar</button>';
-    options += '<option value="editar">Editar/Reagendar</option>';
+  } else if (comprador || (consultor && (isOwner || canManageOS()))) {
+    buttons += '<button class="secondary" onclick="abrirModalEdicao(\'' + id + '\')">Corrigir</button>';
+    options += '<option value="editar">Corrigir/Reagendar</option>';
   }
 
-  // OS — Admin, Central, Gerente, Comprador
-  if (['admin', 'atendimento central', 'gerente de loja', 'comprador'].indexOf(role) > -1) {
+  // OS — conforme permissão assinada pelo servidor.
+  if (canManageOS()) {
     options += '<option value="os">Registrar/Atualizar OS</option>';
   }
 
@@ -3337,12 +3342,14 @@ function executarDedupKommo() {
           var r = role();
           var clone = Object.assign({}, payload);
 
-          // Consultor/vendedor não pode preencher OS, valor, desconto
+          // Gonzaga pode preencher dados operacionais da OS; financeiro continua bloqueado.
           if (r === 'consultor de vendas' || r === 'vendedor' || r === 'outros') {
-            var bloqueados = ['NumeroOS','numeroOS','numero_os','StatusOS','statusOS','status_os',
+            var bloqueados = ['ValorVenda','valorVenda','valor_venda','Desconto','desconto','VendedorNome','vendedorNome','vendedor_nome'];
+            if (!canManageOS()) bloqueados = bloqueados.concat([
+              'NumeroOS','numeroOS','numero_os','StatusOS','statusOS','status_os',
               'DataAberturaOS','dataAberturaOS','data_abertura_os','DataEntradaOS','dataEntradaOS','data_entrada_os',
-              'DataFinalizacaoOS','dataFinalizacaoOS','data_finalizacao_os','DataEntregaOS','dataEntregaOS','data_entrega_os',
-              'ValorVenda','valorVenda','valor_venda','Desconto','desconto','VendedorNome','vendedorNome','vendedor_nome'];
+              'DataFinalizacaoOS','dataFinalizacaoOS','data_finalizacao_os','DataEntregaOS','dataEntregaOS','data_entrega_os'
+            ]);
             bloqueados.forEach(function(k) { if (Object.prototype.hasOwnProperty.call(clone, k)) delete clone[k]; });
           }
 
