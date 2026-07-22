@@ -835,6 +835,32 @@ async function initDatabase() {
     );
   `);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS metas_desempenho (
+      id BIGSERIAL PRIMARY KEY,
+      competencia DATE NOT NULL,
+      tipo_escopo TEXT NOT NULL CHECK (tipo_escopo IN ('grupo','loja','consultor')),
+      chave_escopo TEXT NOT NULL,
+      loja TEXT,
+      vendedor_consultor_id BIGINT REFERENCES vendedores_consultores(id) ON DELETE SET NULL,
+      meta_faturamento NUMERIC(14,2) DEFAULT 0,
+      meta_vendas INTEGER DEFAULT 0,
+      meta_agendamentos INTEGER DEFAULT 0,
+      meta_comparecimento NUMERIC(5,2) DEFAULT 0,
+      meta_conversao NUMERIC(5,2) DEFAULT 0,
+      meta_ticket_medio NUMERIC(14,2) DEFAULT 0,
+      limite_desconto NUMERIC(5,2) DEFAULT 0,
+      meta_prazo_os_dias INTEGER DEFAULT 0,
+      observacao TEXT,
+      ativo BOOLEAN NOT NULL DEFAULT true,
+      criado_por_email TEXT,
+      atualizado_por_email TEXT,
+      criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (competencia, chave_escopo)
+    );
+  `);
+
   await addColumnIfMissing("agendamentos", "gas_id", "TEXT UNIQUE");
   await addColumnIfMissing("agendamentos", "origem_sync", "TEXT DEFAULT 'postgres'");
   await addColumnIfMissing("agendamentos", "agendado_por_nome", "TEXT");
@@ -3007,6 +3033,125 @@ app.post("/api/logs", async (req, res) => {
   }
 });
 
+
+function normalizarMetaPayload(body = {}) {
+  const competenciaRaw = clean(body.competencia);
+  if (!/^\d{4}-\d{2}$/.test(competenciaRaw)) throw new Error("Competência inválida. Use mês e ano.");
+  const tipo = clean(body.tipo_escopo || body.tipoEscopo).toLowerCase();
+  if (!["grupo", "loja", "consultor"].includes(tipo)) throw new Error("Tipo de meta inválido.");
+  const loja = clean(body.loja);
+  const vendedorId = Number(body.vendedor_consultor_id || body.vendedorConsultorId || 0) || null;
+  if (tipo === "loja" && !loja) throw new Error("Selecione a loja da meta.");
+  if (tipo === "consultor" && (!loja || !vendedorId)) throw new Error("Selecione a loja e o consultor da meta.");
+  const chaveEscopo = tipo === "grupo"
+    ? "grupo:tgt"
+    : tipo === "loja"
+      ? `loja:${normalizeStoreKey(loja)}`
+      : `consultor:${vendedorId}`;
+  const numero = (value, max = null) => {
+    const parsed = numberFromBR(value);
+    if (parsed < 0 || (max !== null && parsed > max)) throw new Error("As metas devem usar valores válidos e não negativos.");
+    return parsed;
+  };
+  return {
+    competencia: `${competenciaRaw}-01`, tipo, chaveEscopo,
+    loja: tipo === "grupo" ? null : loja,
+    vendedorId: tipo === "consultor" ? vendedorId : null,
+    metaFaturamento: numero(body.meta_faturamento),
+    metaVendas: Math.trunc(numero(body.meta_vendas)),
+    metaAgendamentos: Math.trunc(numero(body.meta_agendamentos)),
+    metaComparecimento: numero(body.meta_comparecimento, 100),
+    metaConversao: numero(body.meta_conversao, 100),
+    metaTicketMedio: numero(body.meta_ticket_medio),
+    limiteDesconto: numero(body.limite_desconto, 100),
+    metaPrazoOsDias: Math.trunc(numero(body.meta_prazo_os_dias)),
+    observacao: clean(body.observacao) || null,
+    ativo: body.ativo !== false
+  };
+}
+
+const META_SELECT = `SELECT m.*, v.nome AS vendedor_consultor_nome
+  FROM metas_desempenho m
+  LEFT JOIN vendedores_consultores v ON v.id = m.vendedor_consultor_id`;
+
+app.get("/api/admin/metas", requireAdmin, async (req, res) => {
+  try {
+    const params = [];
+    const conditions = [];
+    if (/^\d{4}-\d{2}$/.test(clean(req.query.competencia))) {
+      params.push(`${clean(req.query.competencia)}-01`);
+      conditions.push(`m.competencia = $${params.length}::date`);
+    }
+    if (req.query.ativas !== "false") conditions.push("m.ativo = true");
+    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+    const result = await pool.query(`${META_SELECT} ${where} ORDER BY m.competencia DESC, m.tipo_escopo, m.loja, v.nome`, params);
+    res.json({ ok: true, metas: result.rows });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: "Erro ao carregar metas.", error: error.message });
+  }
+});
+
+app.post("/api/admin/metas", requireAdmin, async (req, res) => {
+  try {
+    const m = normalizarMetaPayload(req.body);
+    if (m.vendedorId) {
+      const vendedor = await pool.query(`SELECT id, loja FROM vendedores_consultores WHERE id = $1 AND ativo = true`, [m.vendedorId]);
+      if (!vendedor.rows.length || normalizeStoreKey(vendedor.rows[0].loja) !== normalizeStoreKey(m.loja)) {
+        return res.status(400).json({ ok: false, message: "Consultor não pertence à loja selecionada." });
+      }
+    }
+    const values = [m.competencia,m.tipo,m.chaveEscopo,m.loja,m.vendedorId,m.metaFaturamento,m.metaVendas,m.metaAgendamentos,m.metaComparecimento,m.metaConversao,m.metaTicketMedio,m.limiteDesconto,m.metaPrazoOsDias,m.observacao,m.ativo,req.session.email];
+    const result = await pool.query(
+      `INSERT INTO metas_desempenho (
+        competencia,tipo_escopo,chave_escopo,loja,vendedor_consultor_id,
+        meta_faturamento,meta_vendas,meta_agendamentos,meta_comparecimento,meta_conversao,
+        meta_ticket_medio,limite_desconto,meta_prazo_os_dias,observacao,ativo,
+        criado_por_email,atualizado_por_email,atualizado_em
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$16,CURRENT_TIMESTAMP)
+      ON CONFLICT (competencia, chave_escopo) DO UPDATE SET
+        loja=EXCLUDED.loja,vendedor_consultor_id=EXCLUDED.vendedor_consultor_id,
+        meta_faturamento=EXCLUDED.meta_faturamento,meta_vendas=EXCLUDED.meta_vendas,
+        meta_agendamentos=EXCLUDED.meta_agendamentos,meta_comparecimento=EXCLUDED.meta_comparecimento,
+        meta_conversao=EXCLUDED.meta_conversao,meta_ticket_medio=EXCLUDED.meta_ticket_medio,
+        limite_desconto=EXCLUDED.limite_desconto,meta_prazo_os_dias=EXCLUDED.meta_prazo_os_dias,
+        observacao=EXCLUDED.observacao,ativo=EXCLUDED.ativo,
+        atualizado_por_email=EXCLUDED.atualizado_por_email,atualizado_em=CURRENT_TIMESTAMP
+      RETURNING *`, values);
+    res.json({ ok: true, message: "Meta salva com sucesso.", meta: result.rows[0] });
+  } catch (error) {
+    res.status(400).json({ ok: false, message: error.message || "Erro ao salvar meta." });
+  }
+});
+
+app.patch("/api/admin/metas/:id", requireAdmin, async (req, res) => {
+  try {
+    const m = normalizarMetaPayload(req.body);
+    if (m.vendedorId) {
+      const vendedor = await pool.query(`SELECT id, loja FROM vendedores_consultores WHERE id = $1 AND ativo = true`, [m.vendedorId]);
+      if (!vendedor.rows.length || normalizeStoreKey(vendedor.rows[0].loja) !== normalizeStoreKey(m.loja)) {
+        return res.status(400).json({ ok: false, message: "Consultor não pertence à loja selecionada." });
+      }
+    }
+    const result = await pool.query(
+      `UPDATE metas_desempenho SET competencia=$1,tipo_escopo=$2,chave_escopo=$3,loja=$4,vendedor_consultor_id=$5,
+       meta_faturamento=$6,meta_vendas=$7,meta_agendamentos=$8,meta_comparecimento=$9,meta_conversao=$10,
+       meta_ticket_medio=$11,limite_desconto=$12,meta_prazo_os_dias=$13,observacao=$14,ativo=$15,
+       atualizado_por_email=$16,atualizado_em=CURRENT_TIMESTAMP WHERE id=$17 RETURNING *`,
+      [m.competencia,m.tipo,m.chaveEscopo,m.loja,m.vendedorId,m.metaFaturamento,m.metaVendas,m.metaAgendamentos,m.metaComparecimento,m.metaConversao,m.metaTicketMedio,m.limiteDesconto,m.metaPrazoOsDias,m.observacao,m.ativo,req.session.email,req.params.id]);
+    if (!result.rows.length) return res.status(404).json({ ok: false, message: "Meta não encontrada." });
+    res.json({ ok: true, message: "Meta atualizada.", meta: result.rows[0] });
+  } catch (error) {
+    res.status(400).json({ ok: false, message: error.message || "Erro ao atualizar meta." });
+  }
+});
+
+app.delete("/api/admin/metas/:id", requireAdmin, async (req, res) => {
+  const result = await pool.query(
+    `UPDATE metas_desempenho SET ativo=false, atualizado_por_email=$1, atualizado_em=CURRENT_TIMESTAMP WHERE id=$2 RETURNING id`,
+    [req.session.email, req.params.id]);
+  if (!result.rows.length) return res.status(404).json({ ok: false, message: "Meta não encontrada." });
+  res.json({ ok: true, message: "Meta desativada." });
+});
 
 app.get("/api/usuarios", requireSession, async (req, res) => {
   try {

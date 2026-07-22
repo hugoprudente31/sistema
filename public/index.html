@@ -594,6 +594,39 @@
       <p>Usuários, auditoria e recuperação de registros, separados da rotina operacional.</p>
     </div>
 
+    <div class="card hidden" id="cardMetasAdmin">
+      <div class="topbar" style="margin-bottom:14px;">
+        <div><h3 style="margin:0;">Registro de Metas</h3><span class="legend-mini">Exclusivo para Admin e Super Admin</span></div>
+        <button class="btn-relatorio secondary" onclick="carregarMetasAdmin()">Atualizar metas</button>
+      </div>
+      <input type="hidden" id="metaId">
+      <div class="row-4">
+        <div><label>Mês da meta *</label><input id="metaCompetencia" type="month"></div>
+        <div><label>Meta para *</label><select id="metaTipoEscopo" onchange="atualizarCamposEscopoMeta()"><option value="grupo">Grupo TGT</option><option value="loja">Loja</option><option value="consultor">Vendedor / Consultor</option></select></div>
+        <div><label>Loja</label><select id="metaLoja" onchange="carregarConsultoresMeta()"><option value="">Selecione</option></select></div>
+        <div><label>Vendedor / Consultor</label><select id="metaConsultor"><option value="">Selecione a loja</option></select></div>
+      </div>
+      <div class="row-4">
+        <div><label>Meta faturamento (valor pago)</label><input id="metaFaturamento" type="number" min="0" step="0.01"></div>
+        <div><label>Meta de vendas</label><input id="metaVendas" type="number" min="0" step="1"></div>
+        <div><label>Meta de agendamentos</label><input id="metaAgendamentos" type="number" min="0" step="1"></div>
+        <div><label>Meta ticket médio</label><input id="metaTicketMedio" type="number" min="0" step="0.01"></div>
+      </div>
+      <div class="row-4">
+        <div><label>Comparecimento (%)</label><input id="metaComparecimento" type="number" min="0" max="100" step="0.01"></div>
+        <div><label>Conversão em venda (%)</label><input id="metaConversao" type="number" min="0" max="100" step="0.01"></div>
+        <div><label>Limite médio de desconto (%)</label><input id="metaLimiteDesconto" type="number" min="0" max="100" step="0.01"></div>
+        <div><label>Prazo desejado da OS (dias)</label><input id="metaPrazoOs" type="number" min="0" step="1"></div>
+      </div>
+      <div><label>Observação</label><textarea id="metaObservacao" placeholder="Contexto, estratégia ou justificativa da meta"></textarea></div>
+      <div style="display:flex;gap:10px;margin-top:12px;">
+        <button onclick="salvarMetaAdmin()">Salvar meta</button>
+        <button class="secondary" onclick="limparFormularioMeta()">Limpar</button>
+      </div>
+      <div id="msgMeta" class="msg"></div>
+      <div class="scroll-x" style="margin-top:18px;"><table><thead><tr><th>Competência</th><th>Escopo</th><th>Faturamento</th><th>Vendas</th><th>Agendamentos</th><th>Comparecimento</th><th>Conversão</th><th>Ticket</th><th>Ações</th></tr></thead><tbody id="metasBody"></tbody></table></div>
+    </div>
+
     <div class="card hidden" id="cardUsuarios">
       <div class="topbar" style="margin-bottom:14px;">
         <h3 style="margin:0;">Gerenciar Usuários</h3>
@@ -1096,6 +1129,11 @@ function fazerLogin() {
       aplicarPermissoesTela();
       byId('passwordLogin').value = '';
       return carregarInfoBase().then(function() {
+        if (state.user && state.user.permissions && state.user.permissions.isAdmin) {
+          limparFormularioMeta();
+          return carregarMetasAdmin();
+        }
+      }).then(function() {
         return carregarAgendaEDashboard();
       }).then(function() {
         iniciarAutoRefreshPostgres();
@@ -1120,6 +1158,7 @@ function logout() {
 function aplicarPermissoesTela() {
   var p = state.user.permissions || {};
   if (p.isAdmin) byId('areaAdministracao').classList.remove('hidden');
+  if (p.isAdmin) byId('cardMetasAdmin').classList.remove('hidden');
   if (p.isSuperAdmin) byId('areaTecnica').classList.remove('hidden');
   if (p.isSuperAdmin) byId('cardDiagnostico').classList.remove('hidden');
   if (p.isAdmin) byId('btnUsuarios').classList.remove('hidden');
@@ -2606,6 +2645,120 @@ function sincronizarSistema() {
     .then(function() { toast('Dados recarregados com sucesso.', 'ok'); })
     .catch(function(err) { setMsg('msgForm', err.message || String(err), 'err'); })
     .finally(function() { showLoading(false); });
+}
+
+var metasAdminCache = [];
+
+function prepararLojasMeta() {
+  var el = byId('metaLoja');
+  if (!el) return;
+  var atual = el.value;
+  el.innerHTML = '<option value="">Selecione</option>' + (state.lojas || []).map(function(l) {
+    var nome = l.Loja || l.nome || '';
+    return '<option value="' + escapeHtml(nome) + '">' + escapeHtml(nome) + '</option>';
+  }).join('');
+  el.value = atual;
+}
+
+function atualizarCamposEscopoMeta() {
+  var tipo = byId('metaTipoEscopo').value;
+  byId('metaLoja').disabled = tipo === 'grupo';
+  byId('metaConsultor').disabled = tipo !== 'consultor';
+  if (tipo === 'grupo') { byId('metaLoja').value = ''; byId('metaConsultor').innerHTML = '<option value="">Não se aplica</option>'; }
+  if (tipo === 'loja') byId('metaConsultor').innerHTML = '<option value="">Não se aplica</option>';
+  if (tipo === 'consultor') carregarConsultoresMeta();
+}
+
+function carregarConsultoresMeta(selecionarId) {
+  var tipo = byId('metaTipoEscopo').value;
+  var loja = byId('metaLoja').value;
+  var el = byId('metaConsultor');
+  if (tipo !== 'consultor') { el.innerHTML = '<option value="">Não se aplica</option>'; return Promise.resolve(); }
+  if (!loja) { el.innerHTML = '<option value="">Selecione a loja</option>'; return Promise.resolve(); }
+  el.innerHTML = '<option value="">Carregando...</option>';
+  return apiGet('/api/vendedores-consultores?loja=' + encodeURIComponent(loja)).then(function(res) {
+    var lista = Array.isArray(res.vendedoresConsultores) ? res.vendedoresConsultores : [];
+    el.innerHTML = '<option value="">Selecione</option>' + lista.map(function(v) {
+      return '<option value="' + escapeHtml(String(v.id)) + '">' + escapeHtml(v.nome) + ' · ID ' + escapeHtml(String(v.id)) + '</option>';
+    }).join('');
+    if (selecionarId) el.value = String(selecionarId);
+  });
+}
+
+function valorMeta(id) { return Number(byId(id).value || 0); }
+
+function payloadMetaAdmin() {
+  return {
+    competencia: byId('metaCompetencia').value,
+    tipo_escopo: byId('metaTipoEscopo').value,
+    loja: byId('metaLoja').value,
+    vendedor_consultor_id: byId('metaConsultor').value || null,
+    meta_faturamento: valorMeta('metaFaturamento'),
+    meta_vendas: valorMeta('metaVendas'),
+    meta_agendamentos: valorMeta('metaAgendamentos'),
+    meta_comparecimento: valorMeta('metaComparecimento'),
+    meta_conversao: valorMeta('metaConversao'),
+    meta_ticket_medio: valorMeta('metaTicketMedio'),
+    limite_desconto: valorMeta('metaLimiteDesconto'),
+    meta_prazo_os_dias: valorMeta('metaPrazoOs'),
+    observacao: byId('metaObservacao').value.trim(), ativo: true
+  };
+}
+
+function salvarMetaAdmin() {
+  var payload = payloadMetaAdmin();
+  if (!payload.competencia) { setMsg('msgMeta', 'Informe o mês da meta.', 'err'); return; }
+  if (payload.tipo_escopo !== 'grupo' && !payload.loja) { setMsg('msgMeta', 'Selecione a loja.', 'err'); return; }
+  if (payload.tipo_escopo === 'consultor' && !payload.vendedor_consultor_id) { setMsg('msgMeta', 'Selecione o vendedor ou consultor.', 'err'); return; }
+  var id = byId('metaId').value;
+  showLoading(true);
+  (id ? apiPatch('/api/admin/metas/' + encodeURIComponent(id), payload) : apiPost('/api/admin/metas', payload))
+    .then(function(res) { if (!res.ok) throw new Error(res.message || 'Erro ao salvar meta.'); toast(res.message || 'Meta salva.', 'ok'); limparFormularioMeta(); return carregarMetasAdmin(); })
+    .catch(function(err) { setMsg('msgMeta', err.message || String(err), 'err'); })
+    .finally(function() { showLoading(false); });
+}
+
+function carregarMetasAdmin() {
+  prepararLojasMeta();
+  atualizarCamposEscopoMeta();
+  byId('metasBody').innerHTML = '<tr><td colspan="9">Carregando metas...</td></tr>';
+  return apiGet('/api/admin/metas?ativas=false').then(function(res) {
+    metasAdminCache = Array.isArray(res.metas) ? res.metas : [];
+    byId('metasBody').innerHTML = metasAdminCache.length ? metasAdminCache.map(function(m) {
+      var comp = String(m.competencia || '').slice(0,7);
+      var escopo = m.tipo_escopo === 'grupo' ? 'Grupo TGT' : (m.tipo_escopo === 'loja' ? m.loja : ((m.vendedor_consultor_nome || 'Consultor') + ' · ' + (m.loja || '')));
+      return '<tr' + (m.ativo === false ? ' style="opacity:.55"' : '') + '><td>' + escapeHtml(comp) + '</td><td>' + escapeHtml(escopo) + '</td><td>' + money(m.meta_faturamento || 0) + '</td><td>' + escapeHtml(String(m.meta_vendas || 0)) + '</td><td>' + escapeHtml(String(m.meta_agendamentos || 0)) + '</td><td>' + escapeHtml(String(m.meta_comparecimento || 0)) + '%</td><td>' + escapeHtml(String(m.meta_conversao || 0)) + '%</td><td>' + money(m.meta_ticket_medio || 0) + '</td><td><button class="secondary icon-btn" onclick="editarMetaAdmin(' + m.id + ')">Editar</button> ' + (m.ativo === false ? '' : '<button class="danger icon-btn" onclick="desativarMetaAdmin(' + m.id + ')">Desativar</button>') + '</td></tr>';
+    }).join('') : '<tr><td colspan="9">Nenhuma meta cadastrada.</td></tr>';
+  }).catch(function(err) { byId('metasBody').innerHTML = '<tr><td colspan="9" class="err">' + escapeHtml(err.message || String(err)) + '</td></tr>'; });
+}
+
+function editarMetaAdmin(id) {
+  var m = metasAdminCache.find(function(item) { return Number(item.id) === Number(id); });
+  if (!m) return;
+  prepararLojasMeta();
+  byId('metaId').value = m.id; byId('metaCompetencia').value = String(m.competencia || '').slice(0,7);
+  byId('metaTipoEscopo').value = m.tipo_escopo; byId('metaLoja').value = m.loja || '';
+  byId('metaFaturamento').value = m.meta_faturamento || 0; byId('metaVendas').value = m.meta_vendas || 0;
+  byId('metaAgendamentos').value = m.meta_agendamentos || 0; byId('metaComparecimento').value = m.meta_comparecimento || 0;
+  byId('metaConversao').value = m.meta_conversao || 0; byId('metaTicketMedio').value = m.meta_ticket_medio || 0;
+  byId('metaLimiteDesconto').value = m.limite_desconto || 0; byId('metaPrazoOs').value = m.meta_prazo_os_dias || 0;
+  byId('metaObservacao').value = m.observacao || ''; atualizarCamposEscopoMeta();
+  if (m.tipo_escopo === 'consultor') carregarConsultoresMeta(m.vendedor_consultor_id);
+  byId('cardMetasAdmin').scrollIntoView({ behavior: 'smooth' });
+}
+
+function desativarMetaAdmin(id) {
+  if (!confirm('Desativar esta meta?')) return;
+  fetch('/api/admin/metas/' + encodeURIComponent(id), { method:'DELETE', credentials:'same-origin' })
+    .then(function(r) { return r.json(); }).then(function(res) { if (!res.ok) throw new Error(res.message); toast('Meta desativada.', 'ok'); return carregarMetasAdmin(); })
+    .catch(function(err) { setMsg('msgMeta', err.message || String(err), 'err'); });
+}
+
+function limparFormularioMeta() {
+  ['metaId','metaFaturamento','metaVendas','metaAgendamentos','metaComparecimento','metaConversao','metaTicketMedio','metaLimiteDesconto','metaPrazoOs','metaObservacao'].forEach(function(id) { byId(id).value = ''; });
+  byId('metaTipoEscopo').value = 'grupo'; byId('metaLoja').value = '';
+  if (!byId('metaCompetencia').value) byId('metaCompetencia').value = new Date().toISOString().slice(0,7);
+  atualizarCamposEscopoMeta(); setMsg('msgMeta', '', '');
 }
 
 function carregarUsuarios() {

@@ -14,6 +14,30 @@ CREATE TABLE IF NOT EXISTS vendedores_consultores (
   UNIQUE (nome_chave, loja_chave)
 );
 
+CREATE TABLE IF NOT EXISTS metas_desempenho (
+  id BIGSERIAL PRIMARY KEY,
+  competencia DATE NOT NULL,
+  tipo_escopo TEXT NOT NULL CHECK (tipo_escopo IN ('grupo','loja','consultor')),
+  chave_escopo TEXT NOT NULL,
+  loja TEXT,
+  vendedor_consultor_id BIGINT REFERENCES vendedores_consultores(id) ON DELETE SET NULL,
+  meta_faturamento NUMERIC(14,2) DEFAULT 0,
+  meta_vendas INTEGER DEFAULT 0,
+  meta_agendamentos INTEGER DEFAULT 0,
+  meta_comparecimento NUMERIC(5,2) DEFAULT 0,
+  meta_conversao NUMERIC(5,2) DEFAULT 0,
+  meta_ticket_medio NUMERIC(14,2) DEFAULT 0,
+  limite_desconto NUMERIC(5,2) DEFAULT 0,
+  meta_prazo_os_dias INTEGER DEFAULT 0,
+  observacao TEXT,
+  ativo BOOLEAN NOT NULL DEFAULT true,
+  criado_por_email TEXT,
+  atualizado_por_email TEXT,
+  criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (competencia, chave_escopo)
+);
+
 ALTER TABLE agendamentos
   ADD COLUMN IF NOT EXISTS agendado_por_nome TEXT,
   ADD COLUMN IF NOT EXISTS agendado_por_email TEXT,
