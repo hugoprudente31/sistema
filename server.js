@@ -4207,16 +4207,17 @@ app.get("/api/admin/dashboard-executivo", requireAdmin, async (req, res) => {
       ELSE COALESCE(NULLIF(a.loja,''),'Sem loja') END`;
     const executiveChannelSql = `CASE
       WHEN LOWER(COALESCE(a.agendado_por_nome,'')) LIKE '%maria cristina%' THEN 'Atendimento Central'
-      WHEN LOWER(COALESCE(a.origem_sync,'')) = 'kommo_bot'
-        OR a.kommo_lead_id IS NOT NULL
-        OR LOWER(COALESCE(a.access_tags,'')) LIKE '%origem:kommo%' THEN 'Kommo'
       WHEN LOWER(COALESCE(a.origem_sync,'')) = 'landing_page'
         OR LOWER(COALESCE(a.origem,'')) LIKE '%landing%'
+        OR LOWER(COALESCE(a.origem,'')) LIKE '%site%'
         OR LOWER(COALESCE(a.access_tags,'')) LIKE '%origem:site%' THEN 'Landing Page'
       WHEN LOWER(COALESCE(a.origem,'')) LIKE '%whatsapp%'
         OR LOWER(COALESCE(a.access_tags,'')) LIKE '%origem:whatsapp%' THEN 'WhatsApp'
       WHEN LOWER(COALESCE(a.origem,'')) SIMILAR TO '%(instagram|facebook|rede social|meta)%'
         OR LOWER(COALESCE(a.access_tags,'')) SIMILAR TO '%(origem:instagram|origem:facebook|origem:trafego-pago)%' THEN 'Redes sociais'
+      WHEN LOWER(COALESCE(a.origem_sync,'')) = 'kommo_bot'
+        OR a.kommo_lead_id IS NOT NULL
+        OR LOWER(COALESCE(a.access_tags,'')) LIKE '%origem:kommo%' THEN 'Kommo'
       WHEN NULLIF(TRIM(a.origem),'') IS NULL THEN 'Não informada'
       ELSE a.origem END`;
 

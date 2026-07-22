@@ -57,6 +57,9 @@ test('dashboard normaliza Atendimento Central, canais de marketing e a loja Targ
   const source = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
   assert.match(source, /maria cristina[\s\S]*Atendimento Central/i);
   for (const canal of ['Kommo', 'Landing Page', 'WhatsApp', 'Redes sociais']) assert.match(source, new RegExp(canal));
+  const channelRule = source.slice(source.indexOf('const executiveChannelSql'), source.indexOf('const [resumoResult'));
+  assert.ok(channelRule.indexOf("THEN 'WhatsApp'") < channelRule.indexOf("THEN 'Kommo'"), 'canal original deve ter prioridade sobre vínculo Kommo');
+  assert.ok(channelRule.indexOf("THEN 'Landing Page'") < channelRule.indexOf("THEN 'Kommo'"), 'landing page deve ter prioridade sobre vínculo Kommo');
   assert.match(source, /LIKE '%target%' THEN 'Óticas Target'/);
   assert.match(source, /Clientes dos canais rastreados/);
 });
