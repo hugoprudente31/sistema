@@ -1165,7 +1165,12 @@ async function initDatabase() {
       END IF;
       responsavel_registro := COALESCE(NULLIF(NEW.agendado_por_nome, ''), NULLIF(j->>'responsavel', ''), NULLIF(j->>'proprietario_nome', ''), NULLIF(j->>'criado_por_nome', ''), NULLIF(NEW.ultima_alteracao_por_nome, ''), 'Sistema/Landing');
       NEW.agendado_por_nome := COALESCE(NULLIF(NEW.agendado_por_nome, ''), responsavel_registro);
-      NEW.ultima_alteracao_por_nome := responsavel_registro;
+      -- So preenche ultima_alteracao_por_nome quando ainda esta vazio (ex: INSERT
+      -- vindo do bot/landing page sem essa info). Nao pode sobrescrever o valor que
+      -- a aplicacao ja gravou nesta mesma UPDATE com quem REALMENTE fez a alteracao
+      -- agora -- senao esse campo fica preso para sempre no nome de quem criou o
+      -- registro (agendado_por_nome e "grudento"), mesmo quando outra pessoa edita.
+      NEW.ultima_alteracao_por_nome := COALESCE(NULLIF(NEW.ultima_alteracao_por_nome, ''), responsavel_registro);
       NEW.ultima_alteracao_em := NOW();
       IF COALESCE(NEW.valor_venda, 0) > 0
         AND LOWER(COALESCE(NEW.status, '')) <> 'cancelado'

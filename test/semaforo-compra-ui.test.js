@@ -41,3 +41,18 @@ test('IsConcluidaVisual e IsOverdue são calculados (não ficam undefined) e rea
   assert.match(mapFn, /IsConcluidaVisual: isConcluidaVisual,/, 'o valor calculado precisa ser retornado no objeto do agendamento');
   assert.match(mapFn, /IsOverdue: isOverdue,/, 'o valor calculado precisa ser retornado no objeto do agendamento');
 });
+
+test('gatilho validar_agendamento_tgt não sobrescreve ultima_alteracao_por_nome de quem realmente editou agora', function() {
+  // Bug real encontrado em produção: o gatilho preenchia ultima_alteracao_por_nome
+  // incondicionalmente com agendado_por_nome (o criador original, "grudento"),
+  // apagando o nome de quem de fato fez a alteração atual (ex: a aplicação já
+  // tinha gravado corretamente o nome da optometrista, e o gatilho sobrescrevia
+  // de volta para o nome de quem criou o agendamento).
+  const fnStart = server.indexOf('CREATE OR REPLACE FUNCTION validar_agendamento_tgt()');
+  const fnBody = server.slice(fnStart, server.indexOf('$$ LANGUAGE plpgsql', fnStart));
+  assert.match(
+    fnBody,
+    /NEW\.ultima_alteracao_por_nome := COALESCE\(NULLIF\(NEW\.ultima_alteracao_por_nome, ''\), responsavel_registro\);/,
+    'só deve preencher ultima_alteracao_por_nome quando ainda estiver vazio, nunca sobrescrever o que a aplicação já gravou'
+  );
+});
