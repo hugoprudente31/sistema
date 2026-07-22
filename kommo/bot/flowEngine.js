@@ -8,6 +8,24 @@ const scheduling = require("../scheduling");
 
 const pendingResponses = new Map();
 
+// Fila por lead: garante que mensagens do mesmo lead são processadas em sequência,
+// nunca em paralelo. Evita race condition quando o Kommo dispara 2 Salesbot callbacks
+// quasi-simultâneos para o mesmo lead.
+const leadQueue = new Map();
+
+function enqueueForLead(leadId, fn) {
+  const key = String(leadId);
+  const prev = leadQueue.get(key) || Promise.resolve();
+  const next = prev.then(fn).catch((e) => {
+    console.error(`[BOT][${key}] Erro na fila:`, e.message);
+  });
+  leadQueue.set(key, next);
+  next.finally(() => {
+    if (leadQueue.get(key) === next) leadQueue.delete(key);
+  });
+  return next;
+}
+
 const PIPELINE_TO_PREFIX = {
   "9511355": "tgt",
   "9907903": "gon",
@@ -131,7 +149,9 @@ function prefixFromPipeline(pipelineId) {
 }
 
 function parseOption(text) {
-  const match = clean(text).match(/^(\d+)/);
+  // Exige que a mensagem seja APENAS o número (sem texto junto).
+  // Evita que "2 óculos quero orçamento" dispare a opção 2.
+  const match = clean(text).match(/^(\d+)$/);
   return match ? match[1] : "";
 }
 
@@ -254,12 +274,28 @@ async function handleBoasVindas(leadId, state, talkId, context) {
 
   if (!nome) {
     try {
+      // Tentativa 1: GET /leads/{id}?with=contacts → pega contactId → GET /contacts/{id}
       const lead = await kommo.getLead(leadId);
-      nome = lead?._embedded?.contacts?.[0]?.name || lead?.name || "";
-    } catch {
+      const contactId = lead?._embedded?.contacts?.[0]?.id;
+      if (contactId) {
+        const contact = await kommo.getContact(contactId);
+        nome = sanitizeNome(contact?.name || "");
+        console.log(`[BOT][${leadId}] Nome via getContact(${contactId}): "${nome}"`);
+      }
+      // Tentativa 2 (fallback): GET /contacts?filter[leads_id][]={leadId}
+      if (!nome) {
+        const contacts = await kommo.getContactsByLead(leadId);
+        nome = sanitizeNome(contacts[0]?.name || "");
+        console.log(`[BOT][${leadId}] Nome via getContactsByLead: "${nome}"`);
+      }
+    } catch (e) {
+      console.error(`[BOT][${leadId}] Erro ao buscar nome do contato:`, e.message);
       nome = "";
     }
   }
+
+  // Guarda apenas o primeiro nome
+  if (nome) nome = nome.trim().split(/\s+/)[0];
 
   SM.setState(leadId, {
     nome,
@@ -326,22 +362,20 @@ async function handleMenuPrincipal(leadId, state, text, talkId) {
 
   if (op === "3") {
     SM.resetInvalidCount(leadId);
-    SM.setState(leadId, { etapa: "orcamento_aguardando_receita", ultimo_topico: "Orçamento" }, { persist: true });
+    SM.setState(leadId, { etapa: "orcamento_menu", ultimo_topico: "Orçamento" }, { persist: true });
     await applyFlowLabel(leadId, loja.prefix, "principal", "redirecionado");
     await addFlowLabel(leadId, loja.prefix, "orc-novo");
-    await applyFlowLabel(leadId, loja.prefix, "orc", "orc-aguardando-receita");
     await moveStage(leadId, "orcamento", loja.prefix);
-    await send(talkId, leadId, MSG.orcamento());
+    await send(talkId, leadId, MSG.orcamentoMenu());
     return;
   }
 
   if (op === "4") {
     SM.resetInvalidCount(leadId);
-    SM.setState(leadId, { etapa: "rh_aguardando_curriculo", ultimo_topico: "Trabalhe Conosco" }, { persist: true });
+    SM.setState(leadId, { etapa: "rh_menu", ultimo_topico: "Trabalhe Conosco" }, { persist: true });
     await applyFlowLabel(leadId, loja.prefix, "principal", "redirecionado");
     await addFlowLabel(leadId, loja.prefix, "rh-novo");
-    await applyFlowLabel(leadId, loja.prefix, "rh", "rh-aguardando-curriculo");
-    await send(talkId, leadId, MSG.trabalheConosco());
+    await send(talkId, leadId, MSG.trabalheConoscoMenu());
     return;
   }
 
@@ -460,12 +494,114 @@ async function handleOrcamentoReceita(leadId, state, text, talkId) {
   await transferToHuman(leadId, { ...state, ultimo_topico: `Orçamento: ${clean(text).slice(0, 120)}` }, talkId, "Orçamento - receita recebida");
 }
 
+async function handleOrcamentoMenu(leadId, state, text, talkId) {
+  const loja = lojaByPrefix(state.loja_prefix);
+  const op = parseOption(text);
+
+  if (!op) {
+    await send(talkId, leadId, MSG.orcamentoMenu());
+    return;
+  }
+
+  if (op === "1") {
+    SM.resetInvalidCount(leadId);
+    SM.setState(leadId, { etapa: "orcamento_aguardando_receita", ultimo_topico: "Orçamento - Receita" }, { persist: true });
+    await applyFlowLabel(leadId, loja.prefix, "orc", "orc-aguardando-receita");
+    await send(talkId, leadId, MSG.orcamentoReceita());
+    return;
+  }
+
+  if (op === "2") {
+    SM.resetInvalidCount(leadId);
+    await applyFlowLabel(leadId, loja.prefix, "orc", "orc-em-atendimento");
+    await transferToHuman(leadId, { ...state, ultimo_topico: "Orçamento - Armação" }, talkId, "Orçamento - quer armação");
+    return;
+  }
+
+  if (op === "3") {
+    SM.resetInvalidCount(leadId);
+    SM.setState(leadId, { etapa: "orcamento_lente", ultimo_topico: "Orçamento - Lente" }, { persist: true });
+    await send(talkId, leadId, MSG.orcamentoLente());
+    return;
+  }
+
+  if (op === "4") {
+    SM.resetInvalidCount(leadId);
+    await applyFlowLabel(leadId, loja.prefix, "orc", "orc-em-atendimento");
+    await transferToHuman(leadId, { ...state, ultimo_topico: "Orçamento - Especialista" }, talkId, "Orçamento - falar com especialista");
+    return;
+  }
+
+  const count = SM.incrementInvalidCount(leadId);
+  if (count >= 2) return transferToHuman(leadId, state, talkId, "2 respostas inválidas em orçamento");
+  await send(talkId, leadId, MSG.respostaInvalida());
+  await send(talkId, leadId, MSG.orcamentoMenu());
+}
+
+async function handleOrcamentoLente(leadId, state, text, talkId) {
+  const loja = lojaByPrefix(state.loja_prefix);
+  await applyFlowLabel(leadId, loja.prefix, "orc", "orc-em-atendimento");
+  await transferToHuman(
+    leadId,
+    { ...state, ultimo_topico: `Orçamento - Lente: ${clean(text).slice(0, 100)}` },
+    talkId,
+    "Orçamento - tipo de lente especificado"
+  );
+}
+
 async function handleRhCurriculo(leadId, state, text, talkId) {
   const loja = lojaByPrefix(state.loja_prefix);
   SM.setState(leadId, { etapa: "rh_em_analise" }, { persist: true });
   await addFlowLabel(leadId, loja.prefix, "rh-curriculo-recebido");
   await applyFlowLabel(leadId, loja.prefix, "rh", "rh-em-analise");
   await transferToHuman(leadId, { ...state, ultimo_topico: `RH: ${clean(text).slice(0, 120)}` }, talkId, "Trabalhe Conosco - currículo recebido");
+}
+
+async function handleRhMenu(leadId, state, text, talkId) {
+  const loja = lojaByPrefix(state.loja_prefix);
+  const op = parseOption(text);
+
+  if (!op) {
+    await send(talkId, leadId, MSG.trabalheConoscoMenu());
+    return;
+  }
+
+  if (op === "1") {
+    SM.resetInvalidCount(leadId);
+    SM.setState(leadId, { etapa: "rh_aguardando_curriculo", ultimo_topico: "RH - Currículo" }, { persist: true });
+    await applyFlowLabel(leadId, loja.prefix, "rh", "rh-aguardando-curriculo");
+    await send(talkId, leadId, MSG.trabalheConosco());
+    return;
+  }
+
+  if (op === "2") {
+    SM.resetInvalidCount(leadId);
+    SM.setState(leadId, { etapa: "rh_aguardando_info", ultimo_topico: "RH - Experiência" }, { persist: true });
+    await send(talkId, leadId, MSG.trabalheConoscoExperiencia());
+    return;
+  }
+
+  if (op === "3") {
+    SM.resetInvalidCount(leadId);
+    await transferToHuman(leadId, { ...state, ultimo_topico: "Trabalhe Conosco - Atendimento" }, talkId, "Trabalhe Conosco - falar com atendimento");
+    return;
+  }
+
+  const count = SM.incrementInvalidCount(leadId);
+  if (count >= 2) return transferToHuman(leadId, state, talkId, "2 respostas inválidas em trabalhe conosco");
+  await send(talkId, leadId, MSG.respostaInvalida());
+  await send(talkId, leadId, MSG.trabalheConoscoMenu());
+}
+
+async function handleRhExperiencia(leadId, state, text, talkId) {
+  const loja = lojaByPrefix(state.loja_prefix);
+  await applyFlowLabel(leadId, loja.prefix, "rh", "rh-em-analise");
+  await transferToHuman(
+    leadId,
+    { ...state, ultimo_topico: `RH - Experiência: ${clean(text).slice(0, 100)}` },
+    talkId,
+    "Trabalhe Conosco - experiência informada"
+  );
 }
 
 async function handlePosVendaMenu(leadId, state, text, talkId) {
@@ -478,18 +614,16 @@ async function handlePosVendaMenu(leadId, state, text, talkId) {
   }
 
   const options = {
-    "1": { label: "pv-nota-fiscal", topic: "Nota Fiscal", message: MSG.posVendaNotaFiscal() },
-    "2": { label: "pv-garantia", topic: "Garantia", message: MSG.posVendaGarantia() },
-    "3": { label: "pv-reembolso", topic: "Reembolso", message: MSG.posVendaReembolso() },
-    "4": { label: "pv-especialista", topic: "Especialista", message: MSG.posVendaEspecialista() },
+    "1": { label: "pv-garantia",       topic: "Garantia" },
+    "2": { label: "pv-ajuste-armacao", topic: "Ajuste de Armação" },
+    "3": { label: "pv-problema-lente", topic: "Problema com Lente" },
+    "4": { label: "pv-especialista",   topic: "Atendimento" },
   };
 
   if (options[op]) {
     SM.resetInvalidCount(leadId);
     const selected = options[op];
-    SM.setState(leadId, { etapa: "transferido", ultimo_topico: `Pós Venda - ${selected.topic}` }, { persist: true });
     await applyFlowLabel(leadId, loja.prefix, "pv", selected.label);
-    await send(talkId, leadId, selected.message);
     await transferToHuman(leadId, { ...state, ultimo_topico: `Pós Venda - ${selected.topic}` }, talkId, `Pós Venda - ${selected.topic}`);
     return;
   }
@@ -615,10 +749,9 @@ async function handleRecuperacaoMenu(leadId, state, text, talkId) {
 
   if (op === "2") {
     SM.resetInvalidCount(leadId);
-    SM.setState(leadId, { etapa: "orcamento_aguardando_receita", ultimo_topico: "Orçamento" }, { persist: true });
-    await applyFlowLabel(leadId, loja.prefix, "orc", "orc-aguardando-receita");
+    SM.setState(leadId, { etapa: "orcamento_menu", ultimo_topico: "Orçamento" }, { persist: true });
     await moveStage(leadId, "orcamento", loja.prefix);
-    await send(talkId, leadId, MSG.orcamento());
+    await send(talkId, leadId, MSG.orcamentoMenu());
     return;
   }
 
@@ -641,8 +774,12 @@ async function route(leadId, state, text, talkId, context) {
   if (state.etapa === "info_menu") return handleInfoMenu(leadId, state, text, talkId);
   if (state.etapa === "info_aguarda_sim_nao") return handleInfoSimNao(leadId, state, text, talkId);
   if (state.etapa === "tv_aguardando_confirm") return handleTesteVisao(leadId, state, text, talkId);
+  if (state.etapa === "orcamento_menu") return handleOrcamentoMenu(leadId, state, text, talkId);
   if (state.etapa === "orcamento_aguardando_receita") return handleOrcamentoReceita(leadId, state, text, talkId);
+  if (state.etapa === "orcamento_lente") return handleOrcamentoLente(leadId, state, text, talkId);
+  if (state.etapa === "rh_menu") return handleRhMenu(leadId, state, text, talkId);
   if (state.etapa === "rh_aguardando_curriculo") return handleRhCurriculo(leadId, state, text, talkId);
+  if (state.etapa === "rh_aguardando_info") return handleRhExperiencia(leadId, state, text, talkId);
   if (state.etapa === "pv_menu") return handlePosVendaMenu(leadId, state, text, talkId);
   if (state.etapa === "lembrete_resposta") return handleLembreteResposta(leadId, state, text, talkId);
   if (state.etapa === "reagendamento_data") return handleReagendamentoData(leadId, state, text);
@@ -653,7 +790,7 @@ async function route(leadId, state, text, talkId, context) {
   await send(talkId, leadId, MSG.menuPrincipal(lojaByPrefix(state.loja_prefix)));
 }
 
-async function processMessage({ leadId, talkId, chatId, text, authorType, loja, pipeline_id, pipelineId, contact_name }) {
+async function _processMessage({ leadId, talkId, chatId, text, authorType, loja, pipeline_id, pipelineId, contact_name }) {
   if (process.env.BOT_ENABLED === "false") return;
   if (authorType === "user" || authorType === "bot") return;
 
@@ -671,7 +808,20 @@ async function processMessage({ leadId, talkId, chatId, text, authorType, loja, 
 
   await ensureStoreState(leadId, state, { loja, pipeline_id, pipelineId });
 
-  // Bot bloqueado em atendimento humano — só reativa via nova conversa (add_talk)
+  // Reativação pelo Salesbot: o add_talk e o Salesbot chegam quasi-simultâneos.
+  // Se o Salesbot chegar antes do add_talk processar, o estado ainda é "transferido".
+  // Neste caso reativamos aqui mesmo, sem depender da ordem dos eventos do Kommo.
+  if (state.etapa === "transferido" && state.transferred_at) {
+    const elapsed = Date.now() - state.transferred_at;
+    if (elapsed >= 60 * 1000) {
+      console.log(`[BOT][${leadId}] ♻️ Cliente voltou após ${Math.round(elapsed / 1000)}s — reativando pelo Salesbot`);
+      SM.setState(leadId, { etapa: "boas_vindas", bot_active: false, transferred_at: null, last_human_at: null }, { persist: true });
+      state.etapa = "boas_vindas";
+      state.bot_active = false;
+    }
+  }
+
+  // Bot bloqueado em atendimento humano — só reativa via nova conversa (add_talk ou Salesbot acima)
   if (!SM.shouldBotActivate(state)) return;
 
   if (!state.bot_active) {
@@ -680,6 +830,10 @@ async function processMessage({ leadId, talkId, chatId, text, authorType, loja, 
   }
 
   await route(leadId, state, clean(text), state.talk_id || talkId, { loja, pipeline_id, pipelineId, contact_name });
+}
+
+function processMessage(params) {
+  return enqueueForLead(params.leadId, () => _processMessage(params));
 }
 
 async function processNewLead(leadId, context = {}) {

@@ -205,8 +205,20 @@ function roleOf(session) {
   return clean(session?.perfil).toLowerCase();
 }
 
+// Identidade reservada do criador. A senha nunca deve existir no código.
+const HUGO_SUPER_ADMIN_EMAIL = "hugoprudente.marketing@gmail.com";
+
+function isHugoAccount(user) {
+  return clean(user?.email).toLowerCase() === HUGO_SUPER_ADMIN_EMAIL;
+}
+
+function isSuperAdmin(session) {
+  return isHugoAccount(session) && roleOf(session) === "super_admin";
+}
+
 function hasRole(session, roles) {
-  return roles.includes(roleOf(session));
+  const role = roleOf(session);
+  return roles.includes(role) || (isSuperAdmin(session) && roles.includes("admin"));
 }
 
 function isAdmin(session) {
@@ -230,8 +242,10 @@ function storeSql(column, parameter = "$1") {
 }
 
 function buildPermissions(user) {
-  const role = clean(user?.cargo || user?.perfil).toLowerCase();
-  const admin = role === "admin";
+  const storedRole = clean(user?.cargo || user?.perfil).toLowerCase();
+  const superAdmin = isHugoAccount(user);
+  const role = superAdmin ? "super_admin" : storedRole;
+  const admin = role === "admin" || superAdmin;
   const central = role === "atendimento central";
   const manager = role === "gerente de loja";
   const buyer = role === "comprador";
@@ -239,7 +253,11 @@ function buildPermissions(user) {
   const canViewFinance = admin || manager || buyer || Boolean(user?.can_view_finance);
 
   return {
+    isSuperAdmin: superAdmin,
     isAdmin: admin,
+    canManageSystem: superAdmin,
+    canManageKommo: superAdmin,
+    canManageLandingPages: superAdmin,
     canViewAll: admin || central,
     canCreateAgendamento: admin || central || manager || buyer || seller,
     canManageOS: admin || manager || buyer,
@@ -250,12 +268,13 @@ function buildPermissions(user) {
 
 function publicUser(user) {
   const permissions = buildPermissions(user);
+  const effectiveRole = permissions.isSuperAdmin ? "super_admin" : user.cargo;
   return {
     id: user.id,
     nome: user.nome,
     email: user.email,
-    perfil: user.cargo,
-    cargo: user.cargo,
+    perfil: effectiveRole,
+    cargo: effectiveRole,
     loja: user.loja || "",
     accessTags: clean(user.access_tags).split(/[;,|]/).map((tag) => tag.trim()).filter(Boolean),
     permissions,
@@ -266,6 +285,13 @@ function publicUser(user) {
 function requireAdmin(req, res, next) {
   if (!isAdmin(req.session)) {
     return res.status(403).json({ ok: false, message: "Acesso restrito ao administrador." });
+  }
+  next();
+}
+
+function requireSuperAdmin(req, res, next) {
+  if (!isSuperAdmin(req.session)) {
+    return res.status(403).json({ ok: false, message: "Acesso exclusivo do criador do sistema." });
   }
   next();
 }
@@ -811,18 +837,164 @@ async function initDatabase() {
     );
   `);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS vendedores_consultores (
+      id BIGSERIAL PRIMARY KEY,
+      nome TEXT NOT NULL,
+      nome_chave TEXT NOT NULL,
+      loja TEXT NOT NULL DEFAULT '',
+      loja_chave TEXT NOT NULL DEFAULT '',
+      ativo BOOLEAN NOT NULL DEFAULT true,
+      criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (nome_chave, loja_chave)
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS metas_desempenho (
+      id BIGSERIAL PRIMARY KEY,
+      competencia DATE NOT NULL,
+      tipo_escopo TEXT NOT NULL CHECK (tipo_escopo IN ('grupo','loja','consultor')),
+      chave_escopo TEXT NOT NULL,
+      loja TEXT,
+      vendedor_consultor_id BIGINT REFERENCES vendedores_consultores(id) ON DELETE SET NULL,
+      meta_faturamento NUMERIC(14,2) DEFAULT 0,
+      meta_vendas INTEGER DEFAULT 0,
+      meta_agendamentos INTEGER DEFAULT 0,
+      meta_comparecimento NUMERIC(5,2) DEFAULT 0,
+      meta_conversao NUMERIC(5,2) DEFAULT 0,
+      meta_ticket_medio NUMERIC(14,2) DEFAULT 0,
+      limite_desconto NUMERIC(5,2) DEFAULT 0,
+      meta_prazo_os_dias INTEGER DEFAULT 0,
+      observacao TEXT,
+      ativo BOOLEAN NOT NULL DEFAULT true,
+      criado_por_email TEXT,
+      atualizado_por_email TEXT,
+      criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (competencia, chave_escopo)
+    );
+  `);
+
   await addColumnIfMissing("agendamentos", "gas_id", "TEXT UNIQUE");
   await addColumnIfMissing("agendamentos", "origem_sync", "TEXT DEFAULT 'postgres'");
   await addColumnIfMissing("agendamentos", "agendado_por_nome", "TEXT");
   await addColumnIfMissing("agendamentos", "agendado_por_email", "TEXT");
   await addColumnIfMissing("agendamentos", "vendedor_atendeu_nome", "TEXT");
   await addColumnIfMissing("agendamentos", "vendedor_atendeu_email", "TEXT");
+  await addColumnIfMissing("agendamentos", "vendedor_consultor_id", "BIGINT REFERENCES vendedores_consultores(id) ON DELETE SET NULL");
   await addColumnIfMissing("agendamentos", "ultima_alteracao_por_nome", "TEXT");
   await addColumnIfMissing("agendamentos", "ultima_alteracao_por_email", "TEXT");
   await addColumnIfMissing("agendamentos", "ultima_alteracao_em", "TIMESTAMP");
   await addColumnIfMissing("agendamentos", "excluido_em", "TIMESTAMP");
   await addColumnIfMissing("agendamentos", "patologia", "TEXT DEFAULT 'Pendente'");
   await addColumnIfMissing("agendamentos", "resultado_optometrista", "TEXT DEFAULT 'Pendente'");
+  await addColumnIfMissing("agendamentos", "atendimento_semaforo", "TEXT DEFAULT ''");
+  await addColumnIfMissing("agendamentos", "atendimento_semaforo_label", "TEXT DEFAULT ''");
+
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION normalizar_identidade_comercial_tgt(valor TEXT)
+    RETURNS TEXT AS $$
+      SELECT REGEXP_REPLACE(
+        TRANSLATE(LOWER(TRIM(COALESCE(valor,''))),
+          'áàâãäéèêëíìîïóòôõöúùûüç',
+          'aaaaaeeeeiiiiooooouuuuc'),
+        '\\s+', ' ', 'g');
+    $$ LANGUAGE sql IMMUTABLE;
+
+    CREATE OR REPLACE FUNCTION vincular_vendedor_consultor_tgt()
+    RETURNS trigger AS $$
+    DECLARE
+      nome_comercial TEXT := COALESCE(
+        NULLIF(TRIM(NEW.vendedor_atendeu_nome), ''),
+        NULLIF(TRIM(NEW.vendedor_nome), ''),
+        NULLIF(TRIM(NEW.consultor_responsavel), '')
+      );
+      identidade_id BIGINT;
+    BEGIN
+      IF nome_comercial IS NULL THEN RETURN NEW; END IF;
+
+      INSERT INTO vendedores_consultores (nome, nome_chave, loja, loja_chave, ativo, atualizado_em)
+      VALUES (
+        nome_comercial,
+        normalizar_identidade_comercial_tgt(nome_comercial),
+        COALESCE(NEW.loja, ''),
+        normalizar_identidade_comercial_tgt(NEW.loja),
+        true,
+        CURRENT_TIMESTAMP
+      )
+      ON CONFLICT (nome_chave, loja_chave)
+      DO UPDATE SET ativo = true, atualizado_em = CURRENT_TIMESTAMP
+      RETURNING id INTO identidade_id;
+
+      NEW.vendedor_consultor_id := identidade_id;
+      NEW.vendedor_atendeu_nome := COALESCE(NULLIF(NEW.vendedor_atendeu_nome, ''), nome_comercial);
+      NEW.vendedor_nome := COALESCE(NULLIF(NEW.vendedor_nome, ''), nome_comercial);
+      NEW.consultor_responsavel := COALESCE(NULLIF(NEW.consultor_responsavel, ''), nome_comercial);
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS trg_vincular_vendedor_consultor_tgt ON agendamentos;
+    CREATE TRIGGER trg_vincular_vendedor_consultor_tgt
+    BEFORE INSERT OR UPDATE OF vendedor_atendeu_nome, vendedor_nome, consultor_responsavel, loja
+    ON agendamentos
+    FOR EACH ROW EXECUTE FUNCTION vincular_vendedor_consultor_tgt();
+
+    UPDATE agendamentos
+    SET vendedor_atendeu_nome = COALESCE(
+      NULLIF(vendedor_atendeu_nome, ''),
+      NULLIF(vendedor_nome, ''),
+      NULLIF(consultor_responsavel, '')
+    )
+    WHERE vendedor_consultor_id IS NULL
+      AND COALESCE(NULLIF(vendedor_atendeu_nome, ''), NULLIF(vendedor_nome, ''), NULLIF(consultor_responsavel, '')) IS NOT NULL;
+  `);
+
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION atualizar_atendimento_semaforo_tgt()
+    RETURNS trigger AS $$
+    DECLARE
+      comp TEXT := replace(lower(coalesce(NEW.compareceu, '')), 'ã', 'a');
+      status_agenda TEXT := replace(lower(coalesce(NEW.status, '')), 'ã', 'a');
+      venda TEXT := replace(lower(coalesce(NEW.venda_gerada, '')), 'ã', 'a');
+      resultado TEXT := replace(lower(coalesce(NEW.resultado_optometrista, '')), 'ã', 'a');
+      pat TEXT := replace(lower(coalesce(NEW.patologia, '')), 'ã', 'a');
+      valor NUMERIC := coalesce(NEW.valor_venda, 0);
+    BEGIN
+      IF resultado = 'patologia' OR pat = 'sim' THEN
+        NEW.atendimento_semaforo := 'azul';
+        NEW.atendimento_semaforo_label := 'Patologia';
+      ELSIF status_agenda IN ('nao compareceu', 'não compareceu') OR comp IN ('nao', 'não', 'nao compareceu', 'não compareceu') THEN
+        NEW.atendimento_semaforo := 'vermelho';
+        NEW.atendimento_semaforo_label := 'Não compareceu';
+      ELSIF comp IN ('sim', 'compareceu') OR status_agenda IN ('compareceu', 'concluido', 'concluído') THEN
+        IF venda = 'sim' OR valor > 0 THEN
+          NEW.atendimento_semaforo := 'verde';
+          NEW.atendimento_semaforo_label := 'Compareceu e comprou';
+        ELSE
+          NEW.atendimento_semaforo := 'amarelo';
+          NEW.atendimento_semaforo_label := 'Compareceu e não comprou';
+        END IF;
+      ELSE
+        NEW.atendimento_semaforo := '';
+        NEW.atendimento_semaforo_label := '';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS trg_atualizar_atendimento_semaforo_tgt ON agendamentos;
+    CREATE TRIGGER trg_atualizar_atendimento_semaforo_tgt
+    BEFORE INSERT OR UPDATE OF compareceu, status, venda_gerada, valor_venda, patologia, resultado_optometrista
+    ON agendamentos
+    FOR EACH ROW EXECUTE FUNCTION atualizar_atendimento_semaforo_tgt();
+
+    UPDATE agendamentos
+    SET compareceu = compareceu
+    WHERE atendimento_semaforo IS NULL OR atendimento_semaforo = '';
+  `);
 
   await addColumnIfMissing("clientes", "gas_id", "TEXT UNIQUE");
   await addColumnIfMissing("clientes", "origem_sync", "TEXT DEFAULT 'postgres'");
@@ -1693,8 +1865,8 @@ app.post("/api/gas", async (req, res) => {
       getLeadTimeReport: () => hasRole(req.session, ["admin", "atendimento central", "gerente de loja"]),
       getHistoricoOperacional: () => hasRole(req.session, ["admin", "gerente de loja"]),
       exportFinanceCSV: () => canViewFinanceSession(req.session),
-      atualizarPlanilhaSistemaCompleto: () => isAdmin(req.session),
-      testarBackend: () => isAdmin(req.session)
+      atualizarPlanilhaSistemaCompleto: () => isSuperAdmin(req.session),
+      testarBackend: () => isSuperAdmin(req.session)
     };
 
     if (!allowedByRole[fn] || !allowedByRole[fn]()) {
@@ -1731,8 +1903,8 @@ app.post("/api/gas", async (req, res) => {
 
 app.post("/api/sync/gas-to-postgres", async (req, res) => {
   try {
-    if (!isAdmin(req.session)) {
-      return res.status(403).json({ ok: false, message: "Sincronização restrita ao administrador." });
+    if (!isSuperAdmin(req.session)) {
+      return res.status(403).json({ ok: false, message: "Sincronização exclusiva do responsável técnico do sistema." });
     }
     const result = await syncGasToPostgres(req.body || {});
     res.json(result);
@@ -2638,7 +2810,7 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
 });
 
 // Gera notificações retroativas para agendamentos existentes com resultado de visita
-app.post("/api/admin/notificacoes/gerar-retroativo", requireAdmin, async (req, res) => {
+app.post("/api/admin/notificacoes/gerar-retroativo", requireSuperAdmin, async (req, res) => {
   try {
     const nc = v => String(v || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim();
     const dtBR = v => {
@@ -2850,6 +3022,34 @@ app.get("/api/optometristas", async (req, res) => {
   }
 });
 
+app.get("/api/vendedores-consultores", async (req, res) => {
+  try {
+    let loja = clean(req.query.loja || "");
+    if (!canViewAllStores(req.session)) {
+      if (loja && !ensureStoreAccess(req.session, loja)) {
+        return res.status(403).json({ ok: false, message: "Sem permissão para consultar esta loja." });
+      }
+      loja = clean(req.session.loja);
+    }
+    const params = [];
+    const conditions = ["ativo = true"];
+    if (loja) {
+      params.push(loja);
+      conditions.push(storeSql("loja", `$${params.length}`));
+    }
+    const result = await pool.query(
+      `SELECT id, nome, loja, ativo, criado_em, atualizado_em
+       FROM vendedores_consultores
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY loja, nome`,
+      params
+    );
+    res.json({ ok: true, vendedoresConsultores: result.rows });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: "Erro ao carregar vendedores e consultores.", error: error.message });
+  }
+});
+
 app.post("/api/faturamentos", async (req, res) => {
   try {
     if (!canViewFinanceSession(req.session)) {
@@ -2962,6 +3162,125 @@ app.post("/api/logs", async (req, res) => {
 });
 
 
+function normalizarMetaPayload(body = {}) {
+  const competenciaRaw = clean(body.competencia);
+  if (!/^\d{4}-\d{2}$/.test(competenciaRaw)) throw new Error("Competência inválida. Use mês e ano.");
+  const tipo = clean(body.tipo_escopo || body.tipoEscopo).toLowerCase();
+  if (!["grupo", "loja", "consultor"].includes(tipo)) throw new Error("Tipo de meta inválido.");
+  const loja = clean(body.loja);
+  const vendedorId = Number(body.vendedor_consultor_id || body.vendedorConsultorId || 0) || null;
+  if (tipo === "loja" && !loja) throw new Error("Selecione a loja da meta.");
+  if (tipo === "consultor" && (!loja || !vendedorId)) throw new Error("Selecione a loja e o consultor da meta.");
+  const chaveEscopo = tipo === "grupo"
+    ? "grupo:tgt"
+    : tipo === "loja"
+      ? `loja:${normalizeStoreKey(loja)}`
+      : `consultor:${vendedorId}`;
+  const numero = (value, max = null) => {
+    const parsed = numberFromBR(value);
+    if (parsed < 0 || (max !== null && parsed > max)) throw new Error("As metas devem usar valores válidos e não negativos.");
+    return parsed;
+  };
+  return {
+    competencia: `${competenciaRaw}-01`, tipo, chaveEscopo,
+    loja: tipo === "grupo" ? null : loja,
+    vendedorId: tipo === "consultor" ? vendedorId : null,
+    metaFaturamento: numero(body.meta_faturamento),
+    metaVendas: Math.trunc(numero(body.meta_vendas)),
+    metaAgendamentos: Math.trunc(numero(body.meta_agendamentos)),
+    metaComparecimento: numero(body.meta_comparecimento, 100),
+    metaConversao: numero(body.meta_conversao, 100),
+    metaTicketMedio: numero(body.meta_ticket_medio),
+    limiteDesconto: numero(body.limite_desconto, 100),
+    metaPrazoOsDias: Math.trunc(numero(body.meta_prazo_os_dias)),
+    observacao: clean(body.observacao) || null,
+    ativo: body.ativo !== false
+  };
+}
+
+const META_SELECT = `SELECT m.*, v.nome AS vendedor_consultor_nome
+  FROM metas_desempenho m
+  LEFT JOIN vendedores_consultores v ON v.id = m.vendedor_consultor_id`;
+
+app.get("/api/admin/metas", requireAdmin, async (req, res) => {
+  try {
+    const params = [];
+    const conditions = [];
+    if (/^\d{4}-\d{2}$/.test(clean(req.query.competencia))) {
+      params.push(`${clean(req.query.competencia)}-01`);
+      conditions.push(`m.competencia = $${params.length}::date`);
+    }
+    if (req.query.ativas !== "false") conditions.push("m.ativo = true");
+    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+    const result = await pool.query(`${META_SELECT} ${where} ORDER BY m.competencia DESC, m.tipo_escopo, m.loja, v.nome`, params);
+    res.json({ ok: true, metas: result.rows });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: "Erro ao carregar metas.", error: error.message });
+  }
+});
+
+app.post("/api/admin/metas", requireAdmin, async (req, res) => {
+  try {
+    const m = normalizarMetaPayload(req.body);
+    if (m.vendedorId) {
+      const vendedor = await pool.query(`SELECT id, loja FROM vendedores_consultores WHERE id = $1 AND ativo = true`, [m.vendedorId]);
+      if (!vendedor.rows.length || normalizeStoreKey(vendedor.rows[0].loja) !== normalizeStoreKey(m.loja)) {
+        return res.status(400).json({ ok: false, message: "Consultor não pertence à loja selecionada." });
+      }
+    }
+    const values = [m.competencia,m.tipo,m.chaveEscopo,m.loja,m.vendedorId,m.metaFaturamento,m.metaVendas,m.metaAgendamentos,m.metaComparecimento,m.metaConversao,m.metaTicketMedio,m.limiteDesconto,m.metaPrazoOsDias,m.observacao,m.ativo,req.session.email];
+    const result = await pool.query(
+      `INSERT INTO metas_desempenho (
+        competencia,tipo_escopo,chave_escopo,loja,vendedor_consultor_id,
+        meta_faturamento,meta_vendas,meta_agendamentos,meta_comparecimento,meta_conversao,
+        meta_ticket_medio,limite_desconto,meta_prazo_os_dias,observacao,ativo,
+        criado_por_email,atualizado_por_email,atualizado_em
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$16,CURRENT_TIMESTAMP)
+      ON CONFLICT (competencia, chave_escopo) DO UPDATE SET
+        loja=EXCLUDED.loja,vendedor_consultor_id=EXCLUDED.vendedor_consultor_id,
+        meta_faturamento=EXCLUDED.meta_faturamento,meta_vendas=EXCLUDED.meta_vendas,
+        meta_agendamentos=EXCLUDED.meta_agendamentos,meta_comparecimento=EXCLUDED.meta_comparecimento,
+        meta_conversao=EXCLUDED.meta_conversao,meta_ticket_medio=EXCLUDED.meta_ticket_medio,
+        limite_desconto=EXCLUDED.limite_desconto,meta_prazo_os_dias=EXCLUDED.meta_prazo_os_dias,
+        observacao=EXCLUDED.observacao,ativo=EXCLUDED.ativo,
+        atualizado_por_email=EXCLUDED.atualizado_por_email,atualizado_em=CURRENT_TIMESTAMP
+      RETURNING *`, values);
+    res.json({ ok: true, message: "Meta salva com sucesso.", meta: result.rows[0] });
+  } catch (error) {
+    res.status(400).json({ ok: false, message: error.message || "Erro ao salvar meta." });
+  }
+});
+
+app.patch("/api/admin/metas/:id", requireAdmin, async (req, res) => {
+  try {
+    const m = normalizarMetaPayload(req.body);
+    if (m.vendedorId) {
+      const vendedor = await pool.query(`SELECT id, loja FROM vendedores_consultores WHERE id = $1 AND ativo = true`, [m.vendedorId]);
+      if (!vendedor.rows.length || normalizeStoreKey(vendedor.rows[0].loja) !== normalizeStoreKey(m.loja)) {
+        return res.status(400).json({ ok: false, message: "Consultor não pertence à loja selecionada." });
+      }
+    }
+    const result = await pool.query(
+      `UPDATE metas_desempenho SET competencia=$1,tipo_escopo=$2,chave_escopo=$3,loja=$4,vendedor_consultor_id=$5,
+       meta_faturamento=$6,meta_vendas=$7,meta_agendamentos=$8,meta_comparecimento=$9,meta_conversao=$10,
+       meta_ticket_medio=$11,limite_desconto=$12,meta_prazo_os_dias=$13,observacao=$14,ativo=$15,
+       atualizado_por_email=$16,atualizado_em=CURRENT_TIMESTAMP WHERE id=$17 RETURNING *`,
+      [m.competencia,m.tipo,m.chaveEscopo,m.loja,m.vendedorId,m.metaFaturamento,m.metaVendas,m.metaAgendamentos,m.metaComparecimento,m.metaConversao,m.metaTicketMedio,m.limiteDesconto,m.metaPrazoOsDias,m.observacao,m.ativo,req.session.email,req.params.id]);
+    if (!result.rows.length) return res.status(404).json({ ok: false, message: "Meta não encontrada." });
+    res.json({ ok: true, message: "Meta atualizada.", meta: result.rows[0] });
+  } catch (error) {
+    res.status(400).json({ ok: false, message: error.message || "Erro ao atualizar meta." });
+  }
+});
+
+app.delete("/api/admin/metas/:id", requireAdmin, async (req, res) => {
+  const result = await pool.query(
+    `UPDATE metas_desempenho SET ativo=false, atualizado_por_email=$1, atualizado_em=CURRENT_TIMESTAMP WHERE id=$2 RETURNING id`,
+    [req.session.email, req.params.id]);
+  if (!result.rows.length) return res.status(404).json({ ok: false, message: "Meta não encontrada." });
+  res.json({ ok: true, message: "Meta desativada." });
+});
+
 app.get("/api/usuarios", requireSession, async (req, res) => {
   try {
     const role = roleOf(req.session);
@@ -2996,7 +3315,10 @@ app.get("/api/usuarios", requireSession, async (req, res) => {
     }
 
     const result = await pool.query(query, params);
-    res.json({ ok: true, usuarios: result.rows });
+    const usuarios = result.rows.map((usuario) => isHugoAccount(usuario)
+      ? { ...usuario, cargo: "super_admin", protected: true }
+      : usuario);
+    res.json({ ok: true, usuarios });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });
   }
@@ -3009,6 +3331,12 @@ app.post("/api/usuarios", requireAdmin, async (req, res) => {
     const email = clean(b.email).toLowerCase();
     const cargo = clean(b.cargo);
     const password = String(b.password || b.senha || "");
+    if (cargo.toLowerCase() === "super_admin") {
+      return res.status(403).json({ ok: false, message: "O perfil Super Admin é exclusivo e não pode ser atribuído pelo painel." });
+    }
+    if (email === HUGO_SUPER_ADMIN_EMAIL) {
+      return res.status(403).json({ ok: false, message: "A conta do criador é protegida e não pode ser recriada pelo painel." });
+    }
     if (!nome || !email || !cargo) {
       return res.status(400).json({ ok: false, message: "Nome, e-mail e perfil são obrigatórios." });
     }
@@ -3046,6 +3374,14 @@ app.patch("/api/usuarios/:id", requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const b = req.body || {};
+    const target = await pool.query('SELECT id, email, cargo FROM usuarios WHERE id = $1', [id]);
+    if (!target.rows.length) return res.status(404).json({ ok: false, message: "Usuário não encontrado." });
+    if (isHugoAccount(target.rows[0])) {
+      return res.status(403).json({ ok: false, message: "A conta do criador é protegida contra alterações pelo painel." });
+    }
+    if (clean(b.cargo).toLowerCase() === "super_admin") {
+      return res.status(403).json({ ok: false, message: "O perfil Super Admin é exclusivo e não pode ser atribuído pelo painel." });
+    }
     const password = String(b.password || b.senha || "");
     if (password && password.length < 12) {
       return res.status(400).json({ ok: false, message: "A senha deve ter pelo menos 12 caracteres." });
@@ -3084,6 +3420,9 @@ app.delete("/api/usuarios/:id", requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const check = await pool.query('SELECT id, email FROM usuarios WHERE id = $1', [id]);
+    if (check.rows.length && isHugoAccount(check.rows[0])) {
+      return res.status(403).json({ ok: false, message: "A conta do criador é permanente e não pode ser excluída." });
+    }
     if (!check.rows.length) return res.status(404).json({ ok: false, message: "Usuário não encontrado." });
     if (check.rows[0].email === (req.session && req.session.email)) {
       return res.status(400).json({ ok: false, message: "Você não pode excluir sua própria conta." });
@@ -3280,7 +3619,7 @@ async function obterTodosContatosKommo(kommoClient) {
 
 // ── GET /api/admin/kommo/diagnostico ─────────────────────────────────────────
 // Mostra: duplicatas, leads novos com mensagem, tempo médio de resposta
-app.get("/api/admin/kommo/diagnostico", requireAdmin, async (req, res) => {
+app.get("/api/admin/kommo/diagnostico", requireSuperAdmin, async (req, res) => {
   try {
     const kommoClient = require('./kommo/client');
     const agora = Math.floor(Date.now() / 1000);
@@ -3380,7 +3719,7 @@ async function obterTodosKommo(kommoClient) {
 
 // ── POST /api/admin/kommo/dedup ───────────────────────────────────────────────
 // Mescla contatos duplicados: move leads para o contato principal e exclui os extras
-app.post("/api/admin/kommo/dedup", requireAdmin, async (req, res) => {
+app.post("/api/admin/kommo/dedup", requireSuperAdmin, async (req, res) => {
   try {
     const kommoClient = require('./kommo/client');
     const contatos = await obterTodosKommo(kommoClient);
@@ -3439,7 +3778,7 @@ app.post("/api/admin/kommo/dedup", requireAdmin, async (req, res) => {
 
 // ── GET /api/admin/kommo/inspect ─────────────────────────────────────────────
 // Inspeciona a configuração real do Kommo: pipelines, estágios, webhooks, leads recentes
-app.get("/api/admin/kommo/inspect", requireAdmin, async (req, res) => {
+app.get("/api/admin/kommo/inspect", requireSuperAdmin, async (req, res) => {
   try {
     const kommoClient = require('./kommo/client');
     const PIPELINE_TARGET = 9511355;
@@ -3483,7 +3822,7 @@ app.get("/api/admin/kommo/inspect", requireAdmin, async (req, res) => {
 
 // ── GET /api/admin/kommo/bot-states ──────────────────────────────────────────
 // Lista os estados do bot salvos no PostgreSQL — útil para debug
-app.get("/api/admin/kommo/bot-states", requireAdmin, async (req, res) => {
+app.get("/api/admin/kommo/bot-states", requireSuperAdmin, async (req, res) => {
   try {
     const limit  = Math.min(Number(req.query.limit  || 50), 200);
     const etapa  = clean(req.query.etapa  || "");
@@ -3532,7 +3871,7 @@ app.get("/api/admin/kommo/bot-states", requireAdmin, async (req, res) => {
 // ── GET /api/admin/kommo/pipelines ────────────────────────────────────────────
 // Retorna todos os pipelines do Kommo com seus estágios atuais
 // Diagnóstico: mostra os valores exatos de loja em usuarios e agendamentos
-app.get("/api/admin/diag/loja-mismatch", requireAdmin, async (req, res) => {
+app.get("/api/admin/diag/loja-mismatch", requireSuperAdmin, async (req, res) => {
   try {
     // Valores distintos de loja em agendamentos
     const ag = await pool.query(`
@@ -3575,7 +3914,7 @@ app.get("/api/admin/diag/loja-mismatch", requireAdmin, async (req, res) => {
   }
 });
 
-app.get("/api/admin/kommo/pipelines", requireAdmin, async (req, res) => {
+app.get("/api/admin/kommo/pipelines", requireSuperAdmin, async (req, res) => {
   try {
     const kommoClient = require('./kommo/client');
     const data = await kommoClient.request('GET', '/leads/pipelines?with=statuses');
@@ -3602,7 +3941,7 @@ app.get("/api/admin/kommo/pipelines", requireAdmin, async (req, res) => {
 
 // ── POST /api/admin/kommo/setup-stages ───────────────────────────────────────
 // Cria os estágios padrão do bot em todos os 4 pipelines e retorna o mapa de IDs
-app.post("/api/admin/kommo/setup-stages", requireAdmin, async (req, res) => {
+app.post("/api/admin/kommo/setup-stages", requireSuperAdmin, async (req, res) => {
   try {
     const kommoClient = require('./kommo/client');
 
@@ -3678,7 +4017,7 @@ app.post("/api/admin/kommo/setup-stages", requireAdmin, async (req, res) => {
   }
 });
 
-app.post("/api/admin/kommo/update-stage-colors", requireAdmin, async (req, res) => {
+app.post("/api/admin/kommo/update-stage-colors", requireSuperAdmin, async (req, res) => {
   try {
     const kommoClient = require('./kommo/client');
 
@@ -4092,7 +4431,7 @@ async function adicionarNotaKommo(leadId, texto) {
 }
 
 // Sync retroativo: vincula agendamentos existentes sem kommo_lead_id ao Kommo
-app.post('/api/admin/sync/agendamentos-para-kommo', requireAdmin, async (req, res) => {
+app.post('/api/admin/sync/agendamentos-para-kommo', requireSuperAdmin, async (req, res) => {
   try {
     const { rows } = await pool.query(`
       SELECT id, nome, whatsapp, email, loja, optometrista, origem, data_agendamento, horario, agendado_por_nome
@@ -4229,7 +4568,7 @@ async function disparadorLembretes24h() {
 }
 
 // Endpoint para disparar manualmente (admin)
-app.post('/api/admin/lembretes/disparar', requireAdmin, async (req, res) => {
+app.post('/api/admin/lembretes/disparar', requireSuperAdmin, async (req, res) => {
   const resultado = await runReminders();
   res.json({ ok: true, ...resultado });
 });
@@ -4276,6 +4615,8 @@ module.exports = {
   signSession,
   verifySession,
   requireSession,
+  requireSuperAdmin,
+  isSuperAdmin,
   buildPermissions,
   publicUser
 };

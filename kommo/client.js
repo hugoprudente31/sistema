@@ -58,6 +58,13 @@ class KommoClient {
     return this.request("GET", `/contacts/${contactId}`);
   }
 
+  // Busca contatos vinculados a um lead — retorna objetos completos com name
+  async getContactsByLead(leadId) {
+    try {
+      const data = await this.request("GET", `/contacts?filter[leads_id][]=${leadId}&limit=1`);
+      return data?._embedded?.contacts || [];
+    } catch { return []; }
+  }
   async createLead({ nome, contactId, customFields = [] }) {
     const body = [{
       name:      `Agendamento — ${nome}`,

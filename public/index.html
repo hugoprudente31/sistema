@@ -168,6 +168,7 @@
     .row-red td { background: #fee2e2 !important; }
     .row-yellow td { background: #fef3c7 !important; }
     .row-green td { background: #dcfce7 !important; }
+    .row-blue td { background: #dbeafe !important; border-bottom-color: #93c5fd; }
     .row-pathology td {
       background: #dbeafe !important;
       border-bottom-color: #93c5fd;
@@ -293,6 +294,10 @@
     }
 
     .page-loading.show { display: flex; }
+    .area-heading { border-left: 5px solid var(--p); background: linear-gradient(90deg,#fff7ed,#fff); }
+    .area-heading h3 { margin: 0 0 4px; }
+    .area-heading p { margin: 0; color: #6b7280; font-size: 13px; }
+    .creator-badge { display:inline-block; margin-top:6px; padding:5px 10px; border-radius:999px; background:#7f1d1d; color:#fff; font-size:12px; font-weight:800; }
   </style>
   <script>
     (function({d=document,s='script',id='bacrmtrk', cKey, oKey}){
@@ -353,6 +358,10 @@
     </div>
 
     <div class="card">
+      <div class="area-heading" style="padding:12px 14px;margin-bottom:14px;">
+        <h3>Visão Operacional do Grupo TGT</h3>
+        <p>Indicadores, prioridades do dia e acompanhamento das lojas em um único fluxo.</p>
+      </div>
       <h3>Dashboard Operacional</h3>
       <div class="row-4">
         <div class="kpi"><div class="label">Agendados/Confirmados</div><div class="value" id="kAgendados">0</div></div>
@@ -389,7 +398,7 @@
       <div class="row"><div><label>Loja *</label><select id="loja" onchange="carregarOptometristas()"></select></div><div><label>Optometrista *</label><select id="optometrista"></select></div></div>
       <div class="row"><div><label>Data do agendamento *</label><input id="dataAgendamento" type="date"></div><div><label>Horário *</label><input id="horario" type="time"></div></div>
       <div class="row"><div><label>Status *</label><select id="statusAgenda"><option value="">Selecione</option><option>Agendado</option><option>Confirmado</option></select></div><div><label>Tag de acesso</label><select id="accessTag"></select><div class="legend-mini" style="margin-top:6px;">Tags padronizadas de origem, perfil, prioridade, fluxo, comercial, loja e operação.</div></div></div>
-      <div class="row"><div><label>Consultor / Vendedor <span style="color:#e24b4a">*</span></label><input id="consultorVendedor" type="text" placeholder="Digite seu nome completo"></div><div><label>Observação *</label><textarea id="observacao" placeholder="Informações importantes"></textarea></div></div>
+      <div class="row"><div><label>Consultor / Vendedor <span style="color:#e24b4a">*</span></label><input id="consultorVendedor" type="text" list="listaVendedoresConsultores" placeholder="Digite ou selecione seu nome completo"><datalist id="listaVendedoresConsultores"></datalist><div class="legend-mini">Ao selecionar um nome existente, o sistema reutiliza o mesmo ID. Nomes novos são cadastrados automaticamente.</div></div><div><label>Observação *</label><textarea id="observacao" placeholder="Informações importantes"></textarea></div></div>
       <div class="row"><div><button onclick="salvarAgendamento()">Salvar agendamento</button></div><div><button class="secondary" onclick="limparFormulario()">Limpar</button></div></div>
       <div id="msgForm" class="msg"></div>
     </div>
@@ -604,6 +613,44 @@
       </div>
     </div>
 
+    <div class="card area-heading hidden" id="areaAdministracao">
+      <h3>Administração do Grupo</h3>
+      <p>Usuários, auditoria e recuperação de registros, separados da rotina operacional.</p>
+    </div>
+
+    <div class="card hidden" id="cardMetasAdmin">
+      <div class="topbar" style="margin-bottom:14px;">
+        <div><h3 style="margin:0;">Registro de Metas</h3><span class="legend-mini">Exclusivo para Admin e Super Admin</span></div>
+        <button class="btn-relatorio secondary" onclick="carregarMetasAdmin()">Atualizar metas</button>
+      </div>
+      <input type="hidden" id="metaId">
+      <div class="row-4">
+        <div><label>Mês da meta *</label><input id="metaCompetencia" type="month"></div>
+        <div><label>Meta para *</label><select id="metaTipoEscopo" onchange="atualizarCamposEscopoMeta()"><option value="grupo">Grupo TGT</option><option value="loja">Loja</option><option value="consultor">Vendedor / Consultor</option></select></div>
+        <div><label>Loja</label><select id="metaLoja" onchange="carregarConsultoresMeta()"><option value="">Selecione</option></select></div>
+        <div><label>Vendedor / Consultor</label><select id="metaConsultor"><option value="">Selecione a loja</option></select></div>
+      </div>
+      <div class="row-4">
+        <div><label>Meta faturamento (valor pago)</label><input id="metaFaturamento" type="number" min="0" step="0.01"></div>
+        <div><label>Meta de vendas</label><input id="metaVendas" type="number" min="0" step="1"></div>
+        <div><label>Meta de agendamentos</label><input id="metaAgendamentos" type="number" min="0" step="1"></div>
+        <div><label>Meta ticket médio</label><input id="metaTicketMedio" type="number" min="0" step="0.01"></div>
+      </div>
+      <div class="row-4">
+        <div><label>Comparecimento (%)</label><input id="metaComparecimento" type="number" min="0" max="100" step="0.01"></div>
+        <div><label>Conversão em venda (%)</label><input id="metaConversao" type="number" min="0" max="100" step="0.01"></div>
+        <div><label>Limite médio de desconto (%)</label><input id="metaLimiteDesconto" type="number" min="0" max="100" step="0.01"></div>
+        <div><label>Prazo desejado da OS (dias)</label><input id="metaPrazoOs" type="number" min="0" step="1"></div>
+      </div>
+      <div><label>Observação</label><textarea id="metaObservacao" placeholder="Contexto, estratégia ou justificativa da meta"></textarea></div>
+      <div style="display:flex;gap:10px;margin-top:12px;">
+        <button onclick="salvarMetaAdmin()">Salvar meta</button>
+        <button class="secondary" onclick="limparFormularioMeta()">Limpar</button>
+      </div>
+      <div id="msgMeta" class="msg"></div>
+      <div class="scroll-x" style="margin-top:18px;"><table><thead><tr><th>Competência</th><th>Escopo</th><th>Faturamento</th><th>Vendas</th><th>Agendamentos</th><th>Comparecimento</th><th>Conversão</th><th>Ticket</th><th>Ações</th></tr></thead><tbody id="metasBody"></tbody></table></div>
+    </div>
+
     <div class="card hidden" id="cardUsuarios">
       <div class="topbar" style="margin-bottom:14px;">
         <h3 style="margin:0;">Gerenciar Usuários</h3>
@@ -637,6 +684,12 @@
     </div>
 
     <div class="card hidden" id="cardDiagnostico"><h3>Diagnóstico Admin</h3><button onclick="executarDiagnostico()">Testar backend</button><div style="height:12px"></div><pre id="diagnosticoOut">Aguardando...</pre></div>
+
+    <div class="card area-heading hidden" id="areaTecnica">
+      <h3>Central Técnica do Criador</h3>
+      <p>Responsabilidade integral de Hugo: sistema, banco de dados, Kommo e landing page do Teste de Visão.</p>
+      <span class="creator-badge">SUPER ADMIN · CRIADOR DO SISTEMA</span>
+    </div>
 
     <div class="card hidden" id="cardKommoDiag">
       <div class="topbar" style="flex-wrap:wrap;gap:10px;">
@@ -676,7 +729,10 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function byId(id) { return document.getElementById(id); }
-function roleName() { return String(state.user && state.user.perfil || '').toLowerCase(); }
+function roleName() {
+  var role = String(state.user && state.user.perfil || '').toLowerCase();
+  return role === 'super_admin' ? 'admin' : role;
+}
 function canFinance() { return !!(state.user && state.user.permissions && state.user.permissions.canViewFinance); }
 function canManageOS() { return !!(state.user && state.user.permissions && state.user.permissions.canManageOS); }
 
@@ -774,13 +830,19 @@ function mapAgendamentoDb(r) {
   var compareceu = normalizeKey(r.compareceu || '');
   var status = normalizeKey(r.status || '');
   var venda = normalizeKey(r.venda_gerada || '');
+  var resultadoOptometrista = normalizeKey(r.resultado_optometrista || '');
+  var patologia = normalizeKey(r.patologia || '');
   var valorVenda = Number(String(r.valor_venda || 0).replace(',', '.')) || 0;
-  var semaforo = '';
-  var semaforoLabel = '';
+  var semaforo = normalizeKey(r.atendimento_semaforo || '');
+  var semaforoLabel = r.atendimento_semaforo_label || '';
   var statusOS = normalizeKey(r.status_os || '');
   var cancelado = status === 'cancelado' || statusOS === 'cancelada' || statusOS === 'cancelado' || statusOS === 'reembolso';
   if (!cancelado && (venda === 'sim' || valorVenda > 0)) {
     semaforo = 'verde'; semaforoLabel = 'Compareceu e comprou';
+  } else if (semaforo) {
+    semaforo = semaforo === 'azul' ? 'azul' : semaforo;
+  } else if (resultadoOptometrista === 'patologia' || patologia === 'sim') {
+    semaforo = 'azul'; semaforoLabel = 'Patologia';
   } else if (compareceu === 'nao' || compareceu === 'nao compareceu' || status === 'nao compareceu') {
     semaforo = 'vermelho'; semaforoLabel = 'Não compareceu';
   } else if (compareceu === 'sim' || compareceu === 'compareceu' || status === 'compareceu' || status === 'concluido') {
@@ -823,6 +885,7 @@ function mapAgendamentoDb(r) {
     AccessTags: r.access_tags || '',
     LeadTimeDias: r.lead_time_dias || '',
     VendedorNome: r.vendedor_nome || '',
+    VendedorConsultorId: r.vendedor_consultor_id || '',
     KommoLeadId: r.kommo_lead_id || '',
     AgendadoPorNome: r.agendado_por_nome || r.proprietario_nome || r.responsavel || '',
     AgendadoPorEmail: r.agendado_por_email || r.criado_por_email || '',
@@ -1081,7 +1144,7 @@ function fazerLogin() {
       byId('app').classList.remove('hidden');
 
       byId('nomeUsuario').textContent = res.user.nome || '';
-      byId('perfilUsuario').textContent = 'Perfil: ' + (res.user.perfil || '');
+      byId('perfilUsuario').textContent = 'Perfil: ' + (res.user.permissions && res.user.permissions.isSuperAdmin ? 'Super Admin · Criador do Sistema' : (res.user.perfil || ''));
       byId('emailUsuario').textContent = 'E-mail: ' + (res.user.email || '');
       byId('lojaUsuario').textContent = 'Loja: ' + ((res.user.loja && res.user.loja !== '') ? res.user.loja : 'Todas');
       byId('versaoServidor').textContent = 'Versão do servidor: ' + (res.serverVersion || '');
@@ -1090,6 +1153,11 @@ function fazerLogin() {
       aplicarPermissoesTela();
       byId('passwordLogin').value = '';
       return carregarInfoBase().then(function() {
+        if (state.user && state.user.permissions && state.user.permissions.isAdmin) {
+          limparFormularioMeta();
+          return carregarMetasAdmin();
+        }
+      }).then(function() {
         return carregarAgendaEDashboard();
       }).then(function() {
         iniciarAutoRefreshPostgres();
@@ -1113,14 +1181,17 @@ function logout() {
 
 function aplicarPermissoesTela() {
   var p = state.user.permissions || {};
-  if (p.isAdmin) byId('cardDiagnostico').classList.remove('hidden');
+  if (p.isAdmin) byId('areaAdministracao').classList.remove('hidden');
+  if (p.isAdmin) byId('cardMetasAdmin').classList.remove('hidden');
+  if (p.isSuperAdmin) byId('areaTecnica').classList.remove('hidden');
+  if (p.isSuperAdmin) byId('cardDiagnostico').classList.remove('hidden');
   if (p.isAdmin) byId('btnUsuarios').classList.remove('hidden');
   if (p.isAdmin) byId('btnLixeira').classList.remove('hidden');
   if (p.isAdmin) byId('cardUsuarios').classList.remove('hidden');
-  if (p.isAdmin) byId('btnKommoDiag').classList.remove('hidden');
-  if (p.isAdmin) byId('btnGerarNotifRetro').classList.remove('hidden');
-  if (p.isAdmin) byId('btnDispararLembretes').classList.remove('hidden');
-  if (p.isAdmin) byId('btnSyncKommo').classList.remove('hidden');
+  if (p.isSuperAdmin) byId('btnKommoDiag').classList.remove('hidden');
+  if (p.isSuperAdmin) byId('btnGerarNotifRetro').classList.remove('hidden');
+  if (p.isSuperAdmin) byId('btnDispararLembretes').classList.remove('hidden');
+  if (p.isSuperAdmin) byId('btnSyncKommo').classList.remove('hidden');
   if (p.canCreateAgendamento) byId('cardAgendamento').classList.remove('hidden');
   if (p.canViewFinance) {
     byId('cardFinanceiro').classList.remove('hidden');
@@ -1129,7 +1200,7 @@ function aplicarPermissoesTela() {
   if (p.canExportFinance) byId('btnExportFinance').classList.remove('hidden');
   if (['admin', 'atendimento central', 'gerente de loja'].indexOf(roleName()) > -1) byId('btnLeadTime').classList.remove('hidden');
   if (p.isAdmin || roleName() === 'gerente de loja') byId('btnHistorico').classList.remove('hidden');
-  if (p.isAdmin) byId('btnSyncSistema').classList.remove('hidden');
+  if (p.isSuperAdmin) byId('btnSyncSistema').classList.remove('hidden');
   byId('filtroMeus').checked = false;
 }
 
@@ -1535,6 +1606,7 @@ function preencherAccessTags() {
 function carregarOptometristas() {
   var loja = byId('loja').value;
   var el = byId('optometrista');
+  carregarVendedoresConsultores(loja);
   if (!loja) {
     el.innerHTML = '<option value="">Selecione a loja primeiro</option>';
     return;
@@ -1708,6 +1780,9 @@ function salvarAgendamento() {
       status: payload.statusAgenda || 'Agendado',
       proprietario_nome: payload.consultorNome,
       responsavel: payload.consultorNome,
+      vendedor_nome: payload.consultorNome,
+      vendedor_atendeu_nome: payload.consultorNome,
+      consultor_responsavel: payload.consultorNome,
       access_tags: payload.accessTags || null
     }).then(function(agendaRes) {
       return { cliente: clienteRes, agenda: agendaRes };
@@ -1907,6 +1982,20 @@ function marcarResultadoOptometrista(id, valor) {
     })
     .finally(function() { showLoading(false); });
 }
+
+function carregarVendedoresConsultores(loja) {
+  var listaEl = byId('listaVendedoresConsultores');
+  if (!listaEl) return;
+  if (!loja) { listaEl.innerHTML = ''; return; }
+  apiGet('/api/vendedores-consultores?loja=' + encodeURIComponent(loja))
+    .then(function(res) {
+      var lista = Array.isArray(res.vendedoresConsultores) ? res.vendedoresConsultores : [];
+      listaEl.innerHTML = lista.map(function(item) {
+        return '<option value="' + escapeHtml(item.nome || '') + '" label="ID ' + escapeHtml(String(item.id || '')) + '"></option>';
+      }).join('');
+    })
+    .catch(function() { listaEl.innerHTML = ''; });
+}
 function cancelarAgendamento(id) { if (confirm('Cancelar este agendamento?')) return runAction('cancelarAgendamento', id); return Promise.resolve(false); }
 function excluirAgendamento(id) { if (confirm('Deseja realmente excluir este agendamento?')) return runAction('excluirAgendamento', id); return Promise.resolve(false); }
 
@@ -2089,6 +2178,7 @@ function statusClassAtendimentoSemaforo(r) {
   if (sem === 'vermelho') return 'red';
   if (sem === 'amarelo') return 'yellow';
   if (sem === 'verde') return 'green';
+  if (sem === 'azul') return 'blue';
   return 'gray';
 }
 
@@ -2098,6 +2188,7 @@ function rowClassAtendimento(r) {
   if (sem === 'vermelho') return 'row-red';
   if (sem === 'amarelo') return 'row-yellow';
   if (sem === 'verde') return 'row-green';
+  if (sem === 'azul') return 'row-blue';
   return '';
 }
 
@@ -2587,6 +2678,120 @@ function sincronizarSistema() {
     .finally(function() { showLoading(false); });
 }
 
+var metasAdminCache = [];
+
+function prepararLojasMeta() {
+  var el = byId('metaLoja');
+  if (!el) return;
+  var atual = el.value;
+  el.innerHTML = '<option value="">Selecione</option>' + (state.lojas || []).map(function(l) {
+    var nome = l.Loja || l.nome || '';
+    return '<option value="' + escapeHtml(nome) + '">' + escapeHtml(nome) + '</option>';
+  }).join('');
+  el.value = atual;
+}
+
+function atualizarCamposEscopoMeta() {
+  var tipo = byId('metaTipoEscopo').value;
+  byId('metaLoja').disabled = tipo === 'grupo';
+  byId('metaConsultor').disabled = tipo !== 'consultor';
+  if (tipo === 'grupo') { byId('metaLoja').value = ''; byId('metaConsultor').innerHTML = '<option value="">Não se aplica</option>'; }
+  if (tipo === 'loja') byId('metaConsultor').innerHTML = '<option value="">Não se aplica</option>';
+  if (tipo === 'consultor') carregarConsultoresMeta();
+}
+
+function carregarConsultoresMeta(selecionarId) {
+  var tipo = byId('metaTipoEscopo').value;
+  var loja = byId('metaLoja').value;
+  var el = byId('metaConsultor');
+  if (tipo !== 'consultor') { el.innerHTML = '<option value="">Não se aplica</option>'; return Promise.resolve(); }
+  if (!loja) { el.innerHTML = '<option value="">Selecione a loja</option>'; return Promise.resolve(); }
+  el.innerHTML = '<option value="">Carregando...</option>';
+  return apiGet('/api/vendedores-consultores?loja=' + encodeURIComponent(loja)).then(function(res) {
+    var lista = Array.isArray(res.vendedoresConsultores) ? res.vendedoresConsultores : [];
+    el.innerHTML = '<option value="">Selecione</option>' + lista.map(function(v) {
+      return '<option value="' + escapeHtml(String(v.id)) + '">' + escapeHtml(v.nome) + ' · ID ' + escapeHtml(String(v.id)) + '</option>';
+    }).join('');
+    if (selecionarId) el.value = String(selecionarId);
+  });
+}
+
+function valorMeta(id) { return Number(byId(id).value || 0); }
+
+function payloadMetaAdmin() {
+  return {
+    competencia: byId('metaCompetencia').value,
+    tipo_escopo: byId('metaTipoEscopo').value,
+    loja: byId('metaLoja').value,
+    vendedor_consultor_id: byId('metaConsultor').value || null,
+    meta_faturamento: valorMeta('metaFaturamento'),
+    meta_vendas: valorMeta('metaVendas'),
+    meta_agendamentos: valorMeta('metaAgendamentos'),
+    meta_comparecimento: valorMeta('metaComparecimento'),
+    meta_conversao: valorMeta('metaConversao'),
+    meta_ticket_medio: valorMeta('metaTicketMedio'),
+    limite_desconto: valorMeta('metaLimiteDesconto'),
+    meta_prazo_os_dias: valorMeta('metaPrazoOs'),
+    observacao: byId('metaObservacao').value.trim(), ativo: true
+  };
+}
+
+function salvarMetaAdmin() {
+  var payload = payloadMetaAdmin();
+  if (!payload.competencia) { setMsg('msgMeta', 'Informe o mês da meta.', 'err'); return; }
+  if (payload.tipo_escopo !== 'grupo' && !payload.loja) { setMsg('msgMeta', 'Selecione a loja.', 'err'); return; }
+  if (payload.tipo_escopo === 'consultor' && !payload.vendedor_consultor_id) { setMsg('msgMeta', 'Selecione o vendedor ou consultor.', 'err'); return; }
+  var id = byId('metaId').value;
+  showLoading(true);
+  (id ? apiPatch('/api/admin/metas/' + encodeURIComponent(id), payload) : apiPost('/api/admin/metas', payload))
+    .then(function(res) { if (!res.ok) throw new Error(res.message || 'Erro ao salvar meta.'); toast(res.message || 'Meta salva.', 'ok'); limparFormularioMeta(); return carregarMetasAdmin(); })
+    .catch(function(err) { setMsg('msgMeta', err.message || String(err), 'err'); })
+    .finally(function() { showLoading(false); });
+}
+
+function carregarMetasAdmin() {
+  prepararLojasMeta();
+  atualizarCamposEscopoMeta();
+  byId('metasBody').innerHTML = '<tr><td colspan="9">Carregando metas...</td></tr>';
+  return apiGet('/api/admin/metas?ativas=false').then(function(res) {
+    metasAdminCache = Array.isArray(res.metas) ? res.metas : [];
+    byId('metasBody').innerHTML = metasAdminCache.length ? metasAdminCache.map(function(m) {
+      var comp = String(m.competencia || '').slice(0,7);
+      var escopo = m.tipo_escopo === 'grupo' ? 'Grupo TGT' : (m.tipo_escopo === 'loja' ? m.loja : ((m.vendedor_consultor_nome || 'Consultor') + ' · ' + (m.loja || '')));
+      return '<tr' + (m.ativo === false ? ' style="opacity:.55"' : '') + '><td>' + escapeHtml(comp) + '</td><td>' + escapeHtml(escopo) + '</td><td>' + money(m.meta_faturamento || 0) + '</td><td>' + escapeHtml(String(m.meta_vendas || 0)) + '</td><td>' + escapeHtml(String(m.meta_agendamentos || 0)) + '</td><td>' + escapeHtml(String(m.meta_comparecimento || 0)) + '%</td><td>' + escapeHtml(String(m.meta_conversao || 0)) + '%</td><td>' + money(m.meta_ticket_medio || 0) + '</td><td><button class="secondary icon-btn" onclick="editarMetaAdmin(' + m.id + ')">Editar</button> ' + (m.ativo === false ? '' : '<button class="danger icon-btn" onclick="desativarMetaAdmin(' + m.id + ')">Desativar</button>') + '</td></tr>';
+    }).join('') : '<tr><td colspan="9">Nenhuma meta cadastrada.</td></tr>';
+  }).catch(function(err) { byId('metasBody').innerHTML = '<tr><td colspan="9" class="err">' + escapeHtml(err.message || String(err)) + '</td></tr>'; });
+}
+
+function editarMetaAdmin(id) {
+  var m = metasAdminCache.find(function(item) { return Number(item.id) === Number(id); });
+  if (!m) return;
+  prepararLojasMeta();
+  byId('metaId').value = m.id; byId('metaCompetencia').value = String(m.competencia || '').slice(0,7);
+  byId('metaTipoEscopo').value = m.tipo_escopo; byId('metaLoja').value = m.loja || '';
+  byId('metaFaturamento').value = m.meta_faturamento || 0; byId('metaVendas').value = m.meta_vendas || 0;
+  byId('metaAgendamentos').value = m.meta_agendamentos || 0; byId('metaComparecimento').value = m.meta_comparecimento || 0;
+  byId('metaConversao').value = m.meta_conversao || 0; byId('metaTicketMedio').value = m.meta_ticket_medio || 0;
+  byId('metaLimiteDesconto').value = m.limite_desconto || 0; byId('metaPrazoOs').value = m.meta_prazo_os_dias || 0;
+  byId('metaObservacao').value = m.observacao || ''; atualizarCamposEscopoMeta();
+  if (m.tipo_escopo === 'consultor') carregarConsultoresMeta(m.vendedor_consultor_id);
+  byId('cardMetasAdmin').scrollIntoView({ behavior: 'smooth' });
+}
+
+function desativarMetaAdmin(id) {
+  if (!confirm('Desativar esta meta?')) return;
+  fetch('/api/admin/metas/' + encodeURIComponent(id), { method:'DELETE', credentials:'same-origin' })
+    .then(function(r) { return r.json(); }).then(function(res) { if (!res.ok) throw new Error(res.message); toast('Meta desativada.', 'ok'); return carregarMetasAdmin(); })
+    .catch(function(err) { setMsg('msgMeta', err.message || String(err), 'err'); });
+}
+
+function limparFormularioMeta() {
+  ['metaId','metaFaturamento','metaVendas','metaAgendamentos','metaComparecimento','metaConversao','metaTicketMedio','metaLimiteDesconto','metaPrazoOs','metaObservacao'].forEach(function(id) { byId(id).value = ''; });
+  byId('metaTipoEscopo').value = 'grupo'; byId('metaLoja').value = '';
+  if (!byId('metaCompetencia').value) byId('metaCompetencia').value = new Date().toISOString().slice(0,7);
+  atualizarCamposEscopoMeta(); setMsg('msgMeta', '', '');
+}
+
 function carregarUsuarios() {
   byId('cardUsuarios').classList.remove('hidden');
   byId('usuariosBody').innerHTML = '<tr><td colspan="7"><div class="loading-box">Carregando usuários...</div></td></tr>';
@@ -2600,6 +2805,11 @@ function carregarUsuarios() {
       byId('usuariosBody').innerHTML = rows.map(function(u) {
         var fin = u.can_view_finance ? '<span class="status green">Sim</span>' : '<span class="status gray">Não</span>';
         var nomeEsc = escapeHtml(u.nome||'').replace(/'/g, "\\'");
+        var actions = u.protected
+          ? '<span class="creator-badge">Conta protegida</span>'
+          : '<button class="secondary icon-btn" onclick="abrirModalEditarUsuario(' + u.id + ')">Editar</button>' +
+            (u.ativo === false ? '<button class="secondary icon-btn" onclick="toggleUsuario(' + u.id + ', true)">Ativar</button>' : '<button class="danger icon-btn" onclick="toggleUsuario(' + u.id + ', false)">Desativar</button>') +
+            '<button class="danger icon-btn" style="background:#7f1d1d" onclick="deletarUsuario(' + u.id + ',\'' + nomeEsc + '\')">Excluir</button>';
         return '<tr>' +
           '<td><strong>' + escapeHtml(u.nome||'') + '</strong></td>' +
           '<td>' + escapeHtml(u.email||'') + '</td>' +
@@ -2607,11 +2817,7 @@ function carregarUsuarios() {
           '<td>' + escapeHtml(u.loja||'Todas') + '</td>' +
           '<td>' + fin + '</td>' +
           '<td><span class="status ' + (u.ativo === false ? 'red' : 'green') + '">' + (u.ativo === false ? 'Inativo' : 'Ativo') + '</span></td>' +
-          '<td style="display:flex;gap:6px">' +
-          '<button class="secondary icon-btn" onclick="abrirModalEditarUsuario(' + u.id + ')">Editar</button>' +
-          (u.ativo === false ? '<button class="secondary icon-btn" onclick="toggleUsuario(' + u.id + ', true)">Ativar</button>' : '<button class="danger icon-btn" onclick="toggleUsuario(' + u.id + ', false)">Desativar</button>') +
-          '<button class="danger icon-btn" style="background:#7f1d1d" onclick="deletarUsuario(' + u.id + ',\'' + nomeEsc + '\')">Excluir</button>' +
-          '</td></tr>';
+          '<td style="display:flex;gap:6px">' + actions + '</td></tr>';
       }).join('');
     })
     .catch(function(err) {

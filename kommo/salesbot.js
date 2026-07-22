@@ -34,6 +34,30 @@ const kommo                            = require("./client");
 const { processMessage, flushResponses } = require("./bot/flowEngine");
 const SM                               = require("./bot/stateManager");
 
+// Deduplicação: bloqueia retries do Kommo com a mesma mensagem no mesmo lead
+// dentro de uma janela de 8 segundos.
+const recentMessages = new Map(); // `${leadId}:${text}` → timestamp
+const DEDUP_WINDOW_MS = 8000;
+
+function isDuplicateMessage(leadId, text) {
+  const key = `${leadId}:${text}`;
+  const last = recentMessages.get(key);
+  if (!last) return false;
+  return Date.now() - last < DEDUP_WINDOW_MS;
+}
+
+function markMessageSeen(leadId, text) {
+  const key = `${leadId}:${text}`;
+  recentMessages.set(key, Date.now());
+  // limpeza: remove entradas antigas para não vazar memória
+  if (recentMessages.size > 500) {
+    const cutoff = Date.now() - DEDUP_WINDOW_MS;
+    for (const [k, ts] of recentMessages) {
+      if (ts < cutoff) recentMessages.delete(k);
+    }
+  }
+}
+
 function safeEqual(value, expected) {
   const a = Buffer.from(String(value || ""));
   const b = Buffer.from(String(expected || ""));
@@ -114,6 +138,13 @@ router.post("/api/salesbot", requireSalesbotSecret, async (req, res) => {
   if (!leadId) {
     return res.json({ text: "" });
   }
+
+  // Bloqueia retries do Kommo: mesma mensagem para o mesmo lead dentro de 8s
+  if (isDuplicateMessage(leadId, message)) {
+    console.log(`[Salesbot] lead=${leadId} — mensagem duplicada bloqueada: "${message.slice(0, 40)}"`);
+    return res.json({ text: "" });
+  }
+  markMessageSeen(leadId, message);
 
   // Drena mensagens pendentes anteriores (limpa estado de envio)
   flushResponses(leadId);

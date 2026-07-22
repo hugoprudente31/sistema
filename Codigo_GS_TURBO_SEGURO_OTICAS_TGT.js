@@ -1021,7 +1021,10 @@ function getAtendimentoSemaforo_(r) {
   const compareceu = normalizeText_(r.Compareceu).toLowerCase();
   const statusAgenda = normalizeText_(r.StatusAgenda).toLowerCase();
   const vendaGerada = normalizeText_(r.VendaGerada).toLowerCase();
+  const resultadoOptometrista = normalizeText_(r.ResultadoOptometrista).toLowerCase();
+  const patologia = normalizeText_(r.Patologia).toLowerCase();
   const valorVenda = numberSafe_(r.ValorVenda);
+  if (resultadoOptometrista === 'patologia' || patologia === 'sim') return { cor: 'azul', label: 'Patologia' };
   if (statusAgenda === 'não compareceu' || statusAgenda === 'nao compareceu' || compareceu === 'não' || compareceu === 'nao') return { cor: 'vermelho', label: 'Não compareceu' };
   if (compareceu === 'sim' || statusAgenda === 'compareceu' || statusAgenda === 'concluído' || statusAgenda === 'concluido') {
     if (vendaGerada === 'sim' || valorVenda > 0) return { cor: 'verde', label: 'Compareceu e comprou' };

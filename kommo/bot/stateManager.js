@@ -206,10 +206,17 @@ function setState(leadId, updates, { persist = false } = {}) {
 function markHumanActivity(leadId) {
   const key     = String(leadId);
   const current = states.get(key) || defaultState(leadId);
-  const next    = { ...current, last_human_at: Date.now(), bot_active: false, updated_at: Date.now() };
+  const next    = {
+    ...current,
+    last_human_at:  Date.now(),
+    bot_active:     false,
+    etapa:          "transferido",   // shouldBotActivate verifica APENAS etapa
+    transferred_at: Date.now(),      // renova o timer a cada msg do atendente
+    updated_at:     Date.now(),
+  };
   states.set(key, next);
   persistToDb(leadId, next).catch(() => {});
-  console.log(`[State] 👤 Atividade humana registrada — lead ${leadId}`);
+  console.log(`[State] 👤 Atendente ativo — lead ${leadId}, bot desativado`);
 }
 
 function markClientActivity(leadId) {

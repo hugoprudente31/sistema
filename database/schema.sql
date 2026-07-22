@@ -2,16 +2,135 @@
 -- PostgreSQL — Regras finais TGT: cargos, auditoria, OS, financeiro real e bloqueio de teste
 BEGIN;
 
+CREATE TABLE IF NOT EXISTS vendedores_consultores (
+  id BIGSERIAL PRIMARY KEY,
+  nome TEXT NOT NULL,
+  nome_chave TEXT NOT NULL,
+  loja TEXT NOT NULL DEFAULT '',
+  loja_chave TEXT NOT NULL DEFAULT '',
+  ativo BOOLEAN NOT NULL DEFAULT true,
+  criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (nome_chave, loja_chave)
+);
+
+CREATE TABLE IF NOT EXISTS metas_desempenho (
+  id BIGSERIAL PRIMARY KEY,
+  competencia DATE NOT NULL,
+  tipo_escopo TEXT NOT NULL CHECK (tipo_escopo IN ('grupo','loja','consultor')),
+  chave_escopo TEXT NOT NULL,
+  loja TEXT,
+  vendedor_consultor_id BIGINT REFERENCES vendedores_consultores(id) ON DELETE SET NULL,
+  meta_faturamento NUMERIC(14,2) DEFAULT 0,
+  meta_vendas INTEGER DEFAULT 0,
+  meta_agendamentos INTEGER DEFAULT 0,
+  meta_comparecimento NUMERIC(5,2) DEFAULT 0,
+  meta_conversao NUMERIC(5,2) DEFAULT 0,
+  meta_ticket_medio NUMERIC(14,2) DEFAULT 0,
+  limite_desconto NUMERIC(5,2) DEFAULT 0,
+  meta_prazo_os_dias INTEGER DEFAULT 0,
+  observacao TEXT,
+  ativo BOOLEAN NOT NULL DEFAULT true,
+  criado_por_email TEXT,
+  atualizado_por_email TEXT,
+  criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (competencia, chave_escopo)
+);
+
 ALTER TABLE agendamentos
   ADD COLUMN IF NOT EXISTS agendado_por_nome TEXT,
   ADD COLUMN IF NOT EXISTS agendado_por_email TEXT,
   ADD COLUMN IF NOT EXISTS vendedor_atendeu_nome TEXT,
   ADD COLUMN IF NOT EXISTS vendedor_atendeu_email TEXT,
+  ADD COLUMN IF NOT EXISTS vendedor_consultor_id BIGINT REFERENCES vendedores_consultores(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS ultima_alteracao_por_nome TEXT,
   ADD COLUMN IF NOT EXISTS ultima_alteracao_por_email TEXT,
   ADD COLUMN IF NOT EXISTS ultima_alteracao_em TIMESTAMP,
   ADD COLUMN IF NOT EXISTS patologia TEXT DEFAULT 'Pendente',
-  ADD COLUMN IF NOT EXISTS resultado_optometrista TEXT DEFAULT 'Pendente';
+  ADD COLUMN IF NOT EXISTS resultado_optometrista TEXT DEFAULT 'Pendente',
+  ADD COLUMN IF NOT EXISTS atendimento_semaforo TEXT DEFAULT '',
+  ADD COLUMN IF NOT EXISTS atendimento_semaforo_label TEXT DEFAULT '';
+
+CREATE OR REPLACE FUNCTION normalizar_identidade_comercial_tgt(valor TEXT)
+RETURNS TEXT AS $$
+  SELECT REGEXP_REPLACE(
+    TRANSLATE(LOWER(TRIM(COALESCE(valor,''))),
+      'áàâãäéèêëíìîïóòôõöúùûüç',
+      'aaaaaeeeeiiiiooooouuuuc'),
+    '\s+', ' ', 'g');
+$$ LANGUAGE sql IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION vincular_vendedor_consultor_tgt()
+RETURNS trigger AS $$
+DECLARE
+  nome_comercial TEXT := COALESCE(NULLIF(TRIM(NEW.vendedor_atendeu_nome), ''), NULLIF(TRIM(NEW.vendedor_nome), ''), NULLIF(TRIM(NEW.consultor_responsavel), ''));
+  identidade_id BIGINT;
+BEGIN
+  IF nome_comercial IS NULL THEN RETURN NEW; END IF;
+  INSERT INTO vendedores_consultores (nome, nome_chave, loja, loja_chave, ativo, atualizado_em)
+  VALUES (nome_comercial, normalizar_identidade_comercial_tgt(nome_comercial), COALESCE(NEW.loja, ''), normalizar_identidade_comercial_tgt(NEW.loja), true, CURRENT_TIMESTAMP)
+  ON CONFLICT (nome_chave, loja_chave) DO UPDATE SET ativo = true, atualizado_em = CURRENT_TIMESTAMP
+  RETURNING id INTO identidade_id;
+  NEW.vendedor_consultor_id := identidade_id;
+  NEW.vendedor_atendeu_nome := COALESCE(NULLIF(NEW.vendedor_atendeu_nome, ''), nome_comercial);
+  NEW.vendedor_nome := COALESCE(NULLIF(NEW.vendedor_nome, ''), nome_comercial);
+  NEW.consultor_responsavel := COALESCE(NULLIF(NEW.consultor_responsavel, ''), nome_comercial);
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_vincular_vendedor_consultor_tgt ON agendamentos;
+CREATE TRIGGER trg_vincular_vendedor_consultor_tgt
+BEFORE INSERT OR UPDATE OF vendedor_atendeu_nome, vendedor_nome, consultor_responsavel, loja ON agendamentos
+FOR EACH ROW EXECUTE FUNCTION vincular_vendedor_consultor_tgt();
+
+UPDATE agendamentos
+SET vendedor_atendeu_nome = COALESCE(NULLIF(vendedor_atendeu_nome, ''), NULLIF(vendedor_nome, ''), NULLIF(consultor_responsavel, ''))
+WHERE vendedor_consultor_id IS NULL
+  AND COALESCE(NULLIF(vendedor_atendeu_nome, ''), NULLIF(vendedor_nome, ''), NULLIF(consultor_responsavel, '')) IS NOT NULL;
+
+CREATE OR REPLACE FUNCTION atualizar_atendimento_semaforo_tgt()
+RETURNS trigger AS $$
+DECLARE
+  comp TEXT := replace(lower(coalesce(NEW.compareceu, '')), 'ã', 'a');
+  status_agenda TEXT := replace(lower(coalesce(NEW.status, '')), 'ã', 'a');
+  venda TEXT := replace(lower(coalesce(NEW.venda_gerada, '')), 'ã', 'a');
+  resultado TEXT := replace(lower(coalesce(NEW.resultado_optometrista, '')), 'ã', 'a');
+  pat TEXT := replace(lower(coalesce(NEW.patologia, '')), 'ã', 'a');
+  valor NUMERIC := coalesce(NEW.valor_venda, 0);
+BEGIN
+  IF resultado = 'patologia' OR pat = 'sim' THEN
+    NEW.atendimento_semaforo := 'azul';
+    NEW.atendimento_semaforo_label := 'Patologia';
+  ELSIF status_agenda IN ('nao compareceu', 'não compareceu') OR comp IN ('nao', 'não', 'nao compareceu', 'não compareceu') THEN
+    NEW.atendimento_semaforo := 'vermelho';
+    NEW.atendimento_semaforo_label := 'Não compareceu';
+  ELSIF comp IN ('sim', 'compareceu') OR status_agenda IN ('compareceu', 'concluido', 'concluído') THEN
+    IF venda = 'sim' OR valor > 0 THEN
+      NEW.atendimento_semaforo := 'verde';
+      NEW.atendimento_semaforo_label := 'Compareceu e comprou';
+    ELSE
+      NEW.atendimento_semaforo := 'amarelo';
+      NEW.atendimento_semaforo_label := 'Compareceu e não comprou';
+    END IF;
+  ELSE
+    NEW.atendimento_semaforo := '';
+    NEW.atendimento_semaforo_label := '';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_atualizar_atendimento_semaforo_tgt ON agendamentos;
+CREATE TRIGGER trg_atualizar_atendimento_semaforo_tgt
+BEFORE INSERT OR UPDATE OF compareceu, status, venda_gerada, valor_venda, patologia, resultado_optometrista
+ON agendamentos
+FOR EACH ROW EXECUTE FUNCTION atualizar_atendimento_semaforo_tgt();
+
+UPDATE agendamentos
+SET compareceu = compareceu
+WHERE atendimento_semaforo IS NULL OR atendimento_semaforo = '';
 
 ALTER TABLE agendamentos
   ADD COLUMN IF NOT EXISTS lembrete_2h_em TIMESTAMPTZ;
