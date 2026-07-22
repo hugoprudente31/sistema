@@ -33,3 +33,18 @@ test('gestão de usuários carrega automaticamente e oferece filtros objetivos',
   assert.match(html, /limparFormularioMeta\(\);\s*carregarUsuarios\(\);\s*return carregarMetasAdmin\(\)/);
   assert.doesNotMatch(html, />Atualizar lista</);
 });
+
+test('perfil Admin usa navegação focada por área sem remover módulos existentes', () => {
+  assert.match(html, /id="adminWorkspaceNav"/);
+  assert.match(html, /Visão Executiva/);
+  assert.match(html, /Operação e OS/);
+  assert.match(html, /Financeiro/);
+  assert.match(html, /Metas e Equipe/);
+  assert.match(html, /id="adminNavTecnica"[^>]*class="hidden"|class="hidden"[^>]*id="adminNavTecnica"/);
+  assert.match(html, /function mostrarAreaAdmin\(area, botao\)/);
+  assert.match(html, /if \(p\.isAdmin\) mostrarAreaAdmin\('executivo'\)/);
+  assert.match(html, /if \(p\.isSuperAdmin\) byId\('adminNavTecnica'\)\.classList\.remove\('hidden'\)/);
+  for (const id of ['cardDashboardExecutivo','cardDashboardOperacional','cardAgendamento','cardOperacaoOS','cardFinanceiro','cardMetasAdmin','cardUsuarios','areaTecnica']) {
+    assert.match(html, new RegExp(`id="${id}"`));
+  }
+});

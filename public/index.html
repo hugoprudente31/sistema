@@ -324,6 +324,12 @@
     .business-alert.medio { background:#fffbeb; color:#92400e; border-left-color:#f59e0b; }
     .goal-progress { min-width:120px; height:8px; background:#e5e7eb; border-radius:999px; overflow:hidden; margin-top:5px; }
     .goal-progress i { display:block; height:100%; background:#f97316; }
+    .admin-workspace-nav { position:sticky; top:8px; z-index:30; padding:14px; border:1px solid #fed7aa; background:rgba(255,255,255,.96); backdrop-filter:blur(8px); }
+    .admin-nav-buttons { display:flex; flex-wrap:wrap; gap:8px; }
+    .admin-nav-buttons button { width:auto; min-width:145px; background:#fff7ed; color:#9a3412; border:1px solid #fed7aa; box-shadow:none; }
+    .admin-nav-buttons button.active { background:#ea580c; color:#fff; border-color:#ea580c; }
+    .admin-nav-summary { margin-top:8px; color:#78716c; font-size:12px; }
+    .admin-focused-hidden { display:none !important; }
     @media (max-width:760px) { .user-filter-bar { grid-template-columns:1fr; } }
     @media (max-width:760px) { .executive-filters { grid-template-columns:1fr; } }
   </style>
@@ -364,7 +370,22 @@
   </div>
 
   <div id="app" class="hidden">
-    <div class="card">
+    <div class="card hidden admin-workspace-nav" id="adminWorkspaceNav">
+      <div class="topbar">
+        <div><h3 style="margin:0 0 4px;">Área de trabalho do Admin</h3><div class="legend-mini">Escolha uma área para trabalhar com mais foco.</div></div>
+        <div class="pill" id="adminAreaAtual">Visão Executiva</div>
+      </div>
+      <div class="admin-nav-buttons" style="margin-top:12px;">
+        <button class="active" data-admin-area="executivo" onclick="mostrarAreaAdmin('executivo',this)">Visão Executiva</button>
+        <button data-admin-area="operacao" onclick="mostrarAreaAdmin('operacao',this)">Operação e OS</button>
+        <button data-admin-area="financeiro" onclick="mostrarAreaAdmin('financeiro',this)">Financeiro</button>
+        <button data-admin-area="gestao" onclick="mostrarAreaAdmin('gestao',this)">Metas e Equipe</button>
+        <button class="hidden" id="adminNavTecnica" data-admin-area="tecnica" onclick="mostrarAreaAdmin('tecnica',this)">Central Técnica</button>
+      </div>
+      <div class="admin-nav-summary" id="adminAreaResumo">Indicadores estratégicos, lojas, clientes, setores, consultores e alertas.</div>
+    </div>
+
+    <div class="card" id="cardIdentidadeUsuario">
       <div class="topbar">
         <div>
           <h2>Sistema de Agendamento</h2>
@@ -385,7 +406,7 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card" id="cardDashboardOperacional">
       <div class="area-heading" style="padding:12px 14px;margin-bottom:14px;">
         <h3>Visão Operacional do Grupo TGT</h3>
         <p>Indicadores, prioridades do dia e acompanhamento das lojas em um único fluxo.</p>
@@ -431,7 +452,7 @@
       <div id="msgForm" class="msg"></div>
     </div>
 
-    <div class="card">
+    <div class="card" id="cardOperacaoOS">
       <div class="topbar" style="margin-bottom:14px;">
         <h3 style="margin:0;">Painel de Acompanhamento de OS</h3>
         <div class="command-bar">
@@ -1251,12 +1272,59 @@ function logout() {
     .finally(function() { location.reload(); });
 }
 
+var ADMIN_AREAS = {
+  executivo: {
+    titulo: 'Visão Executiva',
+    resumo: 'Indicadores estratégicos, lojas, clientes, setores, consultores e alertas.',
+    cards: ['cardDashboardExecutivo','cardDashboardOperacional']
+  },
+  operacao: {
+    titulo: 'Operação e OS',
+    resumo: 'Novo agendamento, acompanhamento de clientes, OS, lead time e histórico operacional.',
+    cards: ['cardAgendamento','cardOperacaoOS','cardLeadTime','cardHistorico']
+  },
+  financeiro: {
+    titulo: 'Financeiro',
+    resumo: 'Faturamento, descontos, ticket médio e relatórios financeiros.',
+    cards: ['cardFinanceiro']
+  },
+  gestao: {
+    titulo: 'Metas e Equipe',
+    resumo: 'Metas do grupo, lojas e consultores, usuários e recuperação de registros.',
+    cards: ['areaAdministracao','cardMetasAdmin','cardUsuarios','cardLixeira']
+  },
+  tecnica: {
+    titulo: 'Central Técnica',
+    resumo: 'Manutenção do sistema, integrações, Kommo e diagnósticos exclusivos do criador.',
+    cards: ['areaTecnica','cardKommoDiag']
+  }
+};
+
+function mostrarAreaAdmin(area, botao) {
+  if (!(state.user && state.user.permissions && state.user.permissions.isAdmin)) return;
+  var config = ADMIN_AREAS[area] || ADMIN_AREAS.executivo;
+  Object.keys(ADMIN_AREAS).forEach(function(chave) {
+    ADMIN_AREAS[chave].cards.forEach(function(id) {
+      var card = byId(id); if (card) card.classList.add('admin-focused-hidden');
+    });
+  });
+  config.cards.forEach(function(id) { var card = byId(id); if (card) card.classList.remove('admin-focused-hidden'); });
+  document.querySelectorAll('[data-admin-area]').forEach(function(el) { el.classList.remove('active'); });
+  var ativo = botao || document.querySelector('[data-admin-area="' + area + '"]');
+  if (ativo) ativo.classList.add('active');
+  byId('adminAreaAtual').textContent = config.titulo;
+  byId('adminAreaResumo').textContent = config.resumo;
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
 function aplicarPermissoesTela() {
   var p = state.user.permissions || {};
   if (p.isAdmin) byId('areaAdministracao').classList.remove('hidden');
+  if (p.isAdmin) byId('adminWorkspaceNav').classList.remove('hidden');
   if (p.isAdmin) byId('cardMetasAdmin').classList.remove('hidden');
   if (p.isAdmin) byId('cardDashboardExecutivo').classList.remove('hidden');
   if (p.isSuperAdmin) byId('areaTecnica').classList.remove('hidden');
+  if (p.isSuperAdmin) byId('adminNavTecnica').classList.remove('hidden');
   if (p.isAdmin) byId('btnLixeira').classList.remove('hidden');
   if (p.isAdmin) byId('cardUsuarios').classList.remove('hidden');
   if (p.canCreateAgendamento) byId('cardAgendamento').classList.remove('hidden');
@@ -1268,6 +1336,7 @@ function aplicarPermissoesTela() {
   if (['admin', 'atendimento central', 'gerente de loja'].indexOf(roleName()) > -1) byId('btnLeadTime').classList.remove('hidden');
   if (p.isAdmin || roleName() === 'gerente de loja') byId('btnHistorico').classList.remove('hidden');
   byId('filtroMeus').checked = false;
+  if (p.isAdmin) mostrarAreaAdmin('executivo');
 }
 
 function carregarInfoBase() {
