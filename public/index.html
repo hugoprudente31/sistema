@@ -298,6 +298,17 @@
     .area-heading h3 { margin: 0 0 4px; }
     .area-heading p { margin: 0; color: #6b7280; font-size: 13px; }
     .creator-badge { display:inline-block; margin-top:6px; padding:5px 10px; border-radius:999px; background:#7f1d1d; color:#fff; font-size:12px; font-weight:800; }
+    .command-bar { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-start; }
+    .action-menu { position:relative; min-width:220px; }
+    .action-menu summary { list-style:none; cursor:pointer; text-align:center; }
+    .action-menu summary::-webkit-details-marker { display:none; }
+    .action-menu[open] { z-index:20; }
+    .action-menu-panel { position:absolute; top:calc(100% + 6px); left:0; width:100%; padding:8px; border:1px solid var(--line); border-radius:12px; background:#fff; box-shadow:0 14px 28px rgba(0,0,0,.16); }
+    .action-menu-panel button { min-width:0; width:100%; margin:4px 0; box-shadow:none; }
+    .technical-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px; margin-top:16px; }
+    .technical-grid button { min-width:0; width:100%; }
+    .user-filter-bar { display:grid; grid-template-columns:minmax(240px,2fr) minmax(180px,1fr) minmax(160px,1fr); gap:10px; margin:12px 0 16px; }
+    @media (max-width:760px) { .user-filter-bar { grid-template-columns:1fr; } }
   </style>
   <script>
     (function({d=document,s='script',id='bacrmtrk', cKey, oKey}){
@@ -406,18 +417,16 @@
     <div class="card">
       <div class="topbar" style="margin-bottom:14px;">
         <h3 style="margin:0;">Painel de Acompanhamento de OS</h3>
-        <div style="display:flex;gap:10px;flex-wrap:wrap;min-width:250px;">
-          <button class="btn-relatorio" onclick="gerarRelatorioCSV()">Relatório CSV</button>
-          <button class="btn-relatorio" style="background:#1d4ed8;" onclick="gerarAgendaPDF()">📄 Baixar PDF</button>
+        <div class="command-bar">
+          <details class="action-menu">
+            <summary class="btn-relatorio">Exportar relatório ▾</summary>
+            <div class="action-menu-panel">
+              <button onclick="gerarRelatorioCSV()">Baixar CSV</button>
+              <button style="background:#1d4ed8;" onclick="gerarAgendaPDF()">Baixar PDF</button>
+            </div>
+          </details>
           <button class="btn-relatorio hidden" id="btnLeadTime" onclick="carregarLeadTime()">Lead Time</button>
           <button class="btn-relatorio hidden" id="btnHistorico" onclick="carregarHistorico(1)">Histórico Interno</button>
-          <button class="btn-relatorio hidden" id="btnUsuarios" onclick="carregarUsuarios()">Usuários</button>
-          <button class="btn-relatorio hidden" id="btnLixeira" onclick="carregarLixeira()" style="background:#7f1d1d">🗑 Lixeira</button>
-          <button class="btn-relatorio secondary hidden" id="btnSyncSistema" onclick="sincronizarSistema()">Sincronizar sistema</button>
-          <button class="btn-relatorio hidden" id="btnKommoDiag" onclick="abrirKommoDiagnostico()" style="background:#6d28d9">Kommo: Diagnóstico</button>
-          <button class="btn-relatorio hidden" id="btnSyncKommo" onclick="syncRetroativoKommo()" style="background:#b45309">Sincronizar → Kommo</button>
-          <button class="btn-relatorio hidden" id="btnGerarNotifRetro" onclick="gerarNotificacoesRetroativas()" style="background:#0369a1">Notificações retroativas</button>
-          <button class="btn-relatorio hidden" id="btnDispararLembretes" onclick="dispararLembretes24h()" style="background:#047857">Disparar lembretes 24h</button>
         </div>
       </div>
 
@@ -614,8 +623,10 @@
     </div>
 
     <div class="card area-heading hidden" id="areaAdministracao">
-      <h3>Administração do Grupo</h3>
-      <p>Usuários, auditoria e recuperação de registros, separados da rotina operacional.</p>
+      <div class="topbar">
+        <div><h3>Administração do Grupo</h3><p>Metas, usuários, auditoria e recuperação de registros, separados da rotina operacional.</p></div>
+        <button class="btn-relatorio" id="btnLixeira" onclick="carregarLixeira(); byId('cardLixeira').scrollIntoView({behavior:'smooth'});" style="background:#7f1d1d">Abrir lixeira</button>
+      </div>
     </div>
 
     <div class="card hidden" id="cardMetasAdmin">
@@ -656,8 +667,13 @@
         <h3 style="margin:0;">Gerenciar Usuários</h3>
         <div style="display:flex;gap:10px;flex-wrap:wrap;">
           <button class="btn-relatorio" onclick="abrirModalNovoUsuario()">+ Novo Usuário</button>
-          <button class="btn-relatorio secondary" onclick="carregarUsuarios()">Atualizar lista</button>
         </div>
+      </div>
+      <p class="legend-mini">A lista é carregada automaticamente. Use os filtros para localizar uma pessoa ou equipe.</p>
+      <div class="user-filter-bar">
+        <input id="usuarioBusca" type="search" placeholder="Buscar por nome, e-mail ou loja" oninput="filtrarUsuariosAdmin()">
+        <select id="usuarioFiltroPerfil" onchange="filtrarUsuariosAdmin()"><option value="">Todos os perfis</option><option value="super_admin">Super Admin</option><option value="admin">Admin</option><option value="atendimento central">Atendimento central</option><option value="gerente de loja">Gerente de loja</option><option value="consultor de vendas">Consultor de vendas</option><option value="vendedor">Vendedor</option><option value="comprador">Comprador</option><option value="optometrista">Optometrista</option></select>
+        <select id="usuarioFiltroStatus" onchange="filtrarUsuariosAdmin()"><option value="">Ativos e inativos</option><option value="ativo">Somente ativos</option><option value="inativo">Somente inativos</option></select>
       </div>
       <div class="scroll-x">
         <table>
@@ -683,12 +699,19 @@
       </div>
     </div>
 
-    <div class="card hidden" id="cardDiagnostico"><h3>Diagnóstico Admin</h3><button onclick="executarDiagnostico()">Testar backend</button><div style="height:12px"></div><pre id="diagnosticoOut">Aguardando...</pre></div>
-
     <div class="card area-heading hidden" id="areaTecnica">
-      <h3>Central Técnica do Criador</h3>
-      <p>Responsabilidade integral de Hugo: sistema, banco de dados, Kommo e landing page do Teste de Visão.</p>
-      <span class="creator-badge">SUPER ADMIN · CRIADOR DO SISTEMA</span>
+      <div class="topbar">
+        <div><h3>Central Técnica do Criador</h3><p>Manutenção do sistema, banco de dados, Kommo e landing page. Uso exclusivo do Hugo.</p><span class="creator-badge">SUPER ADMIN · CRIADOR DO SISTEMA</span></div>
+      </div>
+      <div class="technical-grid">
+        <button class="secondary" id="btnSyncSistema" onclick="sincronizarSistema()">Sincronizar sistema</button>
+        <button id="btnKommoDiag" onclick="abrirKommoDiagnostico()" style="background:#6d28d9">Diagnóstico do Kommo</button>
+        <button id="btnSyncKommo" onclick="syncRetroativoKommo()" style="background:#b45309">Sincronizar agendamentos → Kommo</button>
+        <button id="btnGerarNotifRetro" onclick="gerarNotificacoesRetroativas()" style="background:#0369a1">Gerar notificações retroativas</button>
+        <button id="btnDispararLembretes" onclick="dispararLembretes24h()" style="background:#047857">Disparar lembretes 24h</button>
+        <button onclick="executarDiagnostico()">Executar diagnóstico completo</button>
+      </div>
+      <div style="height:12px"></div><pre id="diagnosticoOut">Diagnóstico ainda não executado.</pre>
     </div>
 
     <div class="card hidden" id="cardKommoDiag">
@@ -1155,6 +1178,7 @@ function fazerLogin() {
       return carregarInfoBase().then(function() {
         if (state.user && state.user.permissions && state.user.permissions.isAdmin) {
           limparFormularioMeta();
+          carregarUsuarios();
           return carregarMetasAdmin();
         }
       }).then(function() {
@@ -1184,14 +1208,8 @@ function aplicarPermissoesTela() {
   if (p.isAdmin) byId('areaAdministracao').classList.remove('hidden');
   if (p.isAdmin) byId('cardMetasAdmin').classList.remove('hidden');
   if (p.isSuperAdmin) byId('areaTecnica').classList.remove('hidden');
-  if (p.isSuperAdmin) byId('cardDiagnostico').classList.remove('hidden');
-  if (p.isAdmin) byId('btnUsuarios').classList.remove('hidden');
   if (p.isAdmin) byId('btnLixeira').classList.remove('hidden');
   if (p.isAdmin) byId('cardUsuarios').classList.remove('hidden');
-  if (p.isSuperAdmin) byId('btnKommoDiag').classList.remove('hidden');
-  if (p.isSuperAdmin) byId('btnGerarNotifRetro').classList.remove('hidden');
-  if (p.isSuperAdmin) byId('btnDispararLembretes').classList.remove('hidden');
-  if (p.isSuperAdmin) byId('btnSyncKommo').classList.remove('hidden');
   if (p.canCreateAgendamento) byId('cardAgendamento').classList.remove('hidden');
   if (p.canViewFinance) {
     byId('cardFinanceiro').classList.remove('hidden');
@@ -1200,7 +1218,6 @@ function aplicarPermissoesTela() {
   if (p.canExportFinance) byId('btnExportFinance').classList.remove('hidden');
   if (['admin', 'atendimento central', 'gerente de loja'].indexOf(roleName()) > -1) byId('btnLeadTime').classList.remove('hidden');
   if (p.isAdmin || roleName() === 'gerente de loja') byId('btnHistorico').classList.remove('hidden');
-  if (p.isSuperAdmin) byId('btnSyncSistema').classList.remove('hidden');
   byId('filtroMeus').checked = false;
 }
 
@@ -2679,6 +2696,7 @@ function sincronizarSistema() {
 }
 
 var metasAdminCache = [];
+var usuariosAdminCache = [];
 
 function prepararLojasMeta() {
   var el = byId('metaLoja');
@@ -2795,11 +2813,33 @@ function limparFormularioMeta() {
 function carregarUsuarios() {
   byId('cardUsuarios').classList.remove('hidden');
   byId('usuariosBody').innerHTML = '<tr><td colspan="7"><div class="loading-box">Carregando usuários...</div></td></tr>';
-  apiGet('/api/usuarios')
+  return apiGet('/api/usuarios')
     .then(function(res) {
-      var rows = Array.isArray(res.usuarios) ? res.usuarios : [];
+      usuariosAdminCache = Array.isArray(res.usuarios) ? res.usuarios : [];
+      filtrarUsuariosAdmin();
+    })
+    .catch(function(err) {
+      byId('usuariosBody').innerHTML = '<tr><td colspan="7" class="err">Erro: ' + escapeHtml(err.message||String(err)) + '</td></tr>';
+    });
+}
+
+function filtrarUsuariosAdmin() {
+  var termo = normalizeKey((byId('usuarioBusca') || {}).value || '');
+  var perfil = String((byId('usuarioFiltroPerfil') || {}).value || '').toLowerCase();
+  var status = String((byId('usuarioFiltroStatus') || {}).value || '');
+  var rows = usuariosAdminCache.filter(function(u) {
+    var haystack = normalizeKey([u.nome, u.email, u.loja].join(' '));
+    var cargo = String(u.cargo || '').toLowerCase();
+    var perfilOk = !perfil || cargo === perfil || (perfil === 'super_admin' && u.protected);
+    var statusOk = !status || (status === 'ativo' ? u.ativo !== false : u.ativo === false);
+    return (!termo || haystack.indexOf(termo) > -1) && perfilOk && statusOk;
+  });
+  renderizarUsuariosAdmin(rows);
+}
+
+function renderizarUsuariosAdmin(rows) {
       if (!rows.length) {
-        byId('usuariosBody').innerHTML = '<tr><td colspan="7">Nenhum usuário cadastrado ainda.</td></tr>';
+        byId('usuariosBody').innerHTML = '<tr><td colspan="7">Nenhum usuário encontrado para os filtros informados.</td></tr>';
         return;
       }
       byId('usuariosBody').innerHTML = rows.map(function(u) {
@@ -2819,10 +2859,6 @@ function carregarUsuarios() {
           '<td><span class="status ' + (u.ativo === false ? 'red' : 'green') + '">' + (u.ativo === false ? 'Inativo' : 'Ativo') + '</span></td>' +
           '<td style="display:flex;gap:6px">' + actions + '</td></tr>';
       }).join('');
-    })
-    .catch(function(err) {
-      byId('usuariosBody').innerHTML = '<tr><td colspan="7" class="err">Erro: ' + escapeHtml(err.message||String(err)) + '</td></tr>';
-    });
 }
 
 function abrirModalNovoUsuario() {
