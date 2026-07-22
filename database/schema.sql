@@ -2,11 +2,24 @@
 -- PostgreSQL — Regras finais TGT: cargos, auditoria, OS, financeiro real e bloqueio de teste
 BEGIN;
 
+CREATE TABLE IF NOT EXISTS vendedores_consultores (
+  id BIGSERIAL PRIMARY KEY,
+  nome TEXT NOT NULL,
+  nome_chave TEXT NOT NULL,
+  loja TEXT NOT NULL DEFAULT '',
+  loja_chave TEXT NOT NULL DEFAULT '',
+  ativo BOOLEAN NOT NULL DEFAULT true,
+  criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (nome_chave, loja_chave)
+);
+
 ALTER TABLE agendamentos
   ADD COLUMN IF NOT EXISTS agendado_por_nome TEXT,
   ADD COLUMN IF NOT EXISTS agendado_por_email TEXT,
   ADD COLUMN IF NOT EXISTS vendedor_atendeu_nome TEXT,
   ADD COLUMN IF NOT EXISTS vendedor_atendeu_email TEXT,
+  ADD COLUMN IF NOT EXISTS vendedor_consultor_id BIGINT REFERENCES vendedores_consultores(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS ultima_alteracao_por_nome TEXT,
   ADD COLUMN IF NOT EXISTS ultima_alteracao_por_email TEXT,
   ADD COLUMN IF NOT EXISTS ultima_alteracao_em TIMESTAMP,
@@ -14,6 +27,44 @@ ALTER TABLE agendamentos
   ADD COLUMN IF NOT EXISTS resultado_optometrista TEXT DEFAULT 'Pendente',
   ADD COLUMN IF NOT EXISTS atendimento_semaforo TEXT DEFAULT '',
   ADD COLUMN IF NOT EXISTS atendimento_semaforo_label TEXT DEFAULT '';
+
+CREATE OR REPLACE FUNCTION normalizar_identidade_comercial_tgt(valor TEXT)
+RETURNS TEXT AS $$
+  SELECT REGEXP_REPLACE(
+    TRANSLATE(LOWER(TRIM(COALESCE(valor,''))),
+      'áàâãäéèêëíìîïóòôõöúùûüç',
+      'aaaaaeeeeiiiiooooouuuuc'),
+    '\s+', ' ', 'g');
+$$ LANGUAGE sql IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION vincular_vendedor_consultor_tgt()
+RETURNS trigger AS $$
+DECLARE
+  nome_comercial TEXT := COALESCE(NULLIF(TRIM(NEW.vendedor_atendeu_nome), ''), NULLIF(TRIM(NEW.vendedor_nome), ''), NULLIF(TRIM(NEW.consultor_responsavel), ''));
+  identidade_id BIGINT;
+BEGIN
+  IF nome_comercial IS NULL THEN RETURN NEW; END IF;
+  INSERT INTO vendedores_consultores (nome, nome_chave, loja, loja_chave, ativo, atualizado_em)
+  VALUES (nome_comercial, normalizar_identidade_comercial_tgt(nome_comercial), COALESCE(NEW.loja, ''), normalizar_identidade_comercial_tgt(NEW.loja), true, CURRENT_TIMESTAMP)
+  ON CONFLICT (nome_chave, loja_chave) DO UPDATE SET ativo = true, atualizado_em = CURRENT_TIMESTAMP
+  RETURNING id INTO identidade_id;
+  NEW.vendedor_consultor_id := identidade_id;
+  NEW.vendedor_atendeu_nome := COALESCE(NULLIF(NEW.vendedor_atendeu_nome, ''), nome_comercial);
+  NEW.vendedor_nome := COALESCE(NULLIF(NEW.vendedor_nome, ''), nome_comercial);
+  NEW.consultor_responsavel := COALESCE(NULLIF(NEW.consultor_responsavel, ''), nome_comercial);
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_vincular_vendedor_consultor_tgt ON agendamentos;
+CREATE TRIGGER trg_vincular_vendedor_consultor_tgt
+BEFORE INSERT OR UPDATE OF vendedor_atendeu_nome, vendedor_nome, consultor_responsavel, loja ON agendamentos
+FOR EACH ROW EXECUTE FUNCTION vincular_vendedor_consultor_tgt();
+
+UPDATE agendamentos
+SET vendedor_atendeu_nome = COALESCE(NULLIF(vendedor_atendeu_nome, ''), NULLIF(vendedor_nome, ''), NULLIF(consultor_responsavel, ''))
+WHERE vendedor_consultor_id IS NULL
+  AND COALESCE(NULLIF(vendedor_atendeu_nome, ''), NULLIF(vendedor_nome, ''), NULLIF(consultor_responsavel, '')) IS NOT NULL;
 
 CREATE OR REPLACE FUNCTION atualizar_atendimento_semaforo_tgt()
 RETURNS trigger AS $$

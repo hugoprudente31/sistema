@@ -375,7 +375,7 @@
       <div class="row"><div><label>Loja *</label><select id="loja" onchange="carregarOptometristas()"></select></div><div><label>Optometrista *</label><select id="optometrista"></select></div></div>
       <div class="row"><div><label>Data do agendamento *</label><input id="dataAgendamento" type="date"></div><div><label>Horário *</label><input id="horario" type="time"></div></div>
       <div class="row"><div><label>Status *</label><select id="statusAgenda"><option value="">Selecione</option><option>Agendado</option><option>Confirmado</option></select></div><div><label>Tag de acesso</label><select id="accessTag"></select><div class="legend-mini" style="margin-top:6px;">Tags padronizadas de origem, perfil, prioridade, fluxo, comercial, loja e operação.</div></div></div>
-      <div class="row"><div><label>Consultor / Vendedor <span style="color:#e24b4a">*</span></label><input id="consultorVendedor" type="text" placeholder="Digite seu nome completo"></div><div><label>Observação *</label><textarea id="observacao" placeholder="Informações importantes"></textarea></div></div>
+      <div class="row"><div><label>Consultor / Vendedor <span style="color:#e24b4a">*</span></label><input id="consultorVendedor" type="text" list="listaVendedoresConsultores" placeholder="Digite ou selecione seu nome completo"><datalist id="listaVendedoresConsultores"></datalist><div class="legend-mini">Ao selecionar um nome existente, o sistema reutiliza o mesmo ID. Nomes novos são cadastrados automaticamente.</div></div><div><label>Observação *</label><textarea id="observacao" placeholder="Informações importantes"></textarea></div></div>
       <div class="row"><div><button onclick="salvarAgendamento()">Salvar agendamento</button></div><div><button class="secondary" onclick="limparFormulario()">Limpar</button></div></div>
       <div id="msgForm" class="msg"></div>
     </div>
@@ -828,6 +828,7 @@ function mapAgendamentoDb(r) {
     AccessTags: r.access_tags || '',
     LeadTimeDias: r.lead_time_dias || '',
     VendedorNome: r.vendedor_nome || '',
+    VendedorConsultorId: r.vendedor_consultor_id || '',
     KommoLeadId: r.kommo_lead_id || '',
     AgendadoPorNome: r.agendado_por_nome || r.proprietario_nome || r.responsavel || '',
     AgendadoPorEmail: r.agendado_por_email || r.criado_por_email || '',
@@ -1542,6 +1543,7 @@ function preencherAccessTags() {
 function carregarOptometristas() {
   var loja = byId('loja').value;
   var el = byId('optometrista');
+  carregarVendedoresConsultores(loja);
   if (!loja) {
     el.innerHTML = '<option value="">Selecione a loja primeiro</option>';
     return;
@@ -1715,6 +1717,9 @@ function salvarAgendamento() {
       status: payload.statusAgenda || 'Agendado',
       proprietario_nome: payload.consultorNome,
       responsavel: payload.consultorNome,
+      vendedor_nome: payload.consultorNome,
+      vendedor_atendeu_nome: payload.consultorNome,
+      consultor_responsavel: payload.consultorNome,
       access_tags: payload.accessTags || null
     }).then(function(agendaRes) {
       return { cliente: clienteRes, agenda: agendaRes };
@@ -1907,6 +1912,20 @@ function marcarResultadoOptometrista(id, valor) {
       throw err;
     })
     .finally(function() { showLoading(false); });
+}
+
+function carregarVendedoresConsultores(loja) {
+  var listaEl = byId('listaVendedoresConsultores');
+  if (!listaEl) return;
+  if (!loja) { listaEl.innerHTML = ''; return; }
+  apiGet('/api/vendedores-consultores?loja=' + encodeURIComponent(loja))
+    .then(function(res) {
+      var lista = Array.isArray(res.vendedoresConsultores) ? res.vendedoresConsultores : [];
+      listaEl.innerHTML = lista.map(function(item) {
+        return '<option value="' + escapeHtml(item.nome || '') + '" label="ID ' + escapeHtml(String(item.id || '')) + '"></option>';
+      }).join('');
+    })
+    .catch(function() { listaEl.innerHTML = ''; });
 }
 function cancelarAgendamento(id) { if (confirm('Cancelar este agendamento?')) return runAction('cancelarAgendamento', id); return Promise.resolve(false); }
 function excluirAgendamento(id) { if (confirm('Deseja realmente excluir este agendamento?')) return runAction('excluirAgendamento', id); return Promise.resolve(false); }
