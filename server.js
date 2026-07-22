@@ -4148,6 +4148,106 @@ app.get("/api/dashboard", async (req, res) => {
   }
 });
 
+function executiveMetricRow(row = {}) {
+  const number = (key) => Number(row[key] || 0);
+  const agendamentos = number("agendamentos");
+  const comparecimentos = number("comparecimentos");
+  const vendas = number("vendas");
+  const faturamento = number("faturamento");
+  return {
+    ...row,
+    agendamentos,
+    clientes: number("clientes"),
+    comparecimentos,
+    faltas: number("faltas"),
+    vendas,
+    faturamento,
+    descontos: number("descontos"),
+    os_ativas: number("os_ativas"),
+    os_atrasadas: number("os_atrasadas"),
+    lead_time_medio: number("lead_time_medio"),
+    ticket_medio: vendas ? Number((faturamento / vendas).toFixed(2)) : 0,
+    taxa_comparecimento: agendamentos ? Number((comparecimentos * 100 / agendamentos).toFixed(1)) : 0,
+    taxa_conversao: comparecimentos ? Number((vendas * 100 / comparecimentos).toFixed(1)) : 0,
+    desconto_percentual: faturamento ? Number((number("descontos") * 100 / faturamento).toFixed(1)) : 0
+  };
+}
+
+app.get("/api/admin/dashboard-executivo", requireAdmin, async (req, res) => {
+  try {
+    const hoje = new Date().toISOString().slice(0, 10);
+    const inicio = clean(req.query.inicio) || `${hoje.slice(0, 7)}-01`;
+    const fim = clean(req.query.fim) || hoje;
+    const loja = clean(req.query.loja);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(inicio) || !/^\d{4}-\d{2}-\d{2}$/.test(fim) || inicio > fim) {
+      return res.status(400).json({ ok: false, message: "Período inválido." });
+    }
+    const params = [inicio, fim];
+    const lojaCondition = loja ? (params.push(loja), `AND ${storeSql("a.loja", `$${params.length}`)}`) : "";
+    const baseWhere = `a.excluido_em IS NULL AND a.nome NOT ILIKE '%teste%'
+      AND COALESCE(a.loja,'') NOT ILIKE '%teste%'
+      AND COALESCE(a.data_agendamento, a.criado_em::date) BETWEEN $1::date AND $2::date ${lojaCondition}`;
+    const metricSql = `
+      COUNT(*)::int AS agendamentos,
+      COUNT(DISTINCT COALESCE(NULLIF(REGEXP_REPLACE(a.whatsapp, '\\D','','g'),''), NULLIF(LOWER(a.email),''), LOWER(a.nome)))::int AS clientes,
+      COUNT(*) FILTER (WHERE LOWER(COALESCE(a.compareceu,'')) IN ('sim','compareceu','true','1') OR LOWER(COALESCE(a.status,'')) IN ('compareceu','concluído','concluido'))::int AS comparecimentos,
+      COUNT(*) FILTER (WHERE LOWER(COALESCE(a.compareceu,'')) IN ('não','nao','não compareceu','nao compareceu') OR LOWER(COALESCE(a.status,'')) IN ('não compareceu','nao compareceu'))::int AS faltas,
+      COUNT(*) FILTER (WHERE COALESCE(a.valor_venda,0) > 0)::int AS vendas,
+      COALESCE(SUM(a.valor_venda),0)::numeric AS faturamento,
+      COALESCE(SUM(a.desconto),0)::numeric AS descontos,
+      COUNT(*) FILTER (WHERE NULLIF(a.numero_os,'') IS NOT NULL AND LOWER(COALESCE(a.status_os,'')) NOT IN ('concluído','concluido','entregue','cancelada','cancelado','reembolso'))::int AS os_ativas,
+      COUNT(*) FILTER (WHERE a.data_entrega_os < CURRENT_DATE AND LOWER(COALESCE(a.status_os,'')) NOT IN ('concluído','concluido','entregue','cancelada','cancelado','reembolso'))::int AS os_atrasadas,
+      COALESCE(AVG(COALESCE(a.lead_time_dias, a.data_finalizacao_os - a.data_abertura_os)) FILTER (WHERE a.data_finalizacao_os IS NOT NULL),0)::numeric AS lead_time_medio`;
+
+    const [resumoResult, lojasResult, consultoresResult, origensResult, tendenciaResult, metasResult] = await Promise.all([
+      pool.query(`SELECT ${metricSql} FROM agendamentos a WHERE ${baseWhere}`, params),
+      pool.query(`SELECT COALESCE(NULLIF(a.loja,''),'Sem loja') AS loja, ${metricSql} FROM agendamentos a WHERE ${baseWhere} GROUP BY a.loja ORDER BY faturamento DESC`, params),
+      pool.query(`SELECT a.vendedor_consultor_id AS id,
+          COALESCE(NULLIF(MAX(v.nome),''), NULLIF(MAX(a.vendedor_nome),''), NULLIF(MAX(a.consultor_responsavel),''), 'Não informado') AS consultor,
+          COALESCE(NULLIF(a.loja,''),'Sem loja') AS loja, ${metricSql}
+        FROM agendamentos a LEFT JOIN vendedores_consultores v ON v.id = a.vendedor_consultor_id
+        WHERE ${baseWhere} GROUP BY a.vendedor_consultor_id, a.loja ORDER BY faturamento DESC`, params),
+      pool.query(`SELECT COALESCE(NULLIF(a.origem,''),'Não informada') AS origem, ${metricSql}
+        FROM agendamentos a WHERE ${baseWhere} GROUP BY a.origem ORDER BY agendamentos DESC`, params),
+      pool.query(`SELECT TO_CHAR(DATE_TRUNC('month', COALESCE(a.data_agendamento,a.criado_em::date)), 'YYYY-MM') AS competencia,
+          ${metricSql} FROM agendamentos a WHERE ${baseWhere}
+        GROUP BY DATE_TRUNC('month', COALESCE(a.data_agendamento,a.criado_em::date)) ORDER BY competencia`, params),
+      pool.query(`${META_SELECT} WHERE m.ativo = true AND m.competencia BETWEEN DATE_TRUNC('month',$1::date) AND DATE_TRUNC('month',$2::date) ORDER BY m.tipo_escopo,m.loja,v.nome`, [inicio, fim])
+    ]);
+
+    const resumo = executiveMetricRow(resumoResult.rows[0]);
+    const setores = [
+      { setor: "Atendimento e agenda", indicador: "Comparecimento", realizado: resumo.taxa_comparecimento, unidade: "%", base: resumo.agendamentos },
+      { setor: "Optometria", indicador: "Atendimentos realizados", realizado: resumo.comparecimentos, unidade: "clientes", base: resumo.clientes },
+      { setor: "Comercial", indicador: "Conversão em vendas", realizado: resumo.taxa_conversao, unidade: "%", base: resumo.vendas },
+      { setor: "Laboratório e OS", indicador: "Prazo médio", realizado: resumo.lead_time_medio, unidade: "dias", base: resumo.os_ativas },
+      { setor: "Marketing", indicador: "Clientes gerados", realizado: resumo.clientes, unidade: "clientes", base: origensResult.rows.length }
+    ];
+    const alertas = [];
+    if (resumo.taxa_comparecimento < 70) alertas.push({ nivel: "alto", area: "Atendimento", mensagem: "Comparecimento abaixo de 70%. Reforçar confirmação e lembretes." });
+    if (resumo.taxa_conversao < 35) alertas.push({ nivel: "alto", area: "Comercial", mensagem: "Conversão abaixo de 35%. Revisar abordagem e motivos de perda." });
+    if (resumo.os_atrasadas > 0) alertas.push({ nivel: "alto", area: "OS", mensagem: `${resumo.os_atrasadas} OS atrasada(s) precisam de ação.` });
+    if (resumo.desconto_percentual > 10) alertas.push({ nivel: "medio", area: "Financeiro", mensagem: "Desconto médio acima de 10% do faturamento." });
+    if (!alertas.length) alertas.push({ nivel: "ok", area: "Grupo", mensagem: "Nenhum alerta crítico no período selecionado." });
+
+    res.setHeader("Cache-Control", "no-store");
+    res.json({
+      ok: true,
+      periodo: { inicio, fim, loja: loja || null },
+      resumo,
+      lojas: lojasResult.rows.map(executiveMetricRow),
+      consultores: consultoresResult.rows.map(executiveMetricRow),
+      origens: origensResult.rows.map(executiveMetricRow),
+      tendencia: tendenciaResult.rows.map(executiveMetricRow),
+      setores,
+      metas: metasResult.rows,
+      alertas
+    });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: "Erro ao carregar o painel executivo.", error: error.message });
+  }
+});
+
 // ===============================
 // DESEMPENHO DE ANÚNCIOS (Meta/Google Ads via AdAnalyzer)
 // ===============================
