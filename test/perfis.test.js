@@ -250,6 +250,54 @@ test('central: NÃO pode marcar check-in não compareceu — 403', async functio
   } finally { restore(); }
 });
 
+test('central: corrige nome/WhatsApp num agendamento já marcado Compareceu — 200 (o formulário reenvia o status sem mudar)', async function() {
+  const r1 = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(G, { status: 'Compareceu', compareceu: 'Sim' })] } });
+  const r2 = withConnect(ag(G, { nome: 'Maria Silva Corrigida' }));
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('atendimento central', G)),
+      // o formulário sempre reenvia o statusAgenda atual junto, mesmo sem mudar
+      body: JSON.stringify({ nome: 'Maria Silva Corrigida', whatsApp: '11999998888', statusAgenda: 'Compareceu' })
+    });
+    assert.equal(r.status, 200, 'corrigir dado do cliente não deveria esbarrar no bloqueio de presença');
+  } finally { r1(); r2(); }
+});
+
+test('central: corrige nome num agendamento já marcado Não Compareceu — 200', async function() {
+  const r1 = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(E, { status: 'Não Compareceu', compareceu: 'Não' })] } });
+  const r2 = withConnect(ag(E, { nome: 'João Corrigido' }));
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('atendimento central', E)),
+      body: JSON.stringify({ nome: 'João Corrigido', statusAgenda: 'Não Compareceu' })
+    });
+    assert.equal(r.status, 200);
+  } finally { r1(); r2(); }
+});
+
+test('central: tentar mudar de fato o status para Compareceu continua bloqueado — 403', async function() {
+  const restore = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(G, { status: 'Agendado' })] } });
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('atendimento central', G)),
+      body: JSON.stringify({ statusAgenda: 'Compareceu' })
+    });
+    assert.equal(r.status, 403, 'mudar o status de verdade para Compareceu ainda é check-in/presença');
+  } finally { restore(); }
+});
+
+test('comprador: corrige nome num agendamento já marcado Compareceu — 200', async function() {
+  const r1 = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(P, { status: 'Compareceu', compareceu: 'Sim' })] } });
+  const r2 = withConnect(ag(P, { nome: 'Cliente Corrigido' }));
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('comprador', P)),
+      body: JSON.stringify({ nome: 'Cliente Corrigido', statusAgenda: 'Compareceu' })
+    });
+    assert.equal(r.status, 200);
+  } finally { r1(); r2(); }
+});
+
 // ════════════════════════════════════════════════════════════════════════════
 // 4. GERENTE DE LOJA — uma instância por loja
 // ════════════════════════════════════════════════════════════════════════════
@@ -1109,4 +1157,125 @@ test('perfis sem acesso a historico-agendamentos: retorna 403', async function()
     const r = await fetch(baseUrl + '/api/historico-agendamentos', { headers: H(tok(arr[0], arr[1])) });
     assert.equal(r.status, 403, arr[0] + ' deve ser bloqueado em historico-agendamentos');
   }
+});
+
+// ─── Reagendamento reabre como pendente (qualquer perfil) ─────────────────────
+// withConnectCaptura: como withConnect, mas guarda os params reais do UPDATE
+// para inspecionar exatamente o que foi enviado ao banco.
+function withConnectCaptura(updateRow) {
+  const orig = pool.connect;
+  const captured = {};
+  pool.connect = async function() {
+    return {
+      query: async function(sql, params) {
+        if (sql.includes('UPDATE agendamentos SET')) {
+          captured.params = params;
+          return { rows: [updateRow] };
+        }
+        return { rows: [] };
+      },
+      release: function() {}
+    };
+  };
+  return { params: captured, restore: function() { pool.connect = orig; } };
+}
+const IDX_STATUS = 9, IDX_COMPARECEU = 10, IDX_RESULTADO_OPT = 29, IDX_LIMPAR = 30;
+
+test('reagendar para nova data sem informar presença junto reabre como Agendado/Pendente e limpa resultado do optometrista', async function() {
+  const original = ag(E, {
+    status: 'Não Compareceu', compareceu: 'Não',
+    resultado_optometrista: 'Check-in Não veio', data_agendamento: '2026-07-15'
+  });
+  const r1 = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [original] } });
+  const r2 = withConnectCaptura(ag(E, { status: 'Agendado', compareceu: 'Pendente', data_agendamento: '2026-07-24' }));
+  try {
+    for (const perfil of ['vendedor', 'atendimento central', 'gerente de loja', 'admin']) {
+      const r = await fetch(baseUrl + '/api/agendamentos/100', {
+        method: 'PATCH', headers: H(tok(perfil, E)),
+        body: JSON.stringify({ data_agendamento: '2026-07-24' })
+      });
+      assert.equal(r.status, 200, perfil + ' deveria conseguir reagendar');
+      assert.equal(r2.params.params[IDX_STATUS], 'Agendado', perfil + ': status deveria reabrir como Agendado');
+      assert.equal(r2.params.params[IDX_COMPARECEU], 'Pendente', perfil + ': presença deveria voltar a Pendente');
+      assert.equal(r2.params.params[IDX_LIMPAR], 'LIMPAR', perfil + ': resultado do optometrista deveria ser limpo');
+    }
+  } finally { r1(); r2.restore(); }
+});
+
+test('reagendar informando presença/status na mesma requisição não sobrescreve o valor explícito', async function() {
+  const original = ag(E, {
+    status: 'Não Compareceu', compareceu: 'Não',
+    resultado_optometrista: 'Check-in Não veio', data_agendamento: '2026-07-15'
+  });
+  const r1 = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [original] } });
+  const r2 = withConnectCaptura(ag(E, { status: 'Confirmado', compareceu: 'Sim', data_agendamento: '2026-07-24' }));
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('gerente de loja', E)),
+      body: JSON.stringify({ data_agendamento: '2026-07-24', status: 'Confirmado', compareceu: 'Sim' })
+    });
+    assert.equal(r.status, 200);
+    assert.equal(r2.params.params[IDX_STATUS], 'Confirmado');
+    assert.equal(r2.params.params[IDX_COMPARECEU], 'Sim');
+    assert.equal(r2.params.params[IDX_LIMPAR], null, 'não deveria disparar a limpeza automática quando o status já veio explícito');
+  } finally { r1(); r2.restore(); }
+});
+
+test('editar outros campos sem mudar a data não reabre nem limpa o resultado do optometrista', async function() {
+  const original = ag(E, {
+    status: 'Não Compareceu', compareceu: 'Não',
+    resultado_optometrista: 'Check-in Não veio', data_agendamento: '2026-07-15'
+  });
+  const r1 = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [original] } });
+  const r2 = withConnectCaptura(ag(E, { observacao: 'Cliente pediu para ligar antes' }));
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('gerente de loja', E)),
+      body: JSON.stringify({ observacao: 'Cliente pediu para ligar antes' })
+    });
+    assert.equal(r.status, 200);
+    assert.equal(r2.params.params[IDX_STATUS], null, 'sem mudança de data, status não deveria ser forçado');
+    assert.equal(r2.params.params[IDX_COMPARECEU], null, 'sem mudança de data, presença não deveria ser forçada');
+    assert.equal(r2.params.params[IDX_LIMPAR], null, 'sem mudança de data, resultado do optometrista não deveria ser limpo');
+  } finally { r1(); r2.restore(); }
+});
+
+test('reagendar um atendimento marcado Não Compareceu mas com venda registrada corrige para Compareceu/Sim (verde), não volta para pendente', async function() {
+  // Cenário real: optometrista marcou "não veio", mas a venda comprova que o
+  // cliente compareceu e comprou. A venda tem que vencer tanto a marcação
+  // antiga quanto o reset automático de reagendamento.
+  const original = ag(E, {
+    status: 'Não Compareceu', compareceu: 'Não', resultado_optometrista: 'Check-in Não veio',
+    valor_venda: 1500, data_agendamento: '2026-07-10'
+  });
+  const r1 = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [original] } });
+  const r2 = withConnectCaptura(ag(E, { status: 'Compareceu', compareceu: 'Sim', data_agendamento: '2026-07-24' }));
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('gerente de loja', E)),
+      body: JSON.stringify({ data_agendamento: '2026-07-24' })
+    });
+    assert.equal(r.status, 200);
+    assert.equal(r2.params.params[IDX_STATUS], 'Compareceu', 'venda ativa deve corrigir o status mesmo reagendando a data');
+    assert.equal(r2.params.params[IDX_COMPARECEU], 'Sim', 'venda ativa deve corrigir a presença mesmo reagendando a data');
+    assert.equal(r2.params.params[IDX_LIMPAR], null, 'não deve apagar o resultado do optometrista quando já existe venda confirmada');
+  } finally { r1(); r2.restore(); }
+});
+
+test('reagendar um atendimento já marcado Compareceu (sem mudar presença) não mexe em status/presença, só na data', async function() {
+  const original = ag(E, {
+    status: 'Compareceu', compareceu: 'Sim', resultado_optometrista: 'Check-in Sim veio',
+    valor_venda: 1500, data_agendamento: '2026-07-10'
+  });
+  const r1 = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [original] } });
+  const r2 = withConnectCaptura(ag(E, { data_agendamento: '2026-07-24' }));
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('gerente de loja', E)),
+      body: JSON.stringify({ data_agendamento: '2026-07-24' })
+    });
+    assert.equal(r.status, 200);
+    assert.equal(r2.params.params[IDX_STATUS], null, 'já estava Compareceu — não precisa reescrever, COALESCE preserva');
+    assert.equal(r2.params.params[IDX_LIMPAR], null, 'não deve apagar o resultado do optometrista quando já existe venda confirmada');
+  } finally { r1(); r2.restore(); }
 });

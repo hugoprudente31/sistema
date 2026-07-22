@@ -2445,22 +2445,34 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
     if (!hasRole(req.session, ["admin", "atendimento central", "gerente de loja", "consultor de vendas", "vendedor", "comprador", "optometrista"])) {
       return res.status(403).json({ ok: false, message: "Perfil sem permissão para alterar agendamentos." });
     }
+    // O formulário sempre reenvia o status/presença atual junto com qualquer
+    // edição (mesmo quando só se está corrigindo nome/WhatsApp/e-mail), então
+    // só bloqueamos quando o valor de status realmente MUDA para compareceu/
+    // não-compareceu — reenviar o valor já existente não deve travar a edição
+    // de outros campos (ex: corrigir dado do cliente num agendamento que já
+    // está marcado Compareceu ou Não Compareceu).
+    const statusEnviadoPresenca = Object.prototype.hasOwnProperty.call(b, "status") ||
+      Object.prototype.hasOwnProperty.call(b, "statusAgenda");
     if (roleOf(req.session) === "atendimento central") {
-      const statusPresenca = clean(b.status || b.statusAgenda).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const statusAtualPresenca = clean(current.rows[0].status).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+      const statusNovoPresenca = clean(b.status || b.statusAgenda).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+      const statusMudouPresenca = statusEnviadoPresenca && statusNovoPresenca !== statusAtualPresenca;
       const alteraPresenca = Object.prototype.hasOwnProperty.call(b, "compareceu") ||
         Object.prototype.hasOwnProperty.call(b, "atendimento_realizado") ||
         Object.prototype.hasOwnProperty.call(b, "atendimentoRealizado") ||
-        ["compareceu", "nao compareceu"].includes(statusPresenca);
+        (statusMudouPresenca && ["compareceu", "nao compareceu"].includes(statusNovoPresenca));
       if (alteraPresenca) {
         return res.status(403).json({ ok: false, message: "Atendimento Central não pode registrar check-in ou presença." });
       }
     }
     if (roleOf(req.session) === "comprador") {
-      const statusPresenca = clean(b.status || b.statusAgenda).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const statusAtualPresenca = clean(current.rows[0].status).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+      const statusNovoPresenca = clean(b.status || b.statusAgenda).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+      const statusMudouPresenca = statusEnviadoPresenca && statusNovoPresenca !== statusAtualPresenca;
       const alteraPresenca = Object.prototype.hasOwnProperty.call(b, "compareceu") ||
         Object.prototype.hasOwnProperty.call(b, "atendimento_realizado") ||
         Object.prototype.hasOwnProperty.call(b, "atendimentoRealizado") ||
-        ["compareceu", "nao compareceu"].includes(statusPresenca);
+        (statusMudouPresenca && ["compareceu", "nao compareceu"].includes(statusNovoPresenca));
       if (alteraPresenca) {
         return res.status(403).json({ ok: false, message: "Comprador não pode registrar check-in ou presença." });
       }
@@ -2551,6 +2563,20 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
     const actorNome = clean(req.session.nome || "Usuário autenticado");
     const actorEmail = clean(req.session.email);
 
+    // Reagendar para uma nova data sem informar presença/status/resultado junto
+    // reabre o registro como pendente — evita ficar com "Não Compareceu" ou
+    // "Check-in Não veio" congelados de uma visita anterior após a repescagem.
+    // Vale para qualquer perfil que possa alterar a data.
+    const novaDataAgendamento = clean(b.data_agendamento || b.dataAgendamento || "").slice(0, 10);
+    const dataAgendamentoAtual = current.rows[0].data_agendamento
+      ? String(current.rows[0].data_agendamento).slice(0, 10) : null;
+    const isReagendamentoDeData = Boolean(novaDataAgendamento) && novaDataAgendamento !== dataAgendamentoAtual;
+    const alterouPresencaOuStatusManualmente = Object.prototype.hasOwnProperty.call(b, "status") ||
+      Object.prototype.hasOwnProperty.call(b, "statusAgenda") ||
+      Object.prototype.hasOwnProperty.call(b, "compareceu") ||
+      hasResultadoOptometrista;
+    const reagendamentoLimpo = isReagendamentoDeData && !alterouPresencaOuStatusManualmente;
+
     // Uma venda válida é evidência definitiva de que o cliente compareceu.
     // Mantemos cancelamentos/reembolsos fora desta regra para não transformar
     // uma OS desfeita em compra concluída.
@@ -2570,6 +2596,13 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
     const statusVenda = compraAtiva && ["agendado", "confirmado", "nao compareceu"].includes(statusAgendaNormalizado)
       ? "Compareceu"
       : null;
+    // O reset de reagendamento só vale quando não há venda ativa segurando o
+    // registro — uma venda já conta a história real do atendimento, então não
+    // deve virar "Agendado"/pendente nem ter o resultado do optometrista apagado.
+    const reagendamentoSemVenda = reagendamentoLimpo && !compraAtiva;
+    const statusReagendamento = reagendamentoSemVenda ? "Agendado" : null;
+    const compareceuReagendamento = reagendamentoSemVenda ? "Pendente" : null;
+    const limparResultadoOptometrista = reagendamentoSemVenda;
 
     const client = await pool.connect();
     let result;
@@ -2618,7 +2651,7 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         data_finalizacao_os = COALESCE($26, data_finalizacao_os),
         data_entrega_os = COALESCE($27, data_entrega_os),
         patologia = COALESCE($29, patologia),
-        resultado_optometrista = COALESCE($30, resultado_optometrista),
+        resultado_optometrista = CASE WHEN $31::text = 'LIMPAR' THEN NULL ELSE COALESCE($30, resultado_optometrista) END,
         agendado_por_nome = COALESCE(NULLIF(agendado_por_nome,''), $19, agendado_por_nome),
         agendado_por_email = COALESCE(NULLIF(agendado_por_email,''), $20, agendado_por_email),
         ultima_alteracao_por_nome = $21,
@@ -2638,8 +2671,8 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         b.data_agendamento || b.dataAgendamento || null,
         b.horario || null,
         b.observacao || null,
-        statusVenda || statusResultadoOptometrista || b.status || b.statusAgenda || null,
-        compareceuVenda || compareceuResultadoOptometrista || b.compareceu || null,
+        statusVenda || statusResultadoOptometrista || b.status || b.statusAgenda || statusReagendamento || null,
+        compareceuVenda || compareceuResultadoOptometrista || b.compareceu || compareceuReagendamento || null,
         b.numero_os || b.numeroOS || null,
         b.status_os || b.statusOS || null,
         b.vendedor_nome || b.vendedorNome || null,
@@ -2658,7 +2691,8 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         b.data_entrega_os || b.dataEntregaOS || null,
         b.excluir_lead ? 'LIXEIRA' : (b.restaurar_lead ? 'RESTAURAR' : null),
         patologiaAtualizada,
-        resultadoOptometristaAtualizado
+        resultadoOptometristaAtualizado,
+        limparResultadoOptometrista ? 'LIMPAR' : null
         ]
       );
       if (!result.rows.length) {
