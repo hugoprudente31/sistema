@@ -728,26 +728,53 @@ function numberFromBR(v) {
   return Number.isFinite(n) ? n : 0;
 }
 
+// Ano fora dessa faixa nunca é uma data real de agendamento -- é sinal de
+// corrupção (já aconteceu em produção: 4 agendamentos gravados com ano 26,
+// 2626, 62026 e 72026, provavelmente de uma data mal formada vinda do
+// cliente/bot que passou direto para a coluna DATE sem nenhuma validação).
+// A janela é generosa o bastante para não travar backdating legítimo nem
+// agendamentos futuros distantes.
+function anoRazoavel(ano) {
+  const atual = new Date().getFullYear();
+  return Number.isInteger(ano) && ano >= 2000 && ano <= atual + 5;
+}
+
 function toPgDate(v) {
   const s = clean(v);
   if (!s) return null;
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
-  const br = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
-  if (br) return `${br[3]}-${br[2]}-${br[1]}`;
-  const d = new Date(s);
-  if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
-  return null;
+  let resultado = null;
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    resultado = s.slice(0, 10);
+  } else {
+    const br = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+    if (br) {
+      resultado = `${br[3]}-${br[2]}-${br[1]}`;
+    } else {
+      const d = new Date(s);
+      if (!Number.isNaN(d.getTime())) resultado = d.toISOString().slice(0, 10);
+    }
+  }
+  if (!resultado) return null;
+  return anoRazoavel(Number(resultado.slice(0, 4))) ? resultado : null;
 }
 
 function toPgTimestamp(v) {
   const s = clean(v);
   if (!s) return null;
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.replace("T", " ").slice(0, 19);
-  const br = s.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?/);
-  if (br) return `${br[3]}-${br[2]}-${br[1]} ${br[4] || "00"}:${br[5] || "00"}:${br[6] || "00"}`;
-  const d = new Date(s);
-  if (!Number.isNaN(d.getTime())) return d.toISOString().replace("T", " ").slice(0, 19);
-  return null;
+  let resultado = null;
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    resultado = s.replace("T", " ").slice(0, 19);
+  } else {
+    const br = s.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?/);
+    if (br) {
+      resultado = `${br[3]}-${br[2]}-${br[1]} ${br[4] || "00"}:${br[5] || "00"}:${br[6] || "00"}`;
+    } else {
+      const d = new Date(s);
+      if (!Number.isNaN(d.getTime())) resultado = d.toISOString().replace("T", " ").slice(0, 19);
+    }
+  }
+  if (!resultado) return null;
+  return anoRazoavel(Number(resultado.slice(0, 4))) ? resultado : null;
 }
 
 function makeGasId(prefix, value) {
@@ -2420,6 +2447,16 @@ app.post("/api/agendamentos", async (req, res) => {
     if (!nomeCliente) return res.status(400).json({ ok: false, message: "Nome do cliente é obrigatório." });
     if (nomeCliente.toLowerCase().includes("teste")) return res.status(400).json({ ok: false, message: "Não é permitido cadastrar cliente com nome TESTE." });
 
+    // Sem validar aqui, uma data mal formada vinda do cliente/bot vai direto
+    // para a coluna DATE sem checagem nenhuma -- já causou agendamentos
+    // gravados com ano 26, 2626, 62026, 72026 em produção (ver toPgDate).
+    const dataAgendamentoBruta = clean(b.data_agendamento || b.dataAgendamento || b.data || "");
+    let dataAgendamento = null;
+    if (dataAgendamentoBruta) {
+      dataAgendamento = toPgDate(dataAgendamentoBruta);
+      if (!dataAgendamento) return res.status(400).json({ ok: false, message: "Data do agendamento inválida." });
+    }
+
     const actorNome = clean(req.session.nome || "Usuário autenticado");
     const actorEmail = clean(req.session.email);
 
@@ -2429,7 +2466,7 @@ app.post("/api/agendamentos", async (req, res) => {
       const bloqueioHorario = await buscarBloqueioDisponibilidade(
         client,
         b.loja || "",
-        b.data_agendamento || b.dataAgendamento || b.data || "",
+        dataAgendamento || "",
         b.horario || ""
       );
       if (bloqueioHorario) {
@@ -2459,7 +2496,7 @@ app.post("/api/agendamentos", async (req, res) => {
         b.loja || null,
         b.optometrista || null,
         b.origem || null,
-        b.data_agendamento || b.dataAgendamento || b.data || null,
+        dataAgendamento,
         b.horario || null,
         b.observacao || null,
         b.status || b.statusAgenda || "Agendado",
@@ -2683,7 +2720,15 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
     // reabre o registro como pendente — evita ficar com "Não Compareceu" ou
     // "Check-in Não veio" congelados de uma visita anterior após a repescagem.
     // Vale para qualquer perfil que possa alterar a data.
-    const novaDataAgendamento = clean(b.data_agendamento || b.dataAgendamento || "").slice(0, 10);
+    // Sem validar aqui, uma data mal formada vinda do cliente/bot vai direto
+    // para a coluna DATE sem checagem nenhuma -- já causou agendamentos
+    // gravados com ano 26, 2626, 62026, 72026 em produção (ver toPgDate).
+    const dataAgendamentoBrutaPatch = clean(b.data_agendamento || b.dataAgendamento || "");
+    let novaDataAgendamento = null;
+    if (dataAgendamentoBrutaPatch) {
+      novaDataAgendamento = toPgDate(dataAgendamentoBrutaPatch);
+      if (!novaDataAgendamento) return res.status(400).json({ ok: false, message: "Data do agendamento inválida." });
+    }
     const dataAgendamentoAtual = current.rows[0].data_agendamento
       ? String(current.rows[0].data_agendamento).slice(0, 10) : null;
     const isReagendamentoDeData = Boolean(novaDataAgendamento) && novaDataAgendamento !== dataAgendamentoAtual;
@@ -2730,7 +2775,7 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         const bloqueioHorario = await buscarBloqueioDisponibilidade(
           client,
           b.loja || current.rows[0].loja || "",
-          b.data_agendamento || b.dataAgendamento || current.rows[0].data_agendamento || "",
+          novaDataAgendamento || current.rows[0].data_agendamento || "",
           b.horario || current.rows[0].horario || ""
         );
         if (bloqueioHorario) {
@@ -2784,7 +2829,7 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         b.email || null,
         b.loja || null,
         b.optometrista || null,
-        b.data_agendamento || b.dataAgendamento || null,
+        novaDataAgendamento,
         b.horario || null,
         b.observacao || null,
         statusVenda || statusResultadoOptometrista || b.status || b.statusAgenda || statusReagendamento || null,
@@ -4948,5 +4993,6 @@ module.exports = {
   isSuperAdmin,
   buildPermissions,
   publicUser,
-  normalizeLojaPublica
+  normalizeLojaPublica,
+  toPgDate
 };

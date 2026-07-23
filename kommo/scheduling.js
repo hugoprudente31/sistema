@@ -171,26 +171,45 @@ function normalizeLoja(loja) {
   return mapa[key] || raw;
 }
 
+// Ano fora dessa faixa nunca é uma data real de agendamento -- é sinal de
+// corrupção (já aconteceu em produção: agendamentos vindos desse fluxo
+// gravados com ano 26, 2626, 62026, 72026, provavelmente de texto livre do
+// WhatsApp que não bateu com nenhum formato esperado e caiu no fallback
+// `new Date(s)`, cujo parsing é permissivo e imprevisível).
+function anoRazoavel(ano) {
+  const atual = new Date().getFullYear();
+  return Number.isInteger(ano) && ano >= 2000 && ano <= atual + 5;
+}
+
 function toPgDate(v) {
   const s = clean(v);
   if (!s) return null;
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
-  const br = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
-  if (br) return `${br[3]}-${br[2]}-${br[1]}`;
-  const brShort = s.match(/^(\d{1,2})\/(\d{1,2})$/);
-  if (brShort) {
-    const now = new Date();
-    let year = now.getFullYear();
-    const month = String(Number(brShort[2])).padStart(2, "0");
-    const day = String(Number(brShort[1])).padStart(2, "0");
-    let candidate = `${year}-${month}-${day}`;
-    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-    if (candidate < today) candidate = `${year + 1}-${month}-${day}`;
-    return candidate;
+  let resultado = null;
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    resultado = s.slice(0, 10);
+  } else {
+    const br = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+    if (br) {
+      resultado = `${br[3]}-${br[2]}-${br[1]}`;
+    } else {
+      const brShort = s.match(/^(\d{1,2})\/(\d{1,2})$/);
+      if (brShort) {
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(Number(brShort[2])).padStart(2, "0");
+        const day = String(Number(brShort[1])).padStart(2, "0");
+        let candidate = `${year}-${month}-${day}`;
+        const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+        if (candidate < today) candidate = `${year + 1}-${month}-${day}`;
+        resultado = candidate;
+      } else {
+        const d = new Date(s);
+        if (!Number.isNaN(d.getTime())) resultado = d.toISOString().slice(0, 10);
+      }
+    }
   }
-  const d = new Date(s);
-  if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
-  return null;
+  if (!resultado) return null;
+  return anoRazoavel(Number(resultado.slice(0, 4))) ? resultado : null;
 }
 
 async function reagendarAgendamentoPorLead({ leadId, data, horario }) {
