@@ -13,6 +13,7 @@ process.env.BOT_ENABLED = "true";
 process.env.ADANALYZER_SYNC_KEY = "test-adanalyzer-sync-key";
 
 const { app, pool, signSession } = require("../server");
+const mailingboss = require("../mailingboss");
 
 let server;
 let baseUrl;
@@ -340,6 +341,44 @@ test("criação de agendamento grava backup com perfil na mesma transação", as
     assert.equal(queries.at(-1).sql, "COMMIT");
   } finally {
     pool.connect = originalConnect;
+  }
+});
+
+test("criação de agendamento pelo painel dispara sincronização com o Mailingboss (Builderall)", async () => {
+  const originalConnect = pool.connect;
+  const originalSincronizar = mailingboss.sincronizarLead;
+  const client = {
+    query: async (sql) => {
+      if (String(sql).includes("INSERT INTO agendamentos")) {
+        return { rows: [{ id: 101, nome: "Cliente Mailingboss", email: "cliente@example.com", loja: "Loja A", status: "Agendado" }] };
+      }
+      return { rows: [] };
+    },
+    release: () => {}
+  };
+  pool.connect = async () => client;
+  const token = signSession({ id: "1", nome: "Admin", email: "admin@example.com", perfil: "admin", loja: "Todas" });
+  // Drena qualquer setImmediate pendente de um teste anterior (ex: a criação
+  // do teste "grava backup" acima, que não aguarda a sincronização em
+  // background) antes de instalar o mock -- senão essa chamada tardia acaba
+  // batendo no mock deste teste, inflando a contagem.
+  await new Promise((resolve) => setImmediate(resolve));
+  const chamadas = [];
+  mailingboss.sincronizarLead = async (ag, origem) => { chamadas.push({ ag, origem }); };
+  try {
+    const response = await fetch(baseUrl + "/api/agendamentos", {
+      method: "POST",
+      headers: { cookie: `tgt_session=${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ nome: "Cliente Mailingboss", email: "cliente@example.com", loja: "Loja A", data_agendamento: "2026-06-20", horario: "10:00" })
+    });
+    assert.equal(response.status, 200);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(chamadas.length, 1, "criar um agendamento pelo painel deve disparar a sincronização com o Mailingboss");
+    assert.equal(chamadas[0].ag.id, 101);
+    assert.equal(chamadas[0].origem, "painel");
+  } finally {
+    pool.connect = originalConnect;
+    mailingboss.sincronizarLead = originalSincronizar;
   }
 });
 

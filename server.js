@@ -9,6 +9,7 @@ require("dotenv").config();
 
 const { startRecoveryCron } = require("./kommo/recovery");
 const { startReminderCron, runReminders, runTwoHourReminders } = require("./kommo/reminder");
+const mailingboss = require("./mailingboss");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -2429,6 +2430,7 @@ app.post("/api/public/agendamentos", validarLandingApiKey, async (req, res) => {
         console.error('[landing-page] Erro ao sincronizar Kommo:', e.message)
       ));
     }
+    setImmediate(() => mailingboss.sincronizarLead(agRow, "landing_page"));
 
     res.status(201).json({
       ok: true,
@@ -2546,8 +2548,9 @@ app.post("/api/agendamentos", async (req, res) => {
         session: req.session
       });
       await client.query("COMMIT");
-      // Sync não-bloqueante para o Kommo
+      // Sync não-bloqueante para o Kommo e Mailingboss
       setImmediate(() => sincronizarAgendamentoKommo(result.rows[0]));
+      setImmediate(() => mailingboss.sincronizarLead(result.rows[0], "painel"));
       res.json({ ok: true, message: "Agendamento salvo no PostgreSQL.", agendamento: result.rows[0] });
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});

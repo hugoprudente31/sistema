@@ -3,6 +3,7 @@
 
 const crypto = require("crypto");
 const { Pool } = require("pg");
+const mailingboss = require("../mailingboss");
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -692,6 +693,10 @@ async function criarAgendamento({ nome, whatsapp, email, loja, data, horario, le
 
     await client.query("COMMIT");
     _cache.delete(`disponibilidade|${lojaNormalizada}|${dataPg}`);
+
+    if (!agendamentoExistente) {
+      setImmediate(() => mailingboss.sincronizarLead(agendamento.rows[0], "kommo"));
+    }
 
     return {
       ok: true,
