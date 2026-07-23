@@ -214,7 +214,32 @@ function sessionCookie(token, maxAgeSeconds) {
   return `${SESSION_COOKIE}=${encodeURIComponent(token || "")}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAgeSeconds}${secure}`;
 }
 
-function requireSession(req, res, next) {
+// O cookie de sessão carrega perfil/loja/permissão financeira congelados no
+// momento do login, válidos por até SESSION_TTL_HOURS. Se um admin corrige a
+// loja/cargo de alguém já logado, ou desativa a conta, isso só valeria a
+// partir do próximo login -- já causou pelo menos um bug real em produção
+// (4 contas com loja errada continuaram usando o valor antigo mesmo depois
+// de corrigido no cadastro). Este cache revalida contra o banco no máximo a
+// cada SESSION_REFRESH_TTL_MS por usuário -- não a cada requisição -- para
+// não adicionar consulta extra em toda chamada da API.
+const SESSION_REFRESH_TTL_MS = 60 * 1000;
+const SESSION_REFRESH_QUERY_TIMEOUT_MS = 1500;
+const sessionRefreshCache = new Map();
+
+// Uma consulta que nunca resolve (ex: pool real inalcançável) não pode travar
+// a requisição -- sem isso, "falha vira fallback silencioso" não vale para
+// uma conexão pendurada, só para uma que rejeita rápido.
+function withTimeout(promise, ms) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("timeout ao revalidar sessão")), ms);
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (error) => { clearTimeout(timer); reject(error); }
+    );
+  });
+}
+
+async function requireSession(req, res, next) {
   if (!SESSION_SECRET) {
     return res.status(503).json({ ok: false, message: "SESSION_SECRET não configurado." });
   }
@@ -223,6 +248,46 @@ function requireSession(req, res, next) {
     return res.status(401).json({ ok: false, message: "Sessão ausente ou expirada." });
   }
   req.session = session;
+
+  const cacheKey = clean(session.email).toLowerCase();
+  const now = Date.now();
+  const cached = cacheKey ? sessionRefreshCache.get(cacheKey) : null;
+
+  if (cached && cached.expiresAt > now) {
+    if (cached.ativo === false) {
+      return res.status(401).json({ ok: false, message: "Sessão inválida. Faça login novamente." });
+    }
+    req.session = { ...session, nome: cached.nome, perfil: cached.perfil, loja: cached.loja, canViewFinance: cached.canViewFinance };
+    return next();
+  }
+
+  // Qualquer falha ou ausência de resultado aqui NÃO bloqueia a requisição:
+  // mantemos os dados do cookie (comportamento de hoje) em vez de rejeitar.
+  // Só barramos explicitamente quando a conta É encontrada e está inativa.
+  try {
+    const fresh = await withTimeout(pool.query(
+      `SELECT id, nome, email, cargo, loja, access_tags, can_view_finance, ativo FROM usuarios WHERE LOWER(email) = LOWER($1) LIMIT 1`,
+      [cacheKey]
+    ), SESSION_REFRESH_QUERY_TIMEOUT_MS);
+    const dbUser = fresh.rows[0];
+    // Confere que a linha realmente é do usuário da sessão -- protege contra
+    // um mock de teste (ou qualquer resultado inesperado) de outra consulta
+    // ser lido aqui como se fosse o cadastro do usuário.
+    if (dbUser && clean(dbUser.email).toLowerCase() === cacheKey) {
+      const atual = publicUser(dbUser);
+      const ativo = dbUser.ativo !== false;
+      sessionRefreshCache.set(cacheKey, {
+        nome: atual.nome, perfil: atual.perfil, loja: atual.loja, canViewFinance: atual.can_view_finance,
+        ativo, expiresAt: now + SESSION_REFRESH_TTL_MS
+      });
+      if (!ativo) {
+        return res.status(401).json({ ok: false, message: "Sessão inválida. Faça login novamente." });
+      }
+      req.session = { ...session, nome: atual.nome, perfil: atual.perfil, loja: atual.loja, canViewFinance: atual.can_view_finance };
+    }
+  } catch (error) {
+    // Falha na consulta: segue com os dados do cookie, sem bloquear ninguém.
+  }
   next();
 }
 
