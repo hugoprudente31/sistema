@@ -72,3 +72,24 @@ test('interceptor client-side de PATCH não filtra mais campos por perfil (servi
   assert.match(interceptorBody, /resultadoOptometrista|resultado_optometrista|Nao filtramos campos por perfil/,
     'o payload do optometrista precisa poder incluir resultadoOptometrista sem ser filtrado');
 });
+
+test('interceptor de PATCH não carimba mais campos de dono do registro (causava 403 pra perfis restritos)', function() {
+  // Segundo bug encontrado na mesma investigação: mesmo depois de remover o
+  // allowlist quebrado, o interceptor ainda chamava validarPayload() em toda
+  // edição — essa função carimba agendado_por_nome/responsavel/
+  // proprietario_nome/criado_por_* (campos que fazem sentido só na CRIAÇÃO).
+  // O servidor rejeita esses campos com 403 pra perfis restritos como
+  // optometrista, então o clique passou a falhar explicitamente em vez de
+  // silenciosamente. validarPayload() continua correta para o POST
+  // (criação) — só não pode mais ser chamada pelo interceptor de PATCH.
+  const patchStart = html.indexOf('// Interceptor PATCH');
+  const patchEnd = html.indexOf('// Override getAgendamentosPostgres', patchStart);
+  const patchBody = html.slice(patchStart, patchEnd);
+  assert.ok(!/=\s*validarPayload\(/.test(patchBody),
+    'o interceptor de PATCH não deve mais CHAMAR validarPayload() — ela carimba campos que o servidor rejeita para perfis restritos');
+
+  const postStart = html.indexOf('// Interceptor POST');
+  const postBody = html.slice(postStart, patchStart);
+  assert.match(postBody, /=\s*validarPayload\(/,
+    'o interceptor de POST (criação) continua precisando de chamar validarPayload()');
+});

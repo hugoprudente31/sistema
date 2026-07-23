@@ -3499,7 +3499,14 @@ function executarDedupKommo() {
       window.__tgtPatchDefinitivo = window.apiPatch;
       window.apiPatch = function(path, payload) {
         try {
-          payload = validarPayload(payload || {});
+          // validarPayload() carimba campos de "dono do registro" (agendado_por_*,
+          // responsavel, proprietario_nome, criado_por_*) que fazem sentido na
+          // CRIACAO (POST), mas nao numa edicao pontual (PATCH) -- o servidor ja
+          // preserva esses campos sozinho quando ja existem, e alguns perfis
+          // restritos (ex: optometrista) sao rejeitados com 403 se o payload
+          // incluir campos fora do que podem alterar. Nao chamamos validarPayload
+          // aqui para nao adicionar campos que o proprio clique nao pediu.
+          payload = payload || {};
           var r = role();
           var clone = Object.assign({}, payload);
 
