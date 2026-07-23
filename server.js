@@ -366,15 +366,21 @@ const PUBLIC_BLOCKING_STATUSES = [
   "OS em Andamento"
 ];
 
-function normalizeLojaPublica(loja) {
-  const raw = clean(loja);
-  const key = raw
+// Remove acentos e qualquer pontuacao (hifen, ponto, meia-risca) antes de
+// comparar, para que variacoes como "Target - Santo Antonio" e "Target Sto.
+// Antonio" cheguem na mesma chave sem precisar cadastrar cada combinacao.
+function chaveLojaPublica(valor) {
+  return String(valor || "")
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/\s+/g, " ")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
     .trim();
+}
 
+function normalizeLojaPublica(loja) {
+  const raw = clean(loja);
+  const key = chaveLojaPublica(raw);
   // Valores canônicos = nomes EXATOS da tabela lojas no banco de dados
   const mapa = {
     // Gonzaga (DB: "óticas TGT - Gonzaga")
@@ -440,7 +446,14 @@ function normalizeLojaPublica(loja) {
     "oticas target santo antônio":       "óticas Target - Ademar de Barros"
   };
 
-  return mapa[key] || raw;
+  const mapaPuro = {};
+  Object.keys(mapa).forEach((k) => { mapaPuro[chaveLojaPublica(k)] = mapa[k]; });
+
+  // Sem correspondência confiável: melhor rejeitar (ver checagem "if (!loja)"
+  // em quem chama esta função) do que aceitar um valor que não bate com
+  // nenhuma loja real e criar um agendamento invisível para todo mundo,
+  // exceto admin/atendimento central.
+  return mapaPuro[key] || null;
 }
 
 function normalizeWhatsappPublico(v) {
@@ -4277,7 +4290,11 @@ app.get("/api/admin/dashboard-executivo", requireAdmin, async (req, res) => {
       WHEN NULLIF(TRIM(a.origem),'') IS NULL THEN 'Não informada'
       ELSE a.origem END`;
 
-    const [resumoResult, lojasResult, consultoresResult, origensResult, tendenciaResult, metasResult, lojaPerfilResult] = await Promise.all([
+    const baseWhereSemFiltroLoja = `a.excluido_em IS NULL AND a.nome NOT ILIKE '%teste%'
+      AND COALESCE(a.loja,'') NOT ILIKE '%teste%'
+      AND COALESCE(a.data_agendamento, a.criado_em::date) BETWEEN $1::date AND $2::date`;
+
+    const [resumoResult, lojasResult, consultoresResult, origensResult, tendenciaResult, metasResult, lojaPerfilResult, lojaOrfaResult] = await Promise.all([
       pool.query(`SELECT ${metricSql} FROM agendamentos a WHERE ${baseWhere}`, params),
       pool.query(`SELECT ${executiveStoreSql} AS loja, ${metricSql} FROM agendamentos a WHERE ${baseWhere} GROUP BY ${executiveStoreSql} ORDER BY faturamento DESC`, params),
       pool.query(`SELECT a.vendedor_consultor_id AS id,
@@ -4294,7 +4311,13 @@ app.get("/api/admin/dashboard-executivo", requireAdmin, async (req, res) => {
       pool.query(`${META_SELECT} WHERE m.ativo = true AND m.competencia BETWEEN DATE_TRUNC('month',$1::date) AND DATE_TRUNC('month',$2::date) ORDER BY m.tipo_escopo,m.loja,v.nome`, [inicio, fim]),
       pool.query(`SELECT ${executiveStoreSql} AS loja, ${executiveProfileSql} AS perfil, ${metricSql}
         FROM agendamentos a LEFT JOIN usuarios u ON LOWER(u.email) = LOWER(NULLIF(a.agendado_por_email,''))
-        WHERE ${baseWhere} GROUP BY ${executiveStoreSql}, ${executiveProfileSql} ORDER BY ${executiveStoreSql}, faturamento DESC`, params)
+        WHERE ${baseWhere} GROUP BY ${executiveStoreSql}, ${executiveProfileSql} ORDER BY ${executiveStoreSql}, faturamento DESC`, params),
+      pool.query(`SELECT COALESCE(NULLIF(TRIM(a.loja),''),'(vazio)') AS loja, COUNT(*)::int AS total
+        FROM agendamentos a
+        WHERE ${baseWhereSemFiltroLoja}
+          AND NULLIF(TRIM(a.loja),'') IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM lojas l WHERE ${storeSql("l.nome", "a.loja")})
+        GROUP BY loja ORDER BY total DESC LIMIT 5`, [inicio, fim])
     ]);
 
     const resumo = executiveMetricRow(resumoResult.rows[0]);
@@ -4322,6 +4345,20 @@ app.get("/api/admin/dashboard-executivo", requireAdmin, async (req, res) => {
     if (resumo.taxa_conversao < 35) alertas.push({ nivel: "alto", area: "Comercial", mensagem: "Conversão abaixo de 35%. Revisar abordagem e motivos de perda." });
     if (resumo.os_atrasadas > 0) alertas.push({ nivel: "alto", area: "OS", mensagem: `${resumo.os_atrasadas} OS atrasada(s) precisam de ação.` });
     if (resumo.desconto_percentual > 10) alertas.push({ nivel: "medio", area: "Financeiro", mensagem: "Desconto médio acima de 10% do faturamento." });
+    if (lojaOrfaResult.rows.length) {
+      // Agendamento com loja fora do cadastro oficial da tabela `lojas` fica
+      // invisível para qualquer perfil de loja (só admin/central enxergam) —
+      // já causou 44 agendamentos "perdidos" vindos da landing page sem que
+      // ninguém percebesse por semanas. Este alerta torna isso visível sem
+      // precisar saber que /api/admin/diag/loja-mismatch existe.
+      const totalOrfaos = lojaOrfaResult.rows.reduce((acc, r) => acc + r.total, 0);
+      const exemplos = lojaOrfaResult.rows.map((r) => `"${r.loja}" (${r.total})`).join(", ");
+      alertas.push({
+        nivel: "alto",
+        area: "Cadastro",
+        mensagem: `${totalOrfaos} agendamento(s) com loja fora do cadastro oficial, invisíveis para perfis de loja: ${exemplos}. Corrigir em /api/admin/diag/loja-mismatch.`
+      });
+    }
     if (!alertas.length) alertas.push({ nivel: "ok", area: "Grupo", mensagem: "Nenhum alerta crítico no período selecionado." });
 
     res.setHeader("Cache-Control", "no-store");
@@ -4825,5 +4862,6 @@ module.exports = {
   requireSuperAdmin,
   isSuperAdmin,
   buildPermissions,
-  publicUser
+  publicUser,
+  normalizeLojaPublica
 };
