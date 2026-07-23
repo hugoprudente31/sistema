@@ -268,7 +268,23 @@ function sanitizeNome(v) {
   return /\{\{.*\}\}/.test(s) ? "" : s; // descarta variável Kommo não resolvida
 }
 
-async function handleBoasVindas(leadId, state, talkId, context) {
+// Se o cliente já disser o que quer logo na primeira mensagem ("qual o
+// endereço de vocês?", "quero fazer teste de visão"), pula a saudação e o
+// menu numerado e manda direto a resposta da opção correspondente -- em vez
+// de obrigar a pessoa a ler o menu e digitar um número pra algo que ela já
+// deixou claro que quer.
+const PALAVRAS_ENDERECO = ["endereco", "onde fica", "localizacao", "onde e a loja", "como chegar", "qual o endereco"];
+const PALAVRAS_TESTE_VISAO = ["teste de visao", "teste visao", "exame de vista", "exame de visao", "marcar teste", "agendar teste", "fazer teste"];
+
+function detectarIntencaoInicial(text) {
+  const n = normalize(text);
+  if (!n) return null;
+  if (PALAVRAS_ENDERECO.some((p) => n.includes(p))) return "endereco";
+  if (PALAVRAS_TESTE_VISAO.some((p) => n.includes(p))) return "teste_visao";
+  return null;
+}
+
+async function handleBoasVindas(leadId, state, talkId, context, text) {
   const loja = await ensureStoreState(leadId, state, context);
   let nome = sanitizeNome(state.nome) || sanitizeNome(context.contact_name || context.nome);
 
@@ -296,6 +312,42 @@ async function handleBoasVindas(leadId, state, talkId, context) {
 
   // Guarda apenas o primeiro nome
   if (nome) nome = nome.trim().split(/\s+/)[0];
+
+  const intencao = detectarIntencaoInicial(text);
+
+  if (intencao === "endereco") {
+    SM.setState(leadId, {
+      nome, loja: loja.nome, loja_prefix: loja.prefix,
+      etapa: "info_aguarda_sim_nao", ultimo_topico: "Endereço e Horário", ultimo_info_label: "info-endereco",
+      bot_active: true,
+    }, { persist: true });
+    await labels.setBotControl(leadId);
+    await labels.applyStoreLabel(leadId, loja.prefix);
+    await addFlowLabel(leadId, loja.prefix, "novo-lead");
+    await addFlowLabel(leadId, loja.prefix, "info-novo");
+    await addFlowLabel(leadId, loja.prefix, "info-submenu");
+    await applyFlowLabel(leadId, loja.prefix, "info", "info-endereco");
+    await moveStage(leadId, "informacoes", loja.prefix);
+    await send(talkId, leadId, MSG.infoEndereco(loja));
+    return;
+  }
+
+  if (intencao === "teste_visao") {
+    SM.setState(leadId, {
+      nome, loja: loja.nome, loja_prefix: loja.prefix,
+      etapa: "tv_aguardando_confirm", ultimo_topico: "Teste de Visão",
+      bot_active: true,
+    }, { persist: true });
+    await labels.setBotControl(leadId);
+    await labels.applyStoreLabel(leadId, loja.prefix);
+    await addFlowLabel(leadId, loja.prefix, "novo-lead");
+    await addFlowLabel(leadId, loja.prefix, "tv-novo");
+    await addFlowLabel(leadId, loja.prefix, "tv-link-enviado");
+    await applyFlowLabel(leadId, loja.prefix, "tv", "tv-aguardando-confirm");
+    await moveStage(leadId, "agendamento", loja.prefix);
+    await send(talkId, leadId, MSG.testeVisao(loja));
+    return;
+  }
 
   SM.setState(leadId, {
     nome,
@@ -768,7 +820,7 @@ async function handleRecuperacaoMenu(leadId, state, text, talkId) {
 }
 
 async function route(leadId, state, text, talkId, context) {
-  if (state.etapa === "boas_vindas") return handleBoasVindas(leadId, state, talkId, context);
+  if (state.etapa === "boas_vindas") return handleBoasVindas(leadId, state, talkId, context, text);
   if (state.etapa === "menu_principal") return handleMenuPrincipal(leadId, state, text, talkId);
   if (state.etapa === "recuperacao_menu") return handleRecuperacaoMenu(leadId, state, text, talkId);
   if (state.etapa === "info_menu") return handleInfoMenu(leadId, state, text, talkId);
@@ -808,20 +860,20 @@ async function _processMessage({ leadId, talkId, chatId, text, authorType, loja,
 
   await ensureStoreState(leadId, state, { loja, pipeline_id, pipelineId });
 
-  // Reativação pelo Salesbot: o add_talk e o Salesbot chegam quasi-simultâneos.
-  // Se o Salesbot chegar antes do add_talk processar, o estado ainda é "transferido".
-  // Neste caso reativamos aqui mesmo, sem depender da ordem dos eventos do Kommo.
-  if (state.etapa === "transferido" && state.transferred_at) {
-    const elapsed = Date.now() - state.transferred_at;
-    if (elapsed >= 60 * 1000) {
-      console.log(`[BOT][${leadId}] ♻️ Cliente voltou após ${Math.round(elapsed / 1000)}s — reativando pelo Salesbot`);
-      SM.setState(leadId, { etapa: "boas_vindas", bot_active: false, transferred_at: null, last_human_at: null }, { persist: true });
-      state.etapa = "boas_vindas";
-      state.bot_active = false;
-    }
-  }
-
-  // Bot bloqueado em atendimento humano — só reativa via nova conversa (add_talk ou Salesbot acima)
+  // Bug real em produção: aqui existia uma reativação por tempo decorrido
+  // (reativava o bot se o cliente mandasse mensagem 60s+ depois da última
+  // fala do atendente). Isso disparava o bot NO MEIO de conversas que um
+  // humano ainda estava conduzindo -- basta o cliente demorar mais de um
+  // minuto para responder ao atendente (comum) para o bot "roubar" a
+  // conversa de volta. Além disso, elapsed aqui não é um sinal confiável de
+  // corrida add_talk/Salesbot: nessa corrida real, transferred_at é da
+  // transferência ANTIGA (pode ter horas), não recente -- então o tempo
+  // decorrido não distingue "corrida de eventos" de "humano ainda atende".
+  //
+  // A única forma correta de reativar o bot após um handoff humano é o
+  // cliente abrir uma conversa genuinamente nova -- sinal estrutural do
+  // Kommo (evento add_talk), tratado em processNewLead(). Enquanto o estado
+  // continuar "transferido", o bot fica calado aqui, ponto.
   if (!SM.shouldBotActivate(state)) return;
 
   if (!state.bot_active) {
