@@ -403,3 +403,87 @@ test("vendedor não acessa backups operacionais", async () => {
   const response = await fetch(baseUrl + "/api/historico-agendamentos", { headers: { cookie: `tgt_session=${token}` } });
   assert.equal(response.status, 403);
 });
+
+test("exclusão permanente grava no histórico quem apagou (era a única ação sem rastro)", async () => {
+  // Bug real: DELETE /api/agendamentos/:id (exclusão definitiva) apagava a
+  // linha direto, sem nenhuma chamada a saveAppointmentBackup -- era a única
+  // ação do sistema sem histórico, então não dava pra saber quem excluiu um
+  // registro permanentemente.
+  const originalConnect = pool.connect;
+  const originalQuery = pool.query;
+  const queries = [];
+  pool.query = async () => ({
+    rows: [{ id: 88, nome: "Cliente Excluído", loja: "Loja A", excluido_em: "2026-07-20T10:00:00.000Z" }]
+  });
+  pool.connect = async () => ({
+    query: async (sql, params) => {
+      queries.push({ sql: String(sql), params });
+      return { rows: [] };
+    },
+    release: () => {}
+  });
+  const token = signSession({ id: "1", nome: "Admin", email: "admin@example.com", perfil: "admin" });
+  try {
+    const response = await fetch(baseUrl + "/api/agendamentos/88", {
+      method: "DELETE", headers: { cookie: `tgt_session=${token}` }
+    });
+    assert.equal(response.status, 200);
+    const backup = queries.find((q) => q.sql.includes("INSERT INTO historico_alteracoes_agendamentos"));
+    assert.ok(backup, "a exclusão permanente precisa gravar no histórico antes de apagar");
+    assert.match(queries.find((q) => q.sql.includes("DELETE FROM agendamentos")).sql, /DELETE FROM agendamentos/);
+    const indiceBackup = queries.indexOf(backup);
+    const indiceDelete = queries.findIndex((q) => q.sql.includes("DELETE FROM agendamentos"));
+    assert.ok(indiceBackup < indiceDelete, "o registro no histórico precisa acontecer antes do DELETE de verdade");
+    assert.equal(backup.params[3], "EXCLUSAO_PERMANENTE");
+    assert.equal(backup.params[6], "admin@example.com");
+    assert.equal(JSON.parse(backup.params[9]).nome, "Cliente Excluído");
+    assert.equal(queries.at(-1).sql, "COMMIT");
+  } finally {
+    pool.connect = originalConnect;
+    pool.query = originalQuery;
+  }
+});
+
+test("toda ação de escrita fica registrada no log de auditoria (quem, o quê, quando, resultado)", async () => {
+  const originalLog = console.log;
+  const linhas = [];
+  console.log = (...args) => { linhas.push(args); };
+  const token = signSession({ id: "20", nome: "Vendedor Teste", email: "vendedor.audit@example.com", perfil: "vendedor", loja: "Loja A" });
+  try {
+    const response = await fetch(baseUrl + "/api/usuarios", {
+      method: "POST",
+      headers: { cookie: `tgt_session=${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ nome: "X", email: "x@x.com", cargo: "vendedor" })
+    });
+    assert.equal(response.status, 403, "vendedor não pode criar usuário -- a ação em si continua bloqueada normalmente");
+    const linhaAudit = linhas.find((l) => l[0] === "[AUDIT]");
+    assert.ok(linhaAudit, "toda escrita (mesmo bloqueada) precisa aparecer no log de auditoria");
+    const registro = JSON.parse(linhaAudit[1]);
+    assert.equal(registro.metodo, "POST");
+    assert.equal(registro.rota, "/api/usuarios");
+    assert.equal(registro.status, 403);
+    assert.equal(registro.email, "vendedor.audit@example.com");
+    assert.equal(registro.perfil, "vendedor");
+    assert.equal(registro.loja, "Loja A");
+    assert.ok(registro.em, "precisa ter timestamp");
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+test("leitura (GET) não é registrada no log de auditoria (só ações de escrita)", async () => {
+  const originalLog = console.log;
+  const linhas = [];
+  console.log = (...args) => { linhas.push(args); };
+  const token = signSession({ id: "21", nome: "Vendedor Teste", email: "vendedor.audit2@example.com", perfil: "vendedor", loja: "Loja A" });
+  const originalQuery = pool.query;
+  pool.query = async () => ({ rows: [] });
+  try {
+    await fetch(baseUrl + "/api/agendamentos", { headers: { cookie: `tgt_session=${token}` } });
+    const linhaAudit = linhas.find((l) => l[0] === "[AUDIT]");
+    assert.ok(!linhaAudit, "GET não deve gerar linha de auditoria -- só ações de escrita");
+  } finally {
+    console.log = originalLog;
+    pool.query = originalQuery;
+  }
+});
