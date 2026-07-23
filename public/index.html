@@ -3514,17 +3514,13 @@ function executarDedupKommo() {
             bloqueados.forEach(function(k) { if (Object.prototype.hasOwnProperty.call(clone, k)) delete clone[k]; });
           }
 
-          // Optometrista só pode marcar presença e status
-          if (r === 'optometrista') {
-            var permitido = {};
-            ['Compareceu','compareceu','StatusAgenda','statusAgenda','status_agenda',
-              'AtendimentoRealizado','atendimentoRealizado','atendimento_realizado',
-              'Observacao','observacao','ultima_alteracao_por_nome','ultima_alteracao_por_email','ultima_alteracao_em'
-            ].forEach(function(k) {
-              if (Object.prototype.hasOwnProperty.call(clone, k)) permitido[k] = clone[k];
-            });
-            clone = permitido;
-          }
+          // Nao filtramos campos por perfil aqui: o servidor ja e a fonte unica
+          // de verdade para essas regras (ver app.patch("/api/agendamentos/:id")
+          // em server.js). Uma copia client-side desse allowlist ficou
+          // desatualizada e passou a bloquear silenciosamente o proprio campo
+          // que os botoes de check-in do optometrista precisam enviar
+          // (resultadoOptometrista/patologia nunca foram adicionados aqui),
+          // fazendo o clique "salvar" sem nunca mudar nada.
           payload = clone;
         } catch(e) { alert(e.message || String(e)); return Promise.reject(e); }
         return window.__tgtPatchDefinitivo(path, payload);

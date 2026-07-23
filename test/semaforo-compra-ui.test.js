@@ -56,3 +56,19 @@ test('gatilho validar_agendamento_tgt não sobrescreve ultima_alteracao_por_nome
     'só deve preencher ultima_alteracao_por_nome quando ainda estiver vazio, nunca sobrescrever o que a aplicação já gravou'
   );
 });
+
+test('interceptor client-side de PATCH não filtra mais campos por perfil (servidor já é a única fonte de verdade)', function() {
+  // Bug real encontrado em produção: um allowlist client-side desatualizado
+  // apagava resultadoOptometrista/patologia do payload antes mesmo de sair do
+  // navegador, para o perfil optometrista — o clique "funcionava" (200 OK)
+  // mas nunca mudava nada, porque o campo nem chegava no servidor. O servidor
+  // já valida isso corretamente (ver server.js), então o cliente não deve
+  // duplicar essa regra.
+  const interceptorStart = html.indexOf('// Interceptor PATCH');
+  const interceptorEnd = html.indexOf('// Override getAgendamentosPostgres', interceptorStart);
+  const interceptorBody = html.slice(interceptorStart, interceptorEnd);
+  assert.ok(!/optometrista.*permitido|permitido.*optometrista/is.test(interceptorBody),
+    'não deve existir mais um allowlist de campos específico para o optometrista no cliente');
+  assert.match(interceptorBody, /resultadoOptometrista|resultado_optometrista|Nao filtramos campos por perfil/,
+    'o payload do optometrista precisa poder incluir resultadoOptometrista sem ser filtrado');
+});
