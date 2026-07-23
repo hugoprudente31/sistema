@@ -270,6 +270,14 @@ async function requireSession(req, res, next) {
       [cacheKey]
     ), SESSION_REFRESH_QUERY_TIMEOUT_MS);
     const dbUser = fresh.rows[0];
+    // DIAGNÓSTICO TEMPORÁRIO (remover depois de identificar a causa do 403
+    // real relatado por optometristas em produção em 2026-07-23).
+    if (cacheKey.includes("optometrista")) {
+      console.log("[DIAG-403-SESSION]", JSON.stringify({
+        cacheKey, encontrou: !!dbUser, dbUserEmail: dbUser?.email, dbUserCargo: dbUser?.cargo, dbUserLoja: dbUser?.loja,
+        sessionEmailOriginal: session.email, sessionPerfilOriginal: session.perfil, sessionLojaOriginal: session.loja
+      }));
+    }
     // Confere que a linha realmente é do usuário da sessão -- protege contra
     // um mock de teste (ou qualquer resultado inesperado) de outra consulta
     // ser lido aqui como se fosse o cadastro do usuário.
@@ -287,6 +295,9 @@ async function requireSession(req, res, next) {
     }
   } catch (error) {
     // Falha na consulta: segue com os dados do cookie, sem bloquear ninguém.
+    if (cacheKey.includes("optometrista")) {
+      console.log("[DIAG-403-SESSION] falha na revalidação -- cacheKey:", cacheKey, "erro:", error.message);
+    }
   }
   next();
 }
@@ -2589,13 +2600,22 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
     const b = req.body || {};
     const current = await pool.query(`SELECT * FROM agendamentos WHERE id = $1`, [id]);
     if (!current.rows.length) return res.status(404).json({ ok: false, message: "Agendamento não encontrado." });
+    // DIAGNÓSTICO TEMPORÁRIO (remover depois de identificar a causa do 403
+    // real relatado por optometristas em produção em 2026-07-23).
+    console.log("[DIAG-403-PATCH]", JSON.stringify({
+      id, bodyKeys: Object.keys(b),
+      sessionEmail: req.session?.email, sessionPerfil: req.session?.perfil, sessionLoja: req.session?.loja,
+      agendamentoLoja: current.rows[0].loja
+    }));
     if (!ensureStoreAccess(req.session, current.rows[0].loja)) {
+      console.log("[DIAG-403-PATCH] bloqueado em ensureStoreAccess (loja)");
       return res.status(403).json({ ok: false, message: "Sem permissão para operar esta loja." });
     }
     if (b.loja && !ensureStoreAccess(req.session, b.loja)) {
       return res.status(403).json({ ok: false, message: "Sem permissão para mover o registro para esta loja." });
     }
     if (!hasRole(req.session, ["admin", "atendimento central", "gerente de loja", "consultor de vendas", "vendedor", "comprador", "optometrista"])) {
+      console.log("[DIAG-403-PATCH] bloqueado em hasRole geral -- perfil:", req.session?.perfil);
       return res.status(403).json({ ok: false, message: "Perfil sem permissão para alterar agendamentos." });
     }
     // O formulário sempre reenvia o status/presença atual junto com qualquer
@@ -2650,6 +2670,7 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
     let compareceuResultadoOptometrista = null;
     if (hasResultadoOptometrista) {
       if (!hasRole(req.session, ["admin", "optometrista"])) {
+        console.log("[DIAG-403-PATCH] bloqueado em hasResultadoOptometrista -- perfil:", req.session?.perfil, "roleOf:", roleOf(req.session));
         return res.status(403).json({ ok: false, message: "Somente o optometrista pode registrar o resultado do atendimento." });
       }
       const valorResultado = clean(b.resultado_optometrista || b.resultadoOptometrista)
@@ -2693,6 +2714,7 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
       ]);
       const forbidden = Object.keys(b).filter((key) => !allowed.has(key));
       if (forbidden.length) {
+        console.log("[DIAG-403-PATCH] bloqueado em allowlist do optometrista -- campos recebidos:", forbidden);
         return res.status(403).json({ ok: false, message: "Optometrista só pode atualizar presença, status e observação." });
       }
     }
