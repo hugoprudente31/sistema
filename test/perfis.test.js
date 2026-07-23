@@ -181,6 +181,86 @@ test('admin: POST /api/usuarios — não retorna 403', async function() {
   } finally { restore(); }
 });
 
+test('admin: POST /api/usuarios rejeita loja fora do cadastro oficial (evita repetir o bug da conta Ademar de Barros)', async function() {
+  // Bug real encontrado em produção: 4 contas da loja Ademar de Barros foram
+  // gravadas com usuarios.loja = "Óticas Target - Santo Antônio" — um valor
+  // que o mapa de variações JÁ reconhece e normalizaria corretamente (ver
+  // test/normaliza-loja-publica.test.js), então o problema nunca foi essa
+  // variação especificamente, e sim que ANTES desta correção nenhuma
+  // validação existia: qualquer texto era salvo cru, sem checar se batia com
+  // alguma loja real. Este teste cobre esse caso — um valor que não bate com
+  // NENHUMA variação conhecida — que antes era salvo sem erro.
+  const restore = withQuery({ 'SELECT * FROM usuarios WHERE': { rows: [] } });
+  try {
+    const r = await fetch(baseUrl + '/api/usuarios', {
+      method: 'POST', headers: H(tok('admin')),
+      body: JSON.stringify({ nome: 'Novo', email: 'n2@novo.com', senha: 'Senha#2026Forte', cargo: 'vendedor', loja: 'Loja que não existe de verdade' })
+    });
+    assert.equal(r.status, 400, 'loja não cadastrada precisa ser rejeitada, não salva crua');
+    assert.match((await r.json()).message, /Loja não reconhecida/);
+  } finally { restore(); }
+});
+
+test('admin: POST /api/usuarios normaliza variações reconhecidas da loja antes de salvar (ex: nome legado "Santo Antônio")', async function() {
+  // Este é o cenário exato do bug real: a conta é criada/editada com o nome
+  // legado da loja, e precisa ser gravada com o nome oficial do cadastro
+  // (`lojas`), não com o texto cru — senão o filtro de sessão em
+  // GET /api/agendamentos (match exato contra agendamentos.loja) nunca bate.
+  let payloadInserido = null;
+  const orig = pool.query;
+  pool.query = async function(sql, params) {
+    if (sql.includes('SELECT * FROM usuarios WHERE')) return { rows: [] };
+    if (sql.includes('INSERT INTO usuarios')) {
+      payloadInserido = params;
+      return { rows: [{ id: 99, nome: 'Novo', email: 'n3@n.com', cargo: 'vendedor', loja: 'óticas Target - Ademar de Barros', ativo: true }] };
+    }
+    return { rows: [] };
+  };
+  try {
+    const r = await fetch(baseUrl + '/api/usuarios', {
+      method: 'POST', headers: H(tok('admin')),
+      body: JSON.stringify({ nome: 'Novo', email: 'n3@novo.com', senha: 'Senha#2026Forte', cargo: 'vendedor', loja: 'Óticas Target - Santo Antônio' })
+    });
+    assert.equal(r.status, 200);
+    assert.equal(payloadInserido[5], 'óticas Target - Ademar de Barros', 'variação legada deve ser normalizada para o nome oficial antes do INSERT');
+  } finally { pool.query = orig; }
+});
+
+test('admin: PATCH /api/usuarios/:id rejeita loja fora do cadastro oficial', async function() {
+  const restore = withQuery({
+    'SELECT id, email, cargo FROM usuarios WHERE id': { rows: [{ id: 20, email: 'x@x.com', cargo: 'optometrista' }] }
+  });
+  try {
+    const r = await fetch(baseUrl + '/api/usuarios/20', {
+      method: 'PATCH', headers: H(tok('admin')),
+      body: JSON.stringify({ loja: 'Loja que não existe' })
+    });
+    assert.equal(r.status, 400);
+    assert.match((await r.json()).message, /Loja não reconhecida/);
+  } finally { restore(); }
+});
+
+test('admin: PATCH /api/usuarios/:id sem tocar em loja não exige o campo (COALESCE mantém o valor atual)', async function() {
+  let paramsRecebidos = null;
+  const orig = pool.query;
+  pool.query = async function(sql, params) {
+    if (sql.includes('SELECT id, email, cargo FROM usuarios WHERE id')) return { rows: [{ id: 20, email: 'x@x.com', cargo: 'optometrista' }] };
+    if (sql.includes('UPDATE usuarios SET')) {
+      paramsRecebidos = params;
+      return { rows: [{ id: 20, nome: 'X', email: 'x@x.com', cargo: 'optometrista', loja: A, ativo: true }] };
+    }
+    return { rows: [] };
+  };
+  try {
+    const r = await fetch(baseUrl + '/api/usuarios/20', {
+      method: 'PATCH', headers: H(tok('admin')),
+      body: JSON.stringify({ nome: 'Novo Nome' })
+    });
+    assert.equal(r.status, 200);
+    assert.equal(paramsRecebidos[2], null, 'loja não enviada no PATCH deve virar null (COALESCE preserva o valor atual no banco)');
+  } finally { pool.query = orig; }
+});
+
 // ════════════════════════════════════════════════════════════════════════════
 // 3. ATENDIMENTO CENTRAL — vê tudo mas não é admin nem tem acesso financeiro
 // ════════════════════════════════════════════════════════════════════════════

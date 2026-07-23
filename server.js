@@ -3419,6 +3419,16 @@ app.post("/api/usuarios", requireAdmin, async (req, res) => {
     if (password && password.length < 12) {
       return res.status(400).json({ ok: false, message: "A senha deve ter pelo menos 12 caracteres." });
     }
+    // Mesma validação da landing page: um valor de loja fora do cadastro
+    // oficial (ex: nome antigo/legado da loja) faz esse usuário nunca ver os
+    // agendamentos da própria loja, porque o filtro de sessão exige match
+    // exato contra agendamentos.loja. Já aconteceu com 4 contas da loja
+    // Ademar de Barros gravadas com "Santo Antônio" (nome legado).
+    let loja = null;
+    if (b.loja) {
+      loja = normalizeLojaPublica(b.loja);
+      if (!loja) return res.status(400).json({ ok: false, message: "Loja não reconhecida. Selecione uma das lojas cadastradas no sistema." });
+    }
     const passwordHash = password ? await bcrypt.hash(password, 12) : null;
     const gasId = makeGasId("usuario", email);
     const result = await pool.query(
@@ -3435,7 +3445,7 @@ app.post("/api/usuarios", requireAdmin, async (req, res) => {
          password_changed_at = CASE WHEN EXCLUDED.senha IS NULL THEN usuarios.password_changed_at ELSE CURRENT_TIMESTAMP END,
          atualizado_em = CURRENT_TIMESTAMP
        RETURNING id, gas_id, nome, email, cargo, loja, access_tags, can_view_finance, ativo, criado_em, atualizado_em`,
-      [gasId, nome, email, passwordHash, cargo, b.loja || null, !!b.can_view_finance, b.ativo !== false]
+      [gasId, nome, email, passwordHash, cargo, loja, !!b.can_view_finance, b.ativo !== false]
     );
     res.json({ ok: true, message: "Usuário salvo com sucesso.", usuario: result.rows[0] });
   } catch (error) {
@@ -3462,6 +3472,16 @@ app.patch("/api/usuarios/:id", requireAdmin, async (req, res) => {
     if (password && password.length < 12) {
       return res.status(400).json({ ok: false, message: "A senha deve ter pelo menos 12 caracteres." });
     }
+    // Mesma validação da landing page (ver POST /api/usuarios acima): não
+    // deixar gravar um nome de loja fora do cadastro oficial.
+    let lojaParam = null;
+    if (b.loja !== undefined) {
+      const lojaRaw = clean(b.loja);
+      if (lojaRaw) {
+        lojaParam = normalizeLojaPublica(lojaRaw);
+        if (!lojaParam) return res.status(400).json({ ok: false, message: "Loja não reconhecida. Selecione uma das lojas cadastradas no sistema." });
+      }
+    }
     const passwordHash = password ? await bcrypt.hash(password, 12) : null;
     const result = await pool.query(
       `UPDATE usuarios SET
@@ -3478,7 +3498,7 @@ app.patch("/api/usuarios/:id", requireAdmin, async (req, res) => {
       [
         b.nome ? clean(b.nome) : null,
         b.cargo ? clean(b.cargo) : null,
-        b.loja !== undefined ? (b.loja || null) : null,
+        lojaParam,
         b.can_view_finance !== undefined ? !!b.can_view_finance : null,
         b.ativo !== undefined ? !!b.ativo : null,
         passwordHash,
