@@ -209,6 +209,11 @@ test("respostas incluem cabeçalhos básicos de segurança", async () => {
   assert.equal(response.headers.get("x-powered-by"), null);
 });
 
+test("index.html nunca fica em cache no navegador (todo o painel vive nesse arquivo, sem hash de build)", async () => {
+  const response = await fetch(baseUrl + "/");
+  assert.match(response.headers.get("cache-control") || "", /no-store/, "GET / precisa impedir cache para refletir deploys imediatamente");
+});
+
 test("agenda de loja usa comparacao sem diferenca de acento", async () => {
   const originalQuery = pool.query;
   let capturedSql = "";

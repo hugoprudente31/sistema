@@ -52,7 +52,20 @@ app.use((req, res, next) => {
 });
 
 const publicPath = path.join(__dirname, "public");
-if (fs.existsSync(publicPath)) app.use(express.static(publicPath));
+// Sem build/hash de assets: todo o painel vive em public/index.html. Sem
+// cache-control explicito, navegadores (e proxies corporativos) podem servir
+// uma copia antiga da pagina indefinidamente apos um deploy, escondendo
+// correcoes ja publicadas ate alguem dar um hard-refresh manual. Forcamos
+// revalidacao sempre para os arquivos HTML.
+if (fs.existsSync(publicPath)) {
+  app.use(express.static(publicPath, {
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith(".html")) {
+        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      }
+    }
+  }));
+}
 app.use(require("./kommo/salesbot"));
 app.use(require("./kommo/webhook"));
 const negociacaoRoutes = require("./negociacao-routes");
@@ -4489,7 +4502,10 @@ app.get("/api/dashboard/ads-performance", requireSessionOuFase2Key, async (req, 
 
 app.get("/", (req, res) => {
   const indexPath = path.join(publicPath, "index.html");
-  if (fs.existsSync(indexPath)) return res.sendFile(indexPath);
+  if (fs.existsSync(indexPath)) {
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    return res.sendFile(indexPath);
+  }
   res.json({
     ok: true,
     service: "Agendamento System",
