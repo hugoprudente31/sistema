@@ -4316,7 +4316,7 @@ app.get("/api/dashboard", async (req, res) => {
     const params = scoped ? [req.session.loja] : [];
     const clientes = await pool.query(
       `SELECT COUNT(*)::int AS total FROM clientes
-       WHERE nome NOT ILIKE '%teste%' AND excluido_em IS NULL
+       WHERE nome NOT ILIKE '%teste%'
        ${scoped ? `AND ${storeSql("loja_origem")}` : ""}`,
       params
     );
