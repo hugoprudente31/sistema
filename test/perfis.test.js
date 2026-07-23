@@ -261,6 +261,51 @@ test('admin: PATCH /api/usuarios/:id sem tocar em loja não exige o campo (COALE
   } finally { pool.query = orig; }
 });
 
+test('admin: POST /api/clientes rejeita loja fora do cadastro oficial (mesmo bug encontrado em usuarios, agora na tabela clientes)', async function() {
+  // Bug real encontrado em produção: 41 clientes da loja Ademar de Barros
+  // foram gravados com loja_origem = "Óticas Target - Santo Antônio" (nome
+  // legado), fazendo o dashboard dessa loja mostrar 1 cliente em vez de 42
+  // -- POST /api/clientes nunca validava loja_origem contra o cadastro
+  // oficial, o mesmo problema já corrigido em agendamentos e usuarios.
+  const r = await fetch(baseUrl + '/api/clientes', {
+    method: 'POST', headers: H(tok('admin')),
+    body: JSON.stringify({ nome: 'Cliente Novo', loja_origem: 'Loja que não existe' })
+  });
+  assert.equal(r.status, 400);
+  assert.match((await r.json()).message, /Loja não reconhecida/);
+});
+
+test('admin: POST /api/clientes normaliza variação legada da loja antes de salvar', async function() {
+  let paramsRecebidos = null;
+  const orig = pool.query;
+  pool.query = async function(sql, params) {
+    if (sql.includes('INSERT INTO clientes')) {
+      paramsRecebidos = params;
+      return { rows: [{ id: 500, nome: 'Cliente Novo', loja_origem: 'óticas Target - Ademar de Barros' }] };
+    }
+    return { rows: [] };
+  };
+  try {
+    const r = await fetch(baseUrl + '/api/clientes', {
+      method: 'POST', headers: H(tok('admin')),
+      body: JSON.stringify({ nome: 'Cliente Novo', loja_origem: 'Óticas Target - Santo Antônio' })
+    });
+    assert.equal(r.status, 200);
+    assert.equal(paramsRecebidos[7], 'óticas Target - Ademar de Barros', 'variação legada deve ser normalizada para o nome oficial antes do INSERT');
+  } finally { pool.query = orig; }
+});
+
+test('gerente de loja: POST /api/clientes sem informar loja_origem usa a própria loja da sessão (sem regressão)', async function() {
+  const restore = withQuery({ 'INSERT INTO clientes': { rows: [{ id: 501, nome: 'Cliente Sem Loja Explicita', loja_origem: null }] } });
+  try {
+    const r = await fetch(baseUrl + '/api/clientes', {
+      method: 'POST', headers: H(tok('gerente de loja', G)),
+      body: JSON.stringify({ nome: 'Cliente Sem Loja Explicita' })
+    });
+    assert.equal(r.status, 200);
+  } finally { restore(); }
+});
+
 // ════════════════════════════════════════════════════════════════════════════
 // 3. ATENDIMENTO CENTRAL — vê tudo mas não é admin nem tem acesso financeiro
 // ════════════════════════════════════════════════════════════════════════════

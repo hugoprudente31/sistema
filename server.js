@@ -3119,7 +3119,16 @@ app.post("/api/clientes", async (req, res) => {
     if (!hasRole(req.session, ["admin", "atendimento central", "gerente de loja", "consultor de vendas", "vendedor", "comprador"])) {
       return res.status(403).json({ ok: false, message: "Perfil sem permissão para cadastrar clientes." });
     }
-    if (!ensureStoreAccess(req.session, b.loja_origem || req.session.loja)) {
+    // Mesma validação já aplicada em agendamentos/usuarios: um nome de loja
+    // fora do cadastro oficial (ex: nome legado da loja) faz o cliente nunca
+    // ser contado nos totais da própria loja. Já aconteceu com 41 clientes
+    // da Ademar de Barros gravados com "Santo Antônio".
+    let lojaOrigem = null;
+    if (b.loja_origem) {
+      lojaOrigem = normalizeLojaPublica(b.loja_origem);
+      if (!lojaOrigem) return res.status(400).json({ ok: false, message: "Loja não reconhecida. Selecione uma das lojas cadastradas no sistema." });
+    }
+    if (!ensureStoreAccess(req.session, lojaOrigem || req.session.loja)) {
       return res.status(403).json({ ok: false, message: "Sem permissão para operar esta loja." });
     }
     if (!b.nome) return res.status(400).json({ ok: false, message: "Nome do cliente é obrigatório." });
@@ -3148,7 +3157,7 @@ app.post("/api/clientes", async (req, res) => {
         b.cpf || null,
         b.data_nascimento || null,
         b.origem || null,
-        b.loja_origem || null,
+        lojaOrigem,
         b.observacoes || null
       ]
     );
