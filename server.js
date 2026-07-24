@@ -131,6 +131,23 @@ function requireSessionOuFase2Key(req, res, next) {
   return requireSession(req, res, next);
 }
 
+// ===============================
+// SEGURANÇA — INTEGRAÇÃO DE CAPTAÇÃO DE LEADS (captacao-leads-tgt)
+// ===============================
+
+const CAPTACAO_SYNC_KEY = process.env.CAPTACAO_SYNC_KEY || "";
+
+function validarCaptacaoKey(req, res, next) {
+  const recebida = req.headers["x-api-key"] || "";
+  if (!CAPTACAO_SYNC_KEY) {
+    return res.status(500).json({ ok: false, message: "CAPTACAO_SYNC_KEY não configurada no Railway." });
+  }
+  if (!safeEqual(recebida, CAPTACAO_SYNC_KEY)) {
+    return res.status(401).json({ ok: false, message: "Chave de sincronismo inválida." });
+  }
+  next();
+}
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL
 });
@@ -3288,6 +3305,29 @@ app.get("/api/vendedores-consultores", async (req, res) => {
     res.json({ ok: true, vendedoresConsultores: result.rows });
   } catch (error) {
     res.status(500).json({ ok: false, message: "Erro ao carregar vendedores e consultores.", error: error.message });
+  }
+});
+
+// Resolve (ou cria) o ID canônico de um vendedor/consultor a partir de nome+loja,
+// para sistemas externos (ex.: captação de leads) que precisam referenciar o
+// mesmo ID usado aqui, sem passar por um agendamento.
+app.post("/api/internal/vendedores-consultores/resolve", validarCaptacaoKey, async (req, res) => {
+  try {
+    const nome = clean(req.body?.nome || "");
+    const loja = clean(req.body?.loja || "");
+    if (!nome) {
+      return res.status(400).json({ ok: false, message: "Campo 'nome' é obrigatório." });
+    }
+    const result = await pool.query(
+      `INSERT INTO vendedores_consultores (nome, nome_chave, loja, loja_chave, ativo, atualizado_em)
+       VALUES ($1, normalizar_identidade_comercial_tgt($1), $2, normalizar_identidade_comercial_tgt($2), true, CURRENT_TIMESTAMP)
+       ON CONFLICT (nome_chave, loja_chave) DO UPDATE SET ativo = true, atualizado_em = CURRENT_TIMESTAMP
+       RETURNING id`,
+      [nome, loja]
+    );
+    res.json({ ok: true, id: result.rows[0].id });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: "Erro ao resolver vendedor/consultor.", error: error.message });
   }
 });
 
