@@ -1983,6 +1983,30 @@ app.get("/api/internal/marketing-performance", validarAdAnalyzerKey, async (req,
   }
 });
 
+// Resolve (ou cria) o ID canônico de um vendedor/consultor a partir de nome+loja,
+// para sistemas externos (ex.: captação de leads) que precisam referenciar o
+// mesmo ID usado aqui, sem passar por um agendamento. Precisa ficar antes do
+// gate global de sessão abaixo -- é chamada server-to-server, sem cookie.
+app.post("/api/internal/vendedores-consultores/resolve", validarCaptacaoKey, async (req, res) => {
+  try {
+    const nome = clean(req.body?.nome || "");
+    const loja = clean(req.body?.loja || "");
+    if (!nome) {
+      return res.status(400).json({ ok: false, message: "Campo 'nome' é obrigatório." });
+    }
+    const result = await pool.query(
+      `INSERT INTO vendedores_consultores (nome, nome_chave, loja, loja_chave, ativo, atualizado_em)
+       VALUES ($1, normalizar_identidade_comercial_tgt($1), $2, normalizar_identidade_comercial_tgt($2), true, CURRENT_TIMESTAMP)
+       ON CONFLICT (nome_chave, loja_chave) DO UPDATE SET ativo = true, atualizado_em = CURRENT_TIMESTAMP
+       RETURNING id`,
+      [nome, loja]
+    );
+    res.json({ ok: true, id: result.rows[0].id });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: "Erro ao resolver vendedor/consultor.", error: error.message });
+  }
+});
+
 app.use("/api", (req, res, next) => {
   if (req.path === "/auth/login" || req.path === "/auth/logout") return next();
   if (req.path.startsWith("/public/")) return next();
@@ -3305,29 +3329,6 @@ app.get("/api/vendedores-consultores", async (req, res) => {
     res.json({ ok: true, vendedoresConsultores: result.rows });
   } catch (error) {
     res.status(500).json({ ok: false, message: "Erro ao carregar vendedores e consultores.", error: error.message });
-  }
-});
-
-// Resolve (ou cria) o ID canônico de um vendedor/consultor a partir de nome+loja,
-// para sistemas externos (ex.: captação de leads) que precisam referenciar o
-// mesmo ID usado aqui, sem passar por um agendamento.
-app.post("/api/internal/vendedores-consultores/resolve", validarCaptacaoKey, async (req, res) => {
-  try {
-    const nome = clean(req.body?.nome || "");
-    const loja = clean(req.body?.loja || "");
-    if (!nome) {
-      return res.status(400).json({ ok: false, message: "Campo 'nome' é obrigatório." });
-    }
-    const result = await pool.query(
-      `INSERT INTO vendedores_consultores (nome, nome_chave, loja, loja_chave, ativo, atualizado_em)
-       VALUES ($1, normalizar_identidade_comercial_tgt($1), $2, normalizar_identidade_comercial_tgt($2), true, CURRENT_TIMESTAMP)
-       ON CONFLICT (nome_chave, loja_chave) DO UPDATE SET ativo = true, atualizado_em = CURRENT_TIMESTAMP
-       RETURNING id`,
-      [nome, loja]
-    );
-    res.json({ ok: true, id: result.rows[0].id });
-  } catch (error) {
-    res.status(500).json({ ok: false, message: "Erro ao resolver vendedor/consultor.", error: error.message });
   }
 });
 
