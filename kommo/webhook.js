@@ -10,6 +10,7 @@ const { syncLeadAppointment } = require("./appointmentSync");
 const SM          = require("./bot/stateManager");
 const { processMessage, processNewLead } = require("./bot/flowEngine");
 const { adicionarBloqueio, removerBloqueio, listarBloqueios } = require("./scheduling");
+const crmLog      = require("./crmLog");
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -268,6 +269,10 @@ router.post("/api/kommo/message", async (req, res) => {
     if (entry.authorType === "user") {
       trackEvent("add_message_atendente", `lead=${entry.leadId}`);
       SM.markHumanActivity(String(entry.leadId));
+      crmLog.registrarMensagem({
+        leadId: entry.leadId, talkId: entry.talkId, chatId: entry.chatId,
+        direcao: "saida", autorTipo: "atendente", texto: entry.text,
+      });
       console.log(`[Kommo/Message] 👤 Atendente — lead ${entry.leadId}`);
       return;
     }
@@ -277,10 +282,16 @@ router.post("/api/kommo/message", async (req, res) => {
 
     // Em modo Salesbot, TODAS as mensagens de cliente são processadas via /api/salesbot.
     // Este webhook só rastreia eventos estruturais (atendente, add_talk, add_lead).
+    // O histórico do CRM para a mensagem do cliente é gravado lá (evita duplicar).
     if (process.env.KOMMO_USE_SALESBOT === "true") {
       console.log(`[Kommo/Message] Modo Salesbot — add_message ignorado (processado pelo Salesbot)`);
       return;
     }
+
+    crmLog.registrarMensagem({
+      leadId: entry.leadId, talkId: entry.talkId, chatId: entry.chatId,
+      direcao: "entrada", autorTipo: "cliente", texto: entry.text,
+    });
 
     await processMessage({
       leadId:       String(entry.leadId),

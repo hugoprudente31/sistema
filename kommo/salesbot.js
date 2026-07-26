@@ -33,6 +33,7 @@ const router                           = express.Router();
 const kommo                            = require("./client");
 const { processMessage, flushResponses } = require("./bot/flowEngine");
 const SM                               = require("./bot/stateManager");
+const crmLog                           = require("./crmLog");
 
 // Deduplicação: bloqueia retries do Kommo com a mesma mensagem no mesmo lead
 // dentro de uma janela de 8 segundos.
@@ -146,6 +147,10 @@ router.post("/api/salesbot", requireSalesbotSecret, async (req, res) => {
   }
   markMessageSeen(leadId, message);
 
+  crmLog.registrarMensagem({
+    leadId, talkId, chatId, direcao: "entrada", autorTipo: "cliente", texto: message,
+  });
+
   // Drena mensagens pendentes anteriores (limpa estado de envio)
   flushResponses(leadId);
 
@@ -168,6 +173,12 @@ router.post("/api/salesbot", requireSalesbotSecret, async (req, res) => {
   // Coleta todas as mensagens que o bot gerou e une em um único texto
   const parts = flushResponses(leadId);
   const text  = parts.join("\n\n");
+
+  for (const parte of parts) {
+    crmLog.registrarMensagem({
+      leadId, talkId, chatId, direcao: "saida", autorTipo: "bot", texto: parte,
+    });
+  }
 
   console.log(`[Salesbot] lead=${leadId} → ${parts.length} msg(s) — "${text.slice(0, 100)}"`);
   if (returnUrl) {

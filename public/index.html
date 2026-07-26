@@ -330,6 +330,19 @@
     .admin-nav-buttons button.active { background:#ea580c; color:#fff; border-color:#ea580c; }
     .admin-nav-summary { margin-top:8px; color:#78716c; font-size:12px; }
     .admin-focused-hidden { display:none !important; }
+    .crm-kanban-board { display:flex; gap:12px; overflow-x:auto; padding-bottom:8px; margin-top:14px; }
+    .crm-kanban-col { flex:0 0 260px; background:#fffaf7; border:1px solid var(--line); border-radius:14px; padding:10px; }
+    .crm-kanban-col-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:6px; }
+    .crm-kanban-col-header strong { font-size:13px; color:var(--p); }
+    .crm-lead-card { background:#fff; border:1px solid var(--line); border-radius:12px; padding:10px; margin-bottom:8px; cursor:pointer; transition:.15s ease; }
+    .crm-lead-card:hover { transform:translateY(-1px); box-shadow:0 6px 14px rgba(0,0,0,.08); }
+    .crm-lead-card .crm-nome { font-weight:700; font-size:13px; }
+    .crm-lead-card .crm-meta-linha { font-size:11px; color:var(--muted); margin-top:2px; }
+    .crm-thread { display:flex; flex-direction:column; gap:8px; max-height:48vh; overflow-y:auto; padding:12px; background:#f8fafc; border-radius:12px; margin:12px 0; }
+    .crm-bubble { max-width:75%; padding:8px 12px; border-radius:14px; font-size:13px; line-height:1.4; }
+    .crm-bubble.entrada { align-self:flex-start; background:#fff; border:1px solid var(--line); }
+    .crm-bubble.saida { align-self:flex-end; background:var(--p); color:#fff; }
+    .crm-bubble .crm-autor { font-size:10px; opacity:.7; display:block; margin-bottom:2px; }
     @media (max-width:760px) { .user-filter-bar { grid-template-columns:1fr; } }
     @media (max-width:760px) { .executive-filters { grid-template-columns:1fr; } }
   </style>
@@ -377,6 +390,7 @@
       </div>
       <div class="admin-nav-buttons" style="margin-top:12px;">
         <button class="active" data-admin-area="executivo" onclick="mostrarAreaAdmin('executivo',this)">Visão Executiva</button>
+        <button data-admin-area="crm" onclick="mostrarAreaAdmin('crm',this)">CRM</button>
         <button data-admin-area="operacao" onclick="mostrarAreaAdmin('operacao',this)">Operação e OS</button>
         <button data-admin-area="financeiro" onclick="mostrarAreaAdmin('financeiro',this)">Financeiro</button>
         <button data-admin-area="gestao" onclick="mostrarAreaAdmin('gestao',this)">Metas e Equipe</button>
@@ -695,6 +709,20 @@
       <div id="execConsultores" class="executive-panel"><div class="scroll-x"><table><thead><tr><th>ID</th><th>Consultor</th><th>Loja</th><th>Atendimentos</th><th>Conversão</th><th>Vendas</th><th>Ticket</th><th>Faturamento</th></tr></thead><tbody id="execConsultoresBody"></tbody></table></div></div>
       <div id="execLojaperfil" class="executive-panel"><p class="legend-mini">Compara onde estamos agendando melhor: mesma loja, por perfil de quem registrou o agendamento.</p><div class="scroll-x"><table><thead><tr><th>Loja</th><th>Perfil</th><th>Clientes</th><th>Agendamentos</th><th>Comparecimento</th><th>Compraram</th><th>Conversão</th><th>Faturamento</th></tr></thead><tbody id="execLojaPerfilBody"></tbody></table></div></div>
       <div id="execMetas" class="executive-panel"><div class="scroll-x"><table><thead><tr><th>Competência</th><th>Escopo</th><th>Meta faturamento</th><th>Meta vendas</th><th>Meta agendamentos</th><th>Meta conversão</th><th>Meta prazo OS</th></tr></thead><tbody id="execMetasBody"></tbody></table></div><p class="legend-mini">As metas são cadastradas no módulo “Registro de Metas” logo abaixo.</p></div>
+    </div>
+
+    <div class="card hidden" id="cardCrmKanban">
+      <div class="topbar">
+        <div><h3 style="margin:0;">CRM — Conversas e Leads</h3><p class="legend-mini">Kanban por estágio, ficha do lead e histórico de conversa. Espelha o Kommo dentro do sistema (Fase 1) — estágio é somente leitura por enquanto.</p></div>
+        <button class="btn-relatorio secondary" onclick="carregarCrmKanban()">Atualizar</button>
+      </div>
+      <div class="row-3">
+        <div><label>Loja</label><select id="crmLoja" onchange="carregarCrmKanban()"><option value="">Todas</option></select></div>
+        <div><label>Buscar (nome ou WhatsApp)</label><input id="crmBusca" type="text" placeholder="Nome ou telefone" onkeyup="if(event.key==='Enter') carregarCrmKanban()"></div>
+        <div style="display:flex;align-items:flex-end;"><button onclick="carregarCrmKanban()">Filtrar</button></div>
+      </div>
+      <div id="crmAtualizado" class="legend-mini"></div>
+      <div id="crmKanbanBoard" class="crm-kanban-board"></div>
     </div>
 
     <div class="card hidden" id="cardMetasAdmin">
@@ -1266,6 +1294,8 @@ function fazerLogin() {
       }).then(function() {
         if (state.user && state.user.permissions && state.user.permissions.isAdmin) return carregarDashboardExecutivo();
       }).then(function() {
+        if (state.user && state.user.permissions && state.user.permissions.isAdmin) return carregarCrmKanban();
+      }).then(function() {
         return carregarAgendaEDashboard();
       }).then(function() {
         iniciarAutoRefreshPostgres();
@@ -1292,6 +1322,11 @@ var ADMIN_AREAS = {
     titulo: 'Visão Executiva',
     resumo: 'Indicadores estratégicos, lojas, clientes, setores, consultores e alertas.',
     cards: ['cardDashboardExecutivo','cardDashboardOperacional']
+  },
+  crm: {
+    titulo: 'CRM',
+    resumo: 'Kanban de leads por estágio e histórico de conversa — espelha o Kommo dentro do sistema.',
+    cards: ['cardCrmKanban']
   },
   operacao: {
     titulo: 'Operação e OS',
@@ -1338,6 +1373,7 @@ function aplicarPermissoesTela() {
   if (p.isAdmin) byId('adminWorkspaceNav').classList.remove('hidden');
   if (p.isAdmin) byId('cardMetasAdmin').classList.remove('hidden');
   if (p.isAdmin) byId('cardDashboardExecutivo').classList.remove('hidden');
+  if (p.isAdmin) byId('cardCrmKanban').classList.remove('hidden');
   if (p.isSuperAdmin) byId('areaTecnica').classList.remove('hidden');
   if (p.isSuperAdmin) byId('adminNavTecnica').classList.remove('hidden');
   if (p.isAdmin) byId('btnLixeira').classList.remove('hidden');
@@ -2859,6 +2895,133 @@ function carregarDashboardExecutivo() {
   if (byId('execLoja').value) p.push('loja='+encodeURIComponent(byId('execLoja').value));
   byId('execAtualizado').textContent='Carregando indicadores...';
   return apiGet('/api/admin/dashboard-executivo?'+p.join('&')).then(function(res){if(!res.ok)throw new Error(res.message||'Erro ao carregar dashboard.');renderDashboardExecutivo(res);}).catch(function(err){byId('execAtualizado').textContent=err.message||String(err);toast(err.message||String(err),'err');});
+}
+
+// ── CRM (Fase 1): kanban de leads + histórico de conversa ────────
+function crmPopularLojas() {
+  var select = byId('crmLoja');
+  if (!select || select.options.length > 1) return;
+  var nomes = [];
+  (state.lojas || []).forEach(function(l) {
+    var nome = l.Loja || l.nome || ''; if (!nome) return;
+    if (nome.toLowerCase().indexOf('target') > -1) nome = 'Óticas Target';
+    if (nomes.indexOf(nome) === -1) nomes.push(nome);
+  });
+  nomes.forEach(function(nome) { var op = document.createElement('option'); op.value = nome; op.textContent = nome; select.appendChild(op); });
+}
+
+function crmTempoRelativo(iso) {
+  if (!iso) return '—';
+  var diffMs = Date.now() - new Date(iso).getTime();
+  var min = Math.floor(diffMs / 60000);
+  if (min < 1) return 'agora';
+  if (min < 60) return min + ' min atrás';
+  var h = Math.floor(min / 60);
+  if (h < 24) return h + 'h atrás';
+  return Math.floor(h / 24) + 'd atrás';
+}
+
+function carregarCrmKanban() {
+  if (!(state.user && state.user.permissions && state.user.permissions.isAdmin)) return Promise.resolve();
+  crmPopularLojas();
+  var p = [];
+  if (byId('crmLoja').value) p.push('loja=' + encodeURIComponent(byId('crmLoja').value));
+  if (byId('crmBusca').value.trim()) p.push('busca=' + encodeURIComponent(byId('crmBusca').value.trim()));
+  byId('crmAtualizado').textContent = 'Carregando...';
+  return apiGet('/api/admin/crm/leads' + (p.length ? '?' + p.join('&') : ''))
+    .then(function(res) {
+      if (!res.ok) throw new Error(res.message || 'Erro ao carregar CRM.');
+      renderCrmKanban(res);
+      byId('crmAtualizado').textContent = (res.leads || []).length + ' lead(s) · atualizado agora';
+    })
+    .catch(function(err) { byId('crmAtualizado').textContent = err.message || String(err); toast(err.message || String(err), 'err'); });
+}
+
+function renderCrmKanban(data) {
+  var colunas = data.colunas || [];
+  var leads = data.leads || [];
+  byId('crmKanbanBoard').innerHTML = colunas.map(function(col) {
+    var leadsDaColuna = leads.filter(function(l) { return l.estagio === col.estagio; });
+    var cards = leadsDaColuna.map(function(l) {
+      return '<div class="crm-lead-card" onclick="abrirLeadCrm(\'' + escapeJs(l.kommo_lead_id) + '\')">' +
+        '<div class="crm-nome">' + escapeHtml(l.nome) + '</div>' +
+        '<div class="crm-meta-linha">' + escapeHtml(l.loja) + '</div>' +
+        '<div class="crm-meta-linha">' + crmTempoRelativo(l.ultima_atividade) + '</div>' +
+        '</div>';
+    }).join('') || '<div class="legend-mini">Sem leads.</div>';
+    return '<div class="crm-kanban-col">' +
+      '<div class="crm-kanban-col-header"><strong>' + escapeHtml(col.estagio) + '</strong><span class="pill">' + col.total + '</span></div>' +
+      cards +
+      '</div>';
+  }).join('');
+}
+
+function crmFecharThread() {
+  var el = document.getElementById('crmModalBackdrop');
+  if (el) el.remove();
+}
+
+function abrirLeadCrm(leadId) {
+  apiGet('/api/admin/crm/leads/' + encodeURIComponent(leadId) + '/mensagens')
+    .then(function(res) {
+      if (!res.ok) throw new Error(res.message || 'Erro ao carregar a conversa.');
+      renderCrmThreadModal(leadId, res.lead, res.mensagens || []);
+    })
+    .catch(function(err) { toast(err.message || String(err), 'err'); });
+}
+
+function renderCrmThreadModal(leadId, lead, mensagens) {
+  crmFecharThread();
+  var backdrop = document.createElement('div');
+  backdrop.id = 'crmModalBackdrop';
+  backdrop.className = 'modal-backdrop';
+  var resumoAgendamento = lead.agendamento_id
+    ? ('<div class="legend-mini">Agendamento: ' + escapeHtml(lead.status || '') + (lead.data_agendamento ? ' · ' + formatDateBR(lead.data_agendamento) : '') + (lead.horario ? ' às ' + escapeHtml(lead.horario) : '') + '</div>')
+    : '<div class="legend-mini">Sem agendamento vinculado ainda.</div>';
+  backdrop.innerHTML = '<div class="modal-card" style="max-width:640px">' +
+    '<div class="topbar"><div><h3 style="margin:0">' + escapeHtml(lead.nome) + '</h3>' +
+    '<div class="legend-mini">' + escapeHtml(lead.loja) + ' · ' + escapeHtml(lead.whatsapp || 'sem WhatsApp') + ' · <span class="pill">' + escapeHtml(lead.estagio) + '</span></div>' +
+    resumoAgendamento +
+    '</div><button class="secondary icon-btn" onclick="crmFecharThread()">Fechar</button></div>' +
+    '<div id="crmThread" class="crm-thread"></div>' +
+    '<div class="row"><textarea id="crmTextoEnvio" placeholder="Escrever mensagem para o cliente..." style="min-height:60px"></textarea></div>' +
+    '<div style="display:flex;gap:10px;margin-top:10px;"><button onclick="enviarMensagemCrmModal(\'' + escapeJs(leadId) + '\')">Enviar e assumir conversa</button><button class="secondary" onclick="crmFecharThread()">Fechar</button></div>' +
+    '<div id="msgCrmModal" class="msg"></div>' +
+    '</div>';
+  document.body.appendChild(backdrop);
+  crmRenderThreadMensagens(mensagens);
+}
+
+function crmRenderThreadMensagens(mensagens) {
+  var el = document.getElementById('crmThread');
+  if (!el) return;
+  el.innerHTML = (mensagens || []).map(function(m) {
+    var autor = m.autor_tipo === 'atendente' ? (m.autor_nome || 'Atendente') : (m.autor_tipo === 'bot' ? 'Bot' : '');
+    return '<div class="crm-bubble ' + escapeHtml(m.direcao) + '">' +
+      (autor ? '<span class="crm-autor">' + escapeHtml(autor) + '</span>' : '') +
+      escapeHtml(m.texto) +
+      '</div>';
+  }).join('') || '<div class="legend-mini">Sem mensagens registradas ainda para este lead.</div>';
+  el.scrollTop = el.scrollHeight;
+}
+
+function enviarMensagemCrmModal(leadId) {
+  var campo = document.getElementById('crmTextoEnvio');
+  var texto = (campo || {}).value || '';
+  if (!texto.trim()) return;
+  apiPost('/api/admin/crm/leads/' + encodeURIComponent(leadId) + '/mensagens', { texto: texto.trim() })
+    .then(function(res) {
+      if (!res.ok) throw new Error(res.message || 'Erro ao enviar mensagem.');
+      if (campo) campo.value = '';
+      toast('Mensagem enviada. Bot silenciado para este lead.', 'ok');
+      return apiGet('/api/admin/crm/leads/' + encodeURIComponent(leadId) + '/mensagens');
+    })
+    .then(function(res) { if (res && res.ok) crmRenderThreadMensagens(res.mensagens); })
+    .catch(function(err) {
+      var msgEl = document.getElementById('msgCrmModal');
+      if (msgEl) { msgEl.textContent = err.message || String(err); msgEl.className = 'msg err'; }
+      toast(err.message || String(err), 'err');
+    });
 }
 
 var metasAdminCache = [];

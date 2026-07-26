@@ -1410,6 +1410,24 @@ async function initDatabase() {
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_desempenho_anuncios_data ON desempenho_anuncios(data_referencia);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_desempenho_anuncios_loja ON desempenho_anuncios(loja);`);
+
+  // Histórico de mensagens do CRM (painel próprio, espelhando conversas do Kommo).
+  // Preenchido a partir de agora pelos webhooks/salesbot — sem backfill do Kommo.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS crm_mensagens (
+      id BIGSERIAL PRIMARY KEY,
+      kommo_lead_id TEXT NOT NULL,
+      talk_id TEXT,
+      chat_id TEXT,
+      direcao TEXT NOT NULL,
+      autor_tipo TEXT NOT NULL,
+      autor_nome TEXT,
+      texto TEXT,
+      criado_em TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_crm_mensagens_lead ON crm_mensagens(kommo_lead_id, criado_em);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_agendamentos_kommo_lead_id ON agendamentos(kommo_lead_id);`);
 }
 
 function buildGasPayload(body) {
@@ -4604,6 +4622,153 @@ app.get("/api/admin/dashboard-executivo", requireAdmin, async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ ok: false, message: "Erro ao carregar o painel executivo.", error: error.message });
+  }
+});
+
+// ===============================
+// CRM (Fase 1): kanban de leads + histórico de conversa, espelhando o Kommo
+// dentro do próprio sistema. Base é kommo_bot_states (sinal de "existe uma
+// conversa real"), com o agendamento mais recente daquele lead via LATERAL.
+// ===============================
+
+const CRM_ESTAGIO_CASE_SQL = `CASE
+  WHEN a.venda_gerada = 'sim' OR COALESCE(a.valor_venda,0) > 0 THEN 'Vendido'
+  WHEN LOWER(COALESCE(a.compareceu,'')) IN ('não','nao','não compareceu','nao compareceu')
+    OR LOWER(COALESCE(a.status,'')) IN ('cancelado','não compareceu','nao compareceu') THEN 'Perdido'
+  WHEN LOWER(COALESCE(a.compareceu,'')) IN ('sim','compareceu') THEN 'Compareceu'
+  WHEN a.id IS NOT NULL AND LOWER(COALESCE(a.status,'')) IN ('agendado','confirmado') THEN 'Agendado'
+  WHEN s.etapa = 'transferido' THEN 'Atendimento Humano'
+  WHEN s.etapa IS NOT NULL AND s.etapa <> 'boas_vindas' THEN 'Bot Ativo'
+  ELSE 'Novo Lead'
+END`;
+
+const CRM_LOJA_SQL = `COALESCE(NULLIF(a.loja,''), NULLIF(s.state->>'loja',''), 'Sem loja')`;
+
+const CRM_ORDEM_ESTAGIOS = ["Atendimento Humano", "Bot Ativo", "Agendado", "Compareceu", "Vendido", "Perdido", "Novo Lead"];
+
+function crmLeadsBaseQuery({ conditions }) {
+  return `
+    SELECT
+      s.lead_id AS kommo_lead_id,
+      COALESCE(NULLIF(s.state->>'nome',''), NULLIF(a.nome,''), '(sem nome)') AS nome,
+      COALESCE(NULLIF(a.whatsapp,''), '') AS whatsapp,
+      ${CRM_LOJA_SQL} AS loja,
+      s.etapa AS etapa_bot,
+      s.bot_active,
+      s.updated_at AS ultima_atividade,
+      a.id AS agendamento_id, a.status, a.compareceu, a.venda_gerada, a.valor_venda,
+      a.data_agendamento, a.horario, a.vendedor_atendeu_nome,
+      ${CRM_ESTAGIO_CASE_SQL} AS estagio
+    FROM kommo_bot_states s
+    LEFT JOIN LATERAL (
+      SELECT * FROM agendamentos ag
+      WHERE ag.kommo_lead_id = s.lead_id AND ag.excluido_em IS NULL
+      ORDER BY ag.criado_em DESC
+      LIMIT 1
+    ) a ON true
+    ${conditions.length ? "WHERE " + conditions.join(" AND ") : ""}
+  `;
+}
+
+app.get("/api/admin/crm/leads", async (req, res) => {
+  try {
+    const q = req.query;
+    const params = [];
+    const conditions = [];
+
+    if (!canViewAllStores(req.session)) {
+      if (!req.session.loja) return res.json({ ok: true, colunas: [], leads: [] });
+      params.push(req.session.loja);
+      conditions.push(storeSql(CRM_LOJA_SQL, `$${params.length}`));
+    } else if (clean(q.loja)) {
+      params.push(clean(q.loja));
+      conditions.push(storeSql(CRM_LOJA_SQL, `$${params.length}`));
+    }
+
+    const busca = clean(q.busca);
+    if (busca) {
+      params.push(`%${busca}%`);
+      conditions.push(`(s.state->>'nome' ILIKE $${params.length} OR a.nome ILIKE $${params.length} OR a.whatsapp ILIKE $${params.length})`);
+    }
+
+    const base = crmLeadsBaseQuery({ conditions });
+
+    const colunasResult = await pool.query(`SELECT estagio, COUNT(*)::int AS total FROM (${base}) t GROUP BY estagio`, params);
+    const contagem = new Map(colunasResult.rows.map((r) => [r.estagio, r.total]));
+    const colunas = CRM_ORDEM_ESTAGIOS.map((estagio) => ({ estagio, total: contagem.get(estagio) || 0 }));
+
+    const estagioFiltro = clean(q.estagio);
+    const paramsLeads = [...params];
+    let whereEstagio = "";
+    if (estagioFiltro) {
+      paramsLeads.push(estagioFiltro);
+      whereEstagio = `WHERE t.estagio = $${paramsLeads.length}`;
+    }
+    const leadsResult = await pool.query(
+      `SELECT * FROM (${base}) t ${whereEstagio} ORDER BY t.ultima_atividade DESC LIMIT 300`,
+      paramsLeads
+    );
+
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ ok: true, colunas, leads: leadsResult.rows });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: "Erro ao carregar o CRM.", error: error.message });
+  }
+});
+
+async function crmBuscarLead(leadId) {
+  const params = [String(leadId)];
+  const base = crmLeadsBaseQuery({ conditions: ["s.lead_id = $1"] });
+  const result = await pool.query(base, params);
+  return result.rows[0] || null;
+}
+
+app.get("/api/admin/crm/leads/:leadId/mensagens", async (req, res) => {
+  try {
+    const leadId = clean(req.params.leadId);
+    const lead = await crmBuscarLead(leadId);
+    if (!lead) return res.status(404).json({ ok: false, message: "Lead não encontrado." });
+    if (!ensureStoreAccess(req.session, lead.loja)) {
+      return res.status(403).json({ ok: false, message: "Sem acesso a esta loja." });
+    }
+    const mensagens = await pool.query(
+      `SELECT id, direcao, autor_tipo, autor_nome, texto, criado_em
+       FROM crm_mensagens WHERE kommo_lead_id = $1 ORDER BY criado_em ASC LIMIT 500`,
+      [leadId]
+    );
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ ok: true, lead, mensagens: mensagens.rows });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: "Erro ao carregar a conversa.", error: error.message });
+  }
+});
+
+app.post("/api/admin/crm/leads/:leadId/mensagens", async (req, res) => {
+  try {
+    const leadId = clean(req.params.leadId);
+    const texto = clean(req.body?.texto);
+    if (!texto) return res.status(400).json({ ok: false, message: "Mensagem vazia." });
+
+    const lead = await crmBuscarLead(leadId);
+    if (!lead) return res.status(404).json({ ok: false, message: "Lead não encontrado." });
+    if (!ensureStoreAccess(req.session, lead.loja)) {
+      return res.status(403).json({ ok: false, message: "Sem acesso a esta loja." });
+    }
+
+    const kommoClient = require("./kommo/client");
+    const SM = require("./kommo/bot/stateManager");
+    const crmLog = require("./kommo/crmLog");
+
+    await kommoClient.sendMessageToLead(leadId, texto);
+    SM.markHumanActivity(leadId);
+    await crmLog.registrarMensagem({
+      leadId, direcao: "saida", autorTipo: "atendente",
+      autorNome: req.session?.nome || null, texto,
+    });
+
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: "Erro ao enviar mensagem.", error: error.message });
   }
 });
 
