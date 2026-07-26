@@ -405,7 +405,7 @@
         <div class="pill" id="centralAreaAtual">CRM</div>
       </div>
       <div class="admin-nav-buttons" style="margin-top:12px;">
-        <button class="active" data-central-area="crm" onclick="mostrarAreaCentral('crm',this)">CRM</button>
+        <button data-central-area="crm" onclick="mostrarAreaCentral('crm',this)">CRM</button>
       </div>
       <div class="admin-nav-summary" id="centralAreaResumo">Kanban de leads, histórico de conversa e métricas de atendimento.</div>
     </div>
@@ -1396,15 +1396,18 @@ var CENTRAL_AREAS = {
   }
 };
 
+// Diferente do mostrarAreaAdmin: aqui a página fica ESCONDIDA (classe
+// 'hidden') até o atendente clicar no botão — não abre sozinha no login,
+// e assim nunca aparece misturada com o registro/painel de agendamento.
 function mostrarAreaCentral(area, botao) {
   if (roleName() !== 'atendimento central') return;
   var config = CENTRAL_AREAS[area] || CENTRAL_AREAS.crm;
   Object.keys(CENTRAL_AREAS).forEach(function(chave) {
     CENTRAL_AREAS[chave].cards.forEach(function(id) {
-      var card = byId(id); if (card) card.classList.add('admin-focused-hidden');
+      var card = byId(id); if (card) card.classList.add('hidden');
     });
   });
-  config.cards.forEach(function(id) { var card = byId(id); if (card) card.classList.remove('admin-focused-hidden'); });
+  config.cards.forEach(function(id) { var card = byId(id); if (card) card.classList.remove('hidden'); });
   document.querySelectorAll('[data-central-area]').forEach(function(el) { el.classList.remove('active'); });
   var ativo = botao || document.querySelector('[data-central-area="' + area + '"]');
   if (ativo) ativo.classList.add('active');
@@ -1419,11 +1422,10 @@ function aplicarPermissoesTela() {
   if (p.isAdmin) byId('adminWorkspaceNav').classList.remove('hidden');
   if (p.isAdmin) byId('cardMetasAdmin').classList.remove('hidden');
   if (p.isAdmin) byId('cardDashboardExecutivo').classList.remove('hidden');
-  if (p.isAdmin || roleName() === 'atendimento central') byId('cardCrmKanban').classList.remove('hidden');
-  if (roleName() === 'atendimento central') {
-    byId('centralWorkspaceNav').classList.remove('hidden');
-    mostrarAreaCentral('crm');
-  }
+  if (p.isAdmin) byId('cardCrmKanban').classList.remove('hidden');
+  // Atendimento Central: o botão "CRM" aparece, mas a página em si (cardCrmKanban)
+  // só é revelada quando o botão é clicado — ver mostrarAreaCentral().
+  if (roleName() === 'atendimento central') byId('centralWorkspaceNav').classList.remove('hidden');
   if (p.isSuperAdmin) byId('areaTecnica').classList.remove('hidden');
   if (p.isSuperAdmin) byId('adminNavTecnica').classList.remove('hidden');
   if (p.isAdmin) byId('btnLixeira').classList.remove('hidden');
