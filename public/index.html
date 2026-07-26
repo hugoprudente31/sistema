@@ -402,12 +402,14 @@
     <div class="card hidden admin-workspace-nav" id="centralWorkspaceNav">
       <div class="topbar">
         <div><h3 style="margin:0 0 4px;">Área de Atendimento Central</h3><div class="legend-mini">Ferramentas liberadas para o seu perfil.</div></div>
-        <div class="pill" id="centralAreaAtual">CRM</div>
+        <div class="pill" id="centralAreaAtual">Painel de Agendados</div>
       </div>
       <div class="admin-nav-buttons" style="margin-top:12px;">
+        <button data-central-area="painel" onclick="mostrarAreaCentral('painel',this)">Painel de Agendados</button>
+        <button data-central-area="agendamento" onclick="mostrarAreaCentral('agendamento',this)">Registro de Agendamento</button>
         <button data-central-area="crm" onclick="mostrarAreaCentral('crm',this)">CRM</button>
       </div>
-      <div class="admin-nav-summary" id="centralAreaResumo">Kanban de leads, histórico de conversa e métricas de atendimento.</div>
+      <div class="admin-nav-summary" id="centralAreaResumo">Agenda, acompanhamento de OS e indicadores operacionais.</div>
     </div>
 
     <div class="card" id="cardIdentidadeUsuario">
@@ -1385,23 +1387,33 @@ function mostrarAreaAdmin(area, botao) {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-// CRM é o único item hoje, mas fica no mesmo formato de ADMIN_AREAS para
-// crescer sem reescrever o mecanismo caso o Atendimento Central ganhe mais
-// ferramentas liberadas depois.
+// Mesmo mecanismo do ADMIN_AREAS: cada botão é uma página isolada, só uma
+// fica visível por vez. CRM, Registro de Agendamento e Painel de Agendados
+// nunca aparecem misturados na tela do Atendimento Central.
 var CENTRAL_AREAS = {
   crm: {
     titulo: 'CRM',
     resumo: 'Kanban de leads, histórico de conversa e métricas de atendimento.',
     cards: ['cardCrmKanban']
+  },
+  agendamento: {
+    titulo: 'Registro de Agendamento',
+    resumo: 'Cadastrar um novo agendamento para o cliente.',
+    cards: ['cardAgendamento']
+  },
+  painel: {
+    titulo: 'Painel de Agendados',
+    resumo: 'Agenda, acompanhamento de OS e indicadores operacionais.',
+    cards: ['cardDashboardOperacional', 'cardOperacaoOS']
   }
 };
 
-// Diferente do mostrarAreaAdmin: aqui a página fica ESCONDIDA (classe
-// 'hidden') até o atendente clicar no botão — não abre sozinha no login,
-// e assim nunca aparece misturada com o registro/painel de agendamento.
+// Mesma lógica do mostrarAreaAdmin: escondida (classe 'hidden') até o
+// atendente clicar no botão da área — nunca abre sozinha, e nunca aparece
+// misturada com as outras páginas do perfil.
 function mostrarAreaCentral(area, botao) {
   if (roleName() !== 'atendimento central') return;
-  var config = CENTRAL_AREAS[area] || CENTRAL_AREAS.crm;
+  var config = CENTRAL_AREAS[area] || CENTRAL_AREAS.painel;
   Object.keys(CENTRAL_AREAS).forEach(function(chave) {
     CENTRAL_AREAS[chave].cards.forEach(function(id) {
       var card = byId(id); if (card) card.classList.add('hidden');
@@ -1423,8 +1435,6 @@ function aplicarPermissoesTela() {
   if (p.isAdmin) byId('cardMetasAdmin').classList.remove('hidden');
   if (p.isAdmin) byId('cardDashboardExecutivo').classList.remove('hidden');
   if (p.isAdmin) byId('cardCrmKanban').classList.remove('hidden');
-  // Atendimento Central: o botão "CRM" aparece, mas a página em si (cardCrmKanban)
-  // só é revelada quando o botão é clicado — ver mostrarAreaCentral().
   if (roleName() === 'atendimento central') byId('centralWorkspaceNav').classList.remove('hidden');
   if (p.isSuperAdmin) byId('areaTecnica').classList.remove('hidden');
   if (p.isSuperAdmin) byId('adminNavTecnica').classList.remove('hidden');
@@ -1440,6 +1450,10 @@ function aplicarPermissoesTela() {
   if (p.isAdmin || roleName() === 'gerente de loja') byId('btnHistorico').classList.remove('hidden');
   byId('filtroMeus').checked = false;
   if (p.isAdmin) mostrarAreaAdmin('executivo');
+  // Roda por último: precisa vir depois das linhas acima (ex: canCreateAgendamento
+  // desescondendo cardAgendamento) para poder re-escondê-las fora da área ativa
+  // e garantir que só uma página fique visível por vez.
+  if (roleName() === 'atendimento central') mostrarAreaCentral('painel');
 }
 
 function carregarInfoBase() {
@@ -3815,8 +3829,12 @@ function executarDedupKommo() {
     if (!u || !u.perfil) return;
 
     // Painel de novo agendamento
+    // Atendimento Central tem seu próprio menu de páginas (mostrarAreaCentral,
+    // no script principal) que já controla quando o cardAgendamento aparece —
+    // não sobrescrever isso aqui, senão o card "vaza" de volta mesmo com outra
+    // página ativa (CRM ou Painel de Agendados).
     var cardAg = document.getElementById('cardAgendamento');
-    if (cardAg) {
+    if (cardAg && role() !== 'atendimento central') {
       if (window.tgtPodeCriarAgendamento()) {
         cardAg.classList.remove('hidden');
       } else {
