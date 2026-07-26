@@ -399,6 +399,17 @@
       <div class="admin-nav-summary" id="adminAreaResumo">Indicadores estratégicos, lojas, clientes, setores, consultores e alertas.</div>
     </div>
 
+    <div class="card hidden admin-workspace-nav" id="centralWorkspaceNav">
+      <div class="topbar">
+        <div><h3 style="margin:0 0 4px;">Área de Atendimento Central</h3><div class="legend-mini">Ferramentas liberadas para o seu perfil.</div></div>
+        <div class="pill" id="centralAreaAtual">CRM</div>
+      </div>
+      <div class="admin-nav-buttons" style="margin-top:12px;">
+        <button class="active" data-central-area="crm" onclick="mostrarAreaCentral('crm',this)">CRM</button>
+      </div>
+      <div class="admin-nav-summary" id="centralAreaResumo">Kanban de leads, histórico de conversa e métricas de atendimento.</div>
+    </div>
+
     <div class="card" id="cardIdentidadeUsuario">
       <div class="topbar">
         <div>
@@ -1374,6 +1385,34 @@ function mostrarAreaAdmin(area, botao) {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
+// CRM é o único item hoje, mas fica no mesmo formato de ADMIN_AREAS para
+// crescer sem reescrever o mecanismo caso o Atendimento Central ganhe mais
+// ferramentas liberadas depois.
+var CENTRAL_AREAS = {
+  crm: {
+    titulo: 'CRM',
+    resumo: 'Kanban de leads, histórico de conversa e métricas de atendimento.',
+    cards: ['cardCrmKanban']
+  }
+};
+
+function mostrarAreaCentral(area, botao) {
+  if (roleName() !== 'atendimento central') return;
+  var config = CENTRAL_AREAS[area] || CENTRAL_AREAS.crm;
+  Object.keys(CENTRAL_AREAS).forEach(function(chave) {
+    CENTRAL_AREAS[chave].cards.forEach(function(id) {
+      var card = byId(id); if (card) card.classList.add('admin-focused-hidden');
+    });
+  });
+  config.cards.forEach(function(id) { var card = byId(id); if (card) card.classList.remove('admin-focused-hidden'); });
+  document.querySelectorAll('[data-central-area]').forEach(function(el) { el.classList.remove('active'); });
+  var ativo = botao || document.querySelector('[data-central-area="' + area + '"]');
+  if (ativo) ativo.classList.add('active');
+  byId('centralAreaAtual').textContent = config.titulo;
+  byId('centralAreaResumo').textContent = config.resumo;
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
 function aplicarPermissoesTela() {
   var p = state.user.permissions || {};
   if (p.isAdmin) byId('areaAdministracao').classList.remove('hidden');
@@ -1381,6 +1420,10 @@ function aplicarPermissoesTela() {
   if (p.isAdmin) byId('cardMetasAdmin').classList.remove('hidden');
   if (p.isAdmin) byId('cardDashboardExecutivo').classList.remove('hidden');
   if (p.isAdmin || roleName() === 'atendimento central') byId('cardCrmKanban').classList.remove('hidden');
+  if (roleName() === 'atendimento central') {
+    byId('centralWorkspaceNav').classList.remove('hidden');
+    mostrarAreaCentral('crm');
+  }
   if (p.isSuperAdmin) byId('areaTecnica').classList.remove('hidden');
   if (p.isSuperAdmin) byId('adminNavTecnica').classList.remove('hidden');
   if (p.isAdmin) byId('btnLixeira').classList.remove('hidden');
