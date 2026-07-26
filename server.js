@@ -4670,17 +4670,24 @@ function crmLeadsBaseQuery({ conditions }) {
   `;
 }
 
-app.get("/api/admin/crm/leads", async (req, res) => {
+// O CRM é ferramenta de Admin/Atendimento Central, não de perfil de loja --
+// o front-end já esconde o botão para os demais perfis, mas as rotas em si
+// não tinham esse gate (só faziam escopo por loja), então qualquer sessão
+// autenticada conseguia listar/enviar mensagem via chamada direta à API.
+function requireCrmAccess(req, res, next) {
+  if (!canViewAllStores(req.session)) {
+    return res.status(403).json({ ok: false, message: "CRM disponível apenas para Admin e Atendimento Central." });
+  }
+  next();
+}
+
+app.get("/api/admin/crm/leads", requireCrmAccess, async (req, res) => {
   try {
     const q = req.query;
     const params = [];
     const conditions = [];
 
-    if (!canViewAllStores(req.session)) {
-      if (!req.session.loja) return res.json({ ok: true, colunas: [], leads: [] });
-      params.push(req.session.loja);
-      conditions.push(storeSql(CRM_LOJA_SQL, `$${params.length}`));
-    } else if (clean(q.loja)) {
+    if (clean(q.loja)) {
       params.push(clean(q.loja));
       conditions.push(storeSql(CRM_LOJA_SQL, `$${params.length}`));
     }
@@ -4771,7 +4778,7 @@ async function crmBuscarLead(leadId) {
   return lead;
 }
 
-app.get("/api/admin/crm/leads/:leadId/mensagens", async (req, res) => {
+app.get("/api/admin/crm/leads/:leadId/mensagens", requireCrmAccess, async (req, res) => {
   try {
     const leadId = clean(req.params.leadId);
     const lead = await crmBuscarLead(leadId);
@@ -4791,7 +4798,7 @@ app.get("/api/admin/crm/leads/:leadId/mensagens", async (req, res) => {
   }
 });
 
-app.post("/api/admin/crm/leads/:leadId/mensagens", async (req, res) => {
+app.post("/api/admin/crm/leads/:leadId/mensagens", requireCrmAccess, async (req, res) => {
   try {
     const leadId = clean(req.params.leadId);
     const texto = clean(req.body?.texto);
@@ -4825,7 +4832,7 @@ app.post("/api/admin/crm/leads/:leadId/mensagens", async (req, res) => {
 // conversas por atendente), calculados a partir de crm_mensagens. Como esse
 // histórico só começou a ser gravado no deploy da Fase 1, fica zerado/parcial
 // até acumular tráfego real — isso é esperado, não é bug.
-app.get("/api/admin/crm/metricas", async (req, res) => {
+app.get("/api/admin/crm/metricas", requireCrmAccess, async (req, res) => {
   try {
     const q = req.query;
     const hoje = hojeBrasil();
@@ -4837,11 +4844,7 @@ app.get("/api/admin/crm/metricas", async (req, res) => {
 
     const params = [];
     const conditions = [];
-    if (!canViewAllStores(req.session)) {
-      if (!req.session.loja) return res.json({ ok: true, periodo: { inicio, fim }, conversasAtivas: 0, tempoMedioRespostaMin: null, porAtendente: [] });
-      params.push(req.session.loja);
-      conditions.push(storeSql(CRM_LOJA_SQL, `$${params.length}`));
-    } else if (clean(q.loja)) {
+    if (clean(q.loja)) {
       params.push(clean(q.loja));
       conditions.push(storeSql(CRM_LOJA_SQL, `$${params.length}`));
     }
