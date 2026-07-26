@@ -1294,7 +1294,7 @@ function fazerLogin() {
       }).then(function() {
         if (state.user && state.user.permissions && state.user.permissions.isAdmin) return carregarDashboardExecutivo();
       }).then(function() {
-        if (state.user && state.user.permissions && state.user.permissions.isAdmin) return carregarCrmKanban();
+        if (state.user && state.user.permissions && (state.user.permissions.isAdmin || roleName() === 'atendimento central')) return carregarCrmKanban();
       }).then(function() {
         return carregarAgendaEDashboard();
       }).then(function() {
@@ -1373,7 +1373,7 @@ function aplicarPermissoesTela() {
   if (p.isAdmin) byId('adminWorkspaceNav').classList.remove('hidden');
   if (p.isAdmin) byId('cardMetasAdmin').classList.remove('hidden');
   if (p.isAdmin) byId('cardDashboardExecutivo').classList.remove('hidden');
-  if (p.isAdmin) byId('cardCrmKanban').classList.remove('hidden');
+  if (p.isAdmin || roleName() === 'atendimento central') byId('cardCrmKanban').classList.remove('hidden');
   if (p.isSuperAdmin) byId('areaTecnica').classList.remove('hidden');
   if (p.isSuperAdmin) byId('adminNavTecnica').classList.remove('hidden');
   if (p.isAdmin) byId('btnLixeira').classList.remove('hidden');
@@ -2922,7 +2922,7 @@ function crmTempoRelativo(iso) {
 }
 
 function carregarCrmKanban() {
-  if (!(state.user && state.user.permissions && state.user.permissions.isAdmin)) return Promise.resolve();
+  if (!(state.user && state.user.permissions && (state.user.permissions.isAdmin || roleName() === 'atendimento central'))) return Promise.resolve();
   crmPopularLojas();
   var p = [];
   if (byId('crmLoja').value) p.push('loja=' + encodeURIComponent(byId('crmLoja').value));

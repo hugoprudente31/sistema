@@ -4651,7 +4651,7 @@ function crmLeadsBaseQuery({ conditions }) {
     SELECT
       s.lead_id AS kommo_lead_id,
       COALESCE(NULLIF(s.state->>'nome',''), NULLIF(a.nome,''), '(sem nome)') AS nome,
-      COALESCE(NULLIF(a.whatsapp,''), '') AS whatsapp,
+      COALESCE(NULLIF(a.whatsapp,''), NULLIF(s.state->>'whatsapp',''), '') AS whatsapp,
       ${CRM_LOJA_SQL} AS loja,
       s.etapa AS etapa_bot,
       s.bot_active,
@@ -4716,11 +4716,59 @@ app.get("/api/admin/crm/leads", async (req, res) => {
   }
 });
 
+function crmExtrairTelefoneContato(contact) {
+  const campos = contact?.custom_fields_values || [];
+  const campo = campos.find((c) => c.field_code === "PHONE")
+    || campos.find((c) => String(c.field_name || "").toUpperCase().includes("TELEFONE"));
+  return clean(campo?.values?.[0]?.value || "");
+}
+
+// Busca o nome/telefone reais do contato direto no Kommo quando o lead ainda
+// não tem essa informação salva (comum em leads que ainda não passaram pela
+// saudação do bot). Resultado é salvo em kommo_bot_states.state para não
+// precisar bater no Kommo de novo nas próximas vezes que o lead for aberto.
+async function crmResolverContatoKommo(leadId) {
+  try {
+    const kommoClient = require("./kommo/client");
+    const lead = await kommoClient.getLead(leadId);
+    const contactId = lead?._embedded?.contacts?.[0]?.id;
+    let contact = contactId ? await kommoClient.getContact(contactId) : null;
+    if (!contact) {
+      const contatos = await kommoClient.getContactsByLead(leadId);
+      contact = contatos[0] || null;
+    }
+    if (!contact) return null;
+    const nome = clean(contact.name);
+    if (/\{\{.*\}\}/.test(nome)) return null; // variável do Kommo não resolvida
+    return { nome: nome || null, whatsapp: crmExtrairTelefoneContato(contact) || null };
+  } catch (e) {
+    console.error(`[CRM] Erro ao resolver contato Kommo — lead ${leadId}:`, e.message);
+    return null;
+  }
+}
+
 async function crmBuscarLead(leadId) {
   const params = [String(leadId)];
   const base = crmLeadsBaseQuery({ conditions: ["s.lead_id = $1"] });
   const result = await pool.query(base, params);
-  return result.rows[0] || null;
+  let lead = result.rows[0] || null;
+  if (!lead) return null;
+
+  if (lead.nome === "(sem nome)" || !lead.whatsapp) {
+    const contato = await crmResolverContatoKommo(leadId);
+    if (contato && (contato.nome || contato.whatsapp)) {
+      const atualizacoes = {};
+      if (contato.nome && lead.nome === "(sem nome)") atualizacoes.nome = contato.nome;
+      if (contato.whatsapp && !lead.whatsapp) atualizacoes.whatsapp = contato.whatsapp;
+      if (Object.keys(atualizacoes).length) {
+        const SM = require("./kommo/bot/stateManager");
+        await SM.getState(leadId); // garante que o estado em memória está carregado antes do merge
+        SM.setState(leadId, atualizacoes, { persist: true });
+        lead = { ...lead, ...atualizacoes };
+      }
+    }
+  }
+  return lead;
 }
 
 app.get("/api/admin/crm/leads/:leadId/mensagens", async (req, res) => {
