@@ -716,12 +716,19 @@
         <div><h3 style="margin:0;">CRM — Conversas e Leads</h3><p class="legend-mini">Kanban por estágio, ficha do lead e histórico de conversa. Espelha o Kommo dentro do sistema (Fase 1) — estágio é somente leitura por enquanto.</p></div>
         <button class="btn-relatorio secondary" onclick="carregarCrmKanban()">Atualizar</button>
       </div>
-      <div class="row-3">
-        <div><label>Loja</label><select id="crmLoja" onchange="carregarCrmKanban()"><option value="">Todas</option></select></div>
+      <div class="row-4">
+        <div><label>Loja</label><select id="crmLoja" onchange="carregarCrmKanban();carregarCrmMetricas();"><option value="">Todas</option></select></div>
         <div><label>Buscar (nome ou WhatsApp)</label><input id="crmBusca" type="text" placeholder="Nome ou telefone" onkeyup="if(event.key==='Enter') carregarCrmKanban()"></div>
-        <div style="display:flex;align-items:flex-end;"><button onclick="carregarCrmKanban()">Filtrar</button></div>
+        <div><label>Período das métricas</label><input id="crmMetricasInicio" type="date" onchange="carregarCrmMetricas()"></div>
+        <div><label>&nbsp;</label><input id="crmMetricasFim" type="date" onchange="carregarCrmMetricas()"></div>
       </div>
-      <div id="crmAtualizado" class="legend-mini"></div>
+      <div style="display:flex;gap:10px;margin-bottom:10px;">
+        <button onclick="carregarCrmKanban()">Filtrar leads</button>
+        <button class="secondary" onclick="carregarCrmMetricas()">Atualizar métricas</button>
+      </div>
+      <div class="executive-kpis" id="crmKpis"></div>
+      <div class="scroll-x"><table><thead><tr><th>Atendente</th><th>Conversas</th><th>Mensagens enviadas</th></tr></thead><tbody id="crmAtendenteBody"></tbody></table></div>
+      <div id="crmAtualizado" class="legend-mini" style="margin-top:14px;"></div>
       <div id="crmKanbanBoard" class="crm-kanban-board"></div>
     </div>
 
@@ -2921,9 +2928,14 @@ function crmTempoRelativo(iso) {
   return Math.floor(h / 24) + 'd atrás';
 }
 
+function crmPodeUsar() {
+  return !!(state.user && state.user.permissions && (state.user.permissions.isAdmin || roleName() === 'atendimento central'));
+}
+
 function carregarCrmKanban() {
-  if (!(state.user && state.user.permissions && (state.user.permissions.isAdmin || roleName() === 'atendimento central'))) return Promise.resolve();
+  if (!crmPodeUsar()) return Promise.resolve();
   crmPopularLojas();
+  if (!byId('crmMetricasInicio').value) { carregarCrmMetricas(); } // primeira carga: dispara metricas junto
   var p = [];
   if (byId('crmLoja').value) p.push('loja=' + encodeURIComponent(byId('crmLoja').value));
   if (byId('crmBusca').value.trim()) p.push('busca=' + encodeURIComponent(byId('crmBusca').value.trim()));
@@ -2935,6 +2947,33 @@ function carregarCrmKanban() {
       byId('crmAtualizado').textContent = (res.leads || []).length + ' lead(s) · atualizado agora';
     })
     .catch(function(err) { byId('crmAtualizado').textContent = err.message || String(err); toast(err.message || String(err), 'err'); });
+}
+
+function carregarCrmMetricas() {
+  if (!crmPodeUsar()) return Promise.resolve();
+  if (!byId('crmMetricasInicio').value) byId('crmMetricasInicio').value = hojeBrasil().slice(0, 7) + '-01';
+  if (!byId('crmMetricasFim').value) byId('crmMetricasFim').value = hojeBrasil();
+  var p = ['inicio=' + encodeURIComponent(byId('crmMetricasInicio').value), 'fim=' + encodeURIComponent(byId('crmMetricasFim').value)];
+  if (byId('crmLoja').value) p.push('loja=' + encodeURIComponent(byId('crmLoja').value));
+  return apiGet('/api/admin/crm/metricas?' + p.join('&'))
+    .then(function(res) {
+      if (!res.ok) throw new Error(res.message || 'Erro ao carregar métricas.');
+      renderCrmMetricas(res);
+    })
+    .catch(function(err) { toast(err.message || String(err), 'err'); });
+}
+
+function renderCrmMetricas(data) {
+  var tempoTexto = data.tempoMedioRespostaMin == null ? 'Sem dados ainda' : Number(data.tempoMedioRespostaMin).toFixed(1) + ' min';
+  var kpis = [
+    ['Conversas ativas agora', numExecutivo(data.conversasAtivas)],
+    ['Tempo médio de 1ª resposta', tempoTexto],
+    ['Atendentes com conversas no período', numExecutivo((data.porAtendente || []).length)]
+  ];
+  byId('crmKpis').innerHTML = kpis.map(function(k) { return '<div class="executive-kpi"><span>' + escapeHtml(k[0]) + '</span><strong>' + escapeHtml(k[1]) + '</strong></div>'; }).join('');
+  byId('crmAtendenteBody').innerHTML = (data.porAtendente || []).map(function(x) {
+    return '<tr><td><strong>' + escapeHtml(x.autor_nome) + '</strong></td><td>' + numExecutivo(x.conversas) + '</td><td>' + numExecutivo(x.mensagens) + '</td></tr>';
+  }).join('') || linhaVazia(3, 'Sem mensagens de atendente registradas no período (histórico começou a ser gravado a partir do deploy do CRM).');
 }
 
 function renderCrmKanban(data) {

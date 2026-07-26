@@ -4820,6 +4820,79 @@ app.post("/api/admin/crm/leads/:leadId/mensagens", async (req, res) => {
   }
 });
 
+// GET /api/admin/crm/metricas — espelha os indicadores de atendimento que hoje
+// só existem dentro do Kommo (conversas ativas, tempo médio de 1ª resposta,
+// conversas por atendente), calculados a partir de crm_mensagens. Como esse
+// histórico só começou a ser gravado no deploy da Fase 1, fica zerado/parcial
+// até acumular tráfego real — isso é esperado, não é bug.
+app.get("/api/admin/crm/metricas", async (req, res) => {
+  try {
+    const q = req.query;
+    const hoje = hojeBrasil();
+    const inicio = clean(q.inicio) || `${hoje.slice(0, 7)}-01`;
+    const fim = clean(q.fim) || hoje;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(inicio) || !/^\d{4}-\d{2}-\d{2}$/.test(fim) || inicio > fim) {
+      return res.status(400).json({ ok: false, message: "Período inválido." });
+    }
+
+    const params = [];
+    const conditions = [];
+    if (!canViewAllStores(req.session)) {
+      if (!req.session.loja) return res.json({ ok: true, periodo: { inicio, fim }, conversasAtivas: 0, tempoMedioRespostaMin: null, porAtendente: [] });
+      params.push(req.session.loja);
+      conditions.push(storeSql(CRM_LOJA_SQL, `$${params.length}`));
+    } else if (clean(q.loja)) {
+      params.push(clean(q.loja));
+      conditions.push(storeSql(CRM_LOJA_SQL, `$${params.length}`));
+    }
+
+    const base = crmLeadsBaseQuery({ conditions });
+    const leadsFiltroSql = conditions.length ? `AND kommo_lead_id IN (SELECT kommo_lead_id FROM (${base}) b)` : "";
+
+    const ativasResult = await pool.query(
+      `SELECT COUNT(*)::int AS total FROM (${base}) t WHERE t.estagio IN ('Bot Ativo','Atendimento Humano')`,
+      params
+    );
+
+    const paramsPeriodo = [...params, inicio, fim];
+    const idxInicio = paramsPeriodo.length - 1;
+    const idxFim = paramsPeriodo.length;
+
+    const tempoResult = await pool.query(
+      `WITH ordenado AS (
+         SELECT kommo_lead_id, direcao, criado_em,
+                LEAD(direcao) OVER (PARTITION BY kommo_lead_id ORDER BY criado_em) AS prox_direcao,
+                LEAD(criado_em) OVER (PARTITION BY kommo_lead_id ORDER BY criado_em) AS prox_em
+         FROM crm_mensagens
+         WHERE criado_em::date BETWEEN $${idxInicio}::date AND $${idxFim}::date ${leadsFiltroSql}
+       )
+       SELECT AVG(EXTRACT(EPOCH FROM (prox_em - criado_em)) / 60)::numeric AS minutos
+       FROM ordenado WHERE direcao = 'entrada' AND prox_direcao = 'saida'`,
+      paramsPeriodo
+    );
+
+    const atendenteResult = await pool.query(
+      `SELECT autor_nome, COUNT(DISTINCT kommo_lead_id)::int AS conversas, COUNT(*)::int AS mensagens
+       FROM crm_mensagens
+       WHERE autor_tipo = 'atendente' AND autor_nome IS NOT NULL
+         AND criado_em::date BETWEEN $${idxInicio}::date AND $${idxFim}::date ${leadsFiltroSql}
+       GROUP BY autor_nome ORDER BY conversas DESC LIMIT 20`,
+      paramsPeriodo
+    );
+
+    res.setHeader("Cache-Control", "no-store");
+    res.json({
+      ok: true,
+      periodo: { inicio, fim },
+      conversasAtivas: ativasResult.rows[0]?.total || 0,
+      tempoMedioRespostaMin: tempoResult.rows[0]?.minutos !== null ? Number(tempoResult.rows[0].minutos) : null,
+      porAtendente: atendenteResult.rows,
+    });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: "Erro ao carregar métricas do CRM.", error: error.message });
+  }
+});
+
 // ===============================
 // DESEMPENHO DE ANÚNCIOS (Meta/Google Ads via AdAnalyzer)
 // ===============================
