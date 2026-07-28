@@ -7,6 +7,16 @@ class KommoClient {
     this.baseUrl     = `https://${this.subdomain}.kommo.com/api/v4`;
   }
 
+  // Permite trocar as credenciais em tempo de execução (ex.: painel de
+  // Configurações salvando no banco), sem precisar reiniciar o processo —
+  // como este client é um singleton (module.exports = new KommoClient()),
+  // todo mundo que já deu require('./client') enxerga a mudança na hora.
+  reconfigure({ subdomain, accessToken } = {}) {
+    if (subdomain) this.subdomain = subdomain;
+    if (accessToken) this.accessToken = accessToken;
+    this.baseUrl = `https://${this.subdomain}.kommo.com/api/v4`;
+  }
+
   async request(method, path, body = null) {
     if (!this.accessToken || !this.subdomain) {
       throw new Error("KOMMO_ACCESS_TOKEN ou KOMMO_SUBDOMAIN não configurado");

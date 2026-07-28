@@ -10,6 +10,8 @@ require("dotenv").config();
 const { startRecoveryCron } = require("./kommo/recovery");
 const { startReminderCron, runReminders, runTwoHourReminders } = require("./kommo/reminder");
 const mailingboss = require("./mailingboss");
+const kommoClient = require("./kommo/client");
+const { resolverJornadaLoja, estaOptometristaDisponivel, gerarSlotsJornada } = require("./lib/horarios");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -182,6 +184,80 @@ function safeEqual(value, expected) {
   const left = crypto.createHash("sha256").update(String(value || "")).digest();
   const right = crypto.createHash("sha256").update(String(expected || "")).digest();
   return crypto.timingSafeEqual(left, right);
+}
+
+// Criptografia em repouso para segredos de integração salvos em
+// configuracoes_integracao (ex.: access token do Kommo). Usa a chave
+// CONFIG_ENCRYPTION_KEY (32 bytes) — se ausente, encryptSecret falha de
+// forma explícita (fail-closed), no mesmo padrão do SESSION_SECRET.
+const CONFIG_ENCRYPTION_KEY = process.env.CONFIG_ENCRYPTION_KEY || "";
+
+function getConfigEncryptionKey() {
+  if (!CONFIG_ENCRYPTION_KEY) return null;
+  return crypto.createHash("sha256").update(CONFIG_ENCRYPTION_KEY).digest();
+}
+
+function encryptSecret(text) {
+  const key = getConfigEncryptionKey();
+  if (!key) throw new Error("CONFIG_ENCRYPTION_KEY não configurada no Railway.");
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const encrypted = Buffer.concat([cipher.update(String(text || ""), "utf8"), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return Buffer.concat([iv, authTag, encrypted]).toString("base64");
+}
+
+function decryptSecret(payload) {
+  const key = getConfigEncryptionKey();
+  if (!key || !payload) return "";
+  try {
+    const raw = Buffer.from(payload, "base64");
+    const iv = raw.subarray(0, 12);
+    const authTag = raw.subarray(12, 28);
+    const encrypted = raw.subarray(28);
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+    decipher.setAuthTag(authTag);
+    return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString("utf8");
+  } catch (error) {
+    return "";
+  }
+}
+
+async function getConfigValor(chave) {
+  const result = await pool.query(`SELECT valor, criptografado FROM configuracoes_integracao WHERE chave = $1`, [chave]);
+  if (!result.rows.length) return null;
+  const row = result.rows[0];
+  return row.criptografado ? decryptSecret(row.valor) : row.valor;
+}
+
+async function setConfigValor(chave, valor, { criptografado = false, email = null } = {}) {
+  const valorGravado = criptografado ? encryptSecret(valor) : String(valor || "");
+  await pool.query(
+    `INSERT INTO configuracoes_integracao (chave, valor, criptografado, atualizado_por_email, atualizado_em)
+     VALUES ($1,$2,$3,$4,CURRENT_TIMESTAMP)
+     ON CONFLICT (chave) DO UPDATE SET
+       valor = EXCLUDED.valor,
+       criptografado = EXCLUDED.criptografado,
+       atualizado_por_email = EXCLUDED.atualizado_por_email,
+       atualizado_em = CURRENT_TIMESTAMP`,
+    [chave, valorGravado, criptografado, email]
+  );
+}
+
+async function carregarConfiguracaoKommoDoBanco() {
+  try {
+    const subdomain = await getConfigValor("kommo_subdomain");
+    const accessToken = await getConfigValor("kommo_access_token");
+    const webhookSecret = await getConfigValor("kommo_webhook_secret");
+    if (subdomain || accessToken) {
+      kommoClient.reconfigure({ subdomain: subdomain || undefined, accessToken: accessToken || undefined });
+    }
+    if (webhookSecret) {
+      process.env.KOMMO_WEBHOOK_SECRET = webhookSecret;
+    }
+  } catch (error) {
+    console.error("Não foi possível carregar configuração do Kommo salva no banco:", error.message);
+  }
 }
 
 function parseCookies(req) {
@@ -669,7 +745,14 @@ async function buscarPrimeiroOptometristaLivre(client, loja, data, horario, opto
 
   if (!candidatos.length) candidatos.push("A definir");
 
+  const diaSemanaAgenda = new Date(String(data) + "T12:00:00").getDay();
+
   for (const optometrista of candidatos) {
+    const disponivelNoHorario = await estaOptometristaDisponivel(client, {
+      nome: optometrista, loja, diaSemana: diaSemanaAgenda, horario
+    });
+    if (!disponivelNoHorario) continue;
+
     const ocupado = await client.query(
       `SELECT id
        FROM agendamentos
@@ -932,6 +1015,45 @@ async function initDatabase() {
       origem_sync TEXT DEFAULT 'postgres',
       criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS configuracoes_integracao (
+      chave TEXT PRIMARY KEY,
+      valor TEXT,
+      criptografado BOOLEAN DEFAULT false,
+      atualizado_por_email TEXT,
+      atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS horarios_funcionamento_loja (
+      id SERIAL PRIMARY KEY,
+      loja TEXT NOT NULL,
+      dia_semana SMALLINT NOT NULL CHECK (dia_semana BETWEEN 0 AND 6),
+      aberto BOOLEAN NOT NULL DEFAULT true,
+      hora_inicio TIME,
+      hora_fim TIME,
+      intervalo_inicio TIME,
+      intervalo_fim TIME,
+      atualizado_por_email TEXT,
+      atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (loja, dia_semana)
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS horarios_optometrista (
+      id SERIAL PRIMARY KEY,
+      optometrista_id INTEGER NOT NULL REFERENCES optometristas(id) ON DELETE CASCADE,
+      dia_semana SMALLINT NOT NULL CHECK (dia_semana BETWEEN 0 AND 6),
+      hora_inicio TIME NOT NULL,
+      hora_fim TIME NOT NULL,
+      atualizado_por_email TEXT,
+      atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (optometrista_id, dia_semana)
     );
   `);
 
@@ -2239,12 +2361,26 @@ app.get("/api/public/horarios-disponiveis", validarLandingApiKey, async (req, re
 
     let horariosBase = gerarHorariosBase(data, loja);
 
-    // Unidade Santos/Gonzaga tem almoço 14:00-14:45 em dias úteis (seg-sex) — 4 slots de 15 min
     const diaRef = new Date(data + "T12:00:00").getDay();
-    const lojaKey = loja.toLowerCase().replace(/[^a-z]/g, "");
-    const isGonzagaSantos = lojaKey.includes("gonzaga") || lojaKey.includes("santos");
-    if (isGonzagaSantos && diaRef >= 1 && diaRef <= 5) {
-      horariosBase = horariosBase.filter(h => h !== "14:00" && h !== "14:15" && h !== "14:30" && h !== "14:45");
+    const jornadaConfig = await resolverJornadaLoja(client, loja, diaRef).catch(() => null);
+    if (jornadaConfig && jornadaConfig.origem === "config") {
+      // Loja com jornada semanal cadastrada no painel de Configurações —
+      // essa configuração substitui a regra padrão hardcoded (para permitir
+      // tanto restringir quanto ampliar o horário de atendimento).
+      if (!jornadaConfig.aberto) {
+        return res.json({
+          ok: true, loja, data, horarios: [],
+          message: "Loja fechada nesta data (horário configurado).",
+        });
+      }
+      horariosBase = gerarSlotsJornada(jornadaConfig);
+    } else {
+      // Unidade Santos/Gonzaga tem almoço 14:00-14:45 em dias úteis (seg-sex) — 4 slots de 15 min
+      const lojaKey = loja.toLowerCase().replace(/[^a-z]/g, "");
+      const isGonzagaSantos = lojaKey.includes("gonzaga") || lojaKey.includes("santos");
+      if (isGonzagaSantos && diaRef >= 1 && diaRef <= 5) {
+        horariosBase = horariosBase.filter(h => h !== "14:00" && h !== "14:15" && h !== "14:30" && h !== "14:45");
+      }
     }
     if (bloqueioAgenda?.hora_inicio && bloqueioAgenda?.hora_fim) {
       horariosBase = horariosBase.filter(h => h < bloqueioAgenda.hora_inicio || h >= bloqueioAgenda.hora_fim);
@@ -2272,6 +2408,11 @@ app.get("/api/public/horarios-disponiveis", validarLandingApiKey, async (req, re
       let optometristaLivre = "";
 
       for (const optometrista of listaOptos) {
+        const disponivelNoHorario = await estaOptometristaDisponivel(client, {
+          nome: optometrista, loja, diaSemana: diaRef, horario
+        });
+        if (!disponivelNoHorario) continue;
+
         const ocupado = await client.query(
           `SELECT id
            FROM agendamentos
@@ -2341,9 +2482,30 @@ app.post("/api/public/agendamentos", validarLandingApiKey, async (req, res) => {
       return res.status(400).json({ ok: false, message: "Data do agendamento é obrigatória." });
     }
 
-    const regraHorario = horarioValidoPorRegra(dataAgendamento, horario, loja);
-    if (!regraHorario.ok) {
-      return res.status(400).json(regraHorario);
+    const diaAgendamento = new Date(dataAgendamento + "T12:00:00").getDay();
+    const jornadaConfigPost = await resolverJornadaLoja(client, loja, diaAgendamento).catch(() => null);
+    const usaJornadaConfig = !!(jornadaConfigPost && jornadaConfigPost.origem === "config");
+
+    if (usaJornadaConfig) {
+      // Loja com jornada semanal cadastrada no painel de Configurações —
+      // substitui a regra padrão hardcoded (permite tanto restringir quanto
+      // ampliar o horário de atendimento em relação ao valor default).
+      if (!jornadaConfigPost.aberto) {
+        return res.status(400).json({ ok: false, message: "Loja fechada nesta data (horário configurado)." });
+      }
+      if (/^\d{2}:\d{2}$/.test(horario)) {
+        const dentroJornada = horario >= jornadaConfigPost.horaInicio && horario <= jornadaConfigPost.horaFim;
+        const noIntervalo = !!(jornadaConfigPost.intervaloInicio && jornadaConfigPost.intervaloFim &&
+          horario >= jornadaConfigPost.intervaloInicio && horario < jornadaConfigPost.intervaloFim);
+        if (!dentroJornada || noIntervalo) {
+          return res.status(400).json({ ok: false, message: "Horário fora do funcionamento configurado para esta loja." });
+        }
+      }
+    } else {
+      const regraHorario = horarioValidoPorRegra(dataAgendamento, horario, loja);
+      if (!regraHorario.ok) {
+        return res.status(400).json(regraHorario);
+      }
     }
 
     const bloqueioHorario = await buscarBloqueioDisponibilidade(client, loja, dataAgendamento, horario);
@@ -2354,13 +2516,15 @@ app.post("/api/public/agendamentos", validarLandingApiKey, async (req, res) => {
       });
     }
 
-    // Unidade Santos/Gonzaga: almoço 14:00-14:45 em dias úteis (4 slots de 15 min)
-    if (horario === "14:00" || horario === "14:15" || horario === "14:30" || horario === "14:45") {
-      const lojaKeyPost = loja.toLowerCase().replace(/[^a-z]/g, "");
-      if (lojaKeyPost.includes("gonzaga") || lojaKeyPost.includes("santos")) {
-        const diaPost = new Date(dataAgendamento + "T12:00:00").getDay();
-        if (diaPost >= 1 && diaPost <= 5) {
-          return res.status(400).json({ ok: false, message: "Horário de almoço não disponível para esta unidade." });
+    if (!usaJornadaConfig) {
+      // Unidade Santos/Gonzaga: almoço 14:00-14:45 em dias úteis (4 slots de 15 min)
+      if (horario === "14:00" || horario === "14:15" || horario === "14:30" || horario === "14:45") {
+        const lojaKeyPost = loja.toLowerCase().replace(/[^a-z]/g, "");
+        if (lojaKeyPost.includes("gonzaga") || lojaKeyPost.includes("santos")) {
+          const diaPost = new Date(dataAgendamento + "T12:00:00").getDay();
+          if (diaPost >= 1 && diaPost <= 5) {
+            return res.status(400).json({ ok: false, message: "Horário de almoço não disponível para esta unidade." });
+          }
         }
       }
     }
@@ -3497,6 +3661,217 @@ function normalizarMetaPayload(body = {}) {
     ativo: body.ativo !== false
   };
 }
+
+// ===============================
+// CONFIGURAÇÕES — Admin e Atendimento Central
+// ===============================
+
+function requireAdminOuCentral(req, res, next) {
+  if (!hasRole(req.session, ["admin", "atendimento central"])) {
+    return res.status(403).json({ ok: false, message: "Acesso restrito ao Admin ou Atendimento Central." });
+  }
+  next();
+}
+
+app.get("/api/admin/configuracoes/kommo", requireAdminOuCentral, async (req, res) => {
+  try {
+    const subdomainBanco = await getConfigValor("kommo_subdomain");
+    const accessTokenBanco = await getConfigValor("kommo_access_token");
+    const webhookSecretBanco = await getConfigValor("kommo_webhook_secret");
+    res.json({
+      ok: true,
+      subdomain: subdomainBanco || process.env.KOMMO_SUBDOMAIN || "",
+      accessTokenConfigurado: !!(accessTokenBanco || process.env.KOMMO_ACCESS_TOKEN),
+      webhookSecretConfigurado: !!(webhookSecretBanco || process.env.KOMMO_WEBHOOK_SECRET),
+      origem: subdomainBanco || accessTokenBanco || webhookSecretBanco ? "banco" : "ambiente"
+    });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: "Erro ao carregar configuração do Kommo.", error: error.message });
+  }
+});
+
+app.post("/api/admin/configuracoes/kommo", requireAdmin, async (req, res) => {
+  try {
+    if (!CONFIG_ENCRYPTION_KEY) {
+      return res.status(503).json({ ok: false, message: "CONFIG_ENCRYPTION_KEY não configurada no Railway." });
+    }
+    const b = req.body || {};
+    const subdomain = clean(b.subdomain);
+    const accessToken = clean(b.accessToken);
+    const webhookSecret = clean(b.webhookSecret);
+
+    if (subdomain) await setConfigValor("kommo_subdomain", subdomain, { email: req.session.email });
+    if (accessToken) await setConfigValor("kommo_access_token", accessToken, { criptografado: true, email: req.session.email });
+    if (webhookSecret) await setConfigValor("kommo_webhook_secret", webhookSecret, { criptografado: true, email: req.session.email });
+
+    if (subdomain || accessToken) {
+      kommoClient.reconfigure({ subdomain: subdomain || undefined, accessToken: accessToken || undefined });
+    }
+    if (webhookSecret) {
+      process.env.KOMMO_WEBHOOK_SECRET = webhookSecret;
+    }
+
+    res.json({ ok: true, message: "Configuração do Kommo salva. Já está em uso, sem precisar reiniciar o sistema." });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: error.message || "Erro ao salvar configuração do Kommo." });
+  }
+});
+
+app.post("/api/admin/configuracoes/kommo/testar", requireAdminOuCentral, async (req, res) => {
+  try {
+    await kommoClient.request("GET", "/account");
+    res.json({ ok: true, message: "Conexão com o Kommo funcionando." });
+  } catch (error) {
+    res.status(502).json({ ok: false, message: error.message || "Não foi possível conectar ao Kommo." });
+  }
+});
+
+const DIA_SEMANA_VALIDOS = [0, 1, 2, 3, 4, 5, 6];
+
+app.get("/api/admin/configuracoes/horarios-loja", requireAdminOuCentral, async (req, res) => {
+  try {
+    const params = [];
+    let where = "";
+    if (clean(req.query.loja)) {
+      params.push(clean(req.query.loja));
+      where = "WHERE LOWER(loja) = LOWER($1)";
+    }
+    const result = await pool.query(
+      `SELECT * FROM horarios_funcionamento_loja ${where} ORDER BY loja ASC, dia_semana ASC`,
+      params
+    );
+    res.json({ ok: true, horarios: result.rows });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: "Erro ao carregar horários de funcionamento.", error: error.message });
+  }
+});
+
+app.post("/api/admin/configuracoes/horarios-loja", requireAdminOuCentral, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const loja = normalizeLojaPublica(b.loja) || clean(b.loja);
+    const diaSemana = Math.trunc(Number(b.dia_semana));
+    if (!loja) return res.status(400).json({ ok: false, message: "Informe a loja." });
+    if (!DIA_SEMANA_VALIDOS.includes(diaSemana)) {
+      return res.status(400).json({ ok: false, message: "Dia da semana inválido (use 0 a 6)." });
+    }
+    const aberto = b.aberto !== false;
+    const horaInicio = aberto ? (clean(b.hora_inicio) || null) : null;
+    const horaFim = aberto ? (clean(b.hora_fim) || null) : null;
+    const intervaloInicio = clean(b.intervalo_inicio) || null;
+    const intervaloFim = clean(b.intervalo_fim) || null;
+
+    const result = await pool.query(
+      `INSERT INTO horarios_funcionamento_loja
+         (loja, dia_semana, aberto, hora_inicio, hora_fim, intervalo_inicio, intervalo_fim, atualizado_por_email, atualizado_em)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,CURRENT_TIMESTAMP)
+       ON CONFLICT (loja, dia_semana) DO UPDATE SET
+         aberto = EXCLUDED.aberto,
+         hora_inicio = EXCLUDED.hora_inicio,
+         hora_fim = EXCLUDED.hora_fim,
+         intervalo_inicio = EXCLUDED.intervalo_inicio,
+         intervalo_fim = EXCLUDED.intervalo_fim,
+         atualizado_por_email = EXCLUDED.atualizado_por_email,
+         atualizado_em = CURRENT_TIMESTAMP
+       RETURNING *`,
+      [loja, diaSemana, aberto, horaInicio, horaFim, intervaloInicio, intervaloFim, req.session.email]
+    );
+    res.json({ ok: true, message: "Horário de funcionamento salvo.", horario: result.rows[0] });
+  } catch (error) {
+    res.status(400).json({ ok: false, message: error.message || "Erro ao salvar horário de funcionamento." });
+  }
+});
+
+app.delete("/api/admin/configuracoes/horarios-loja/:id", requireAdminOuCentral, async (req, res) => {
+  try {
+    const result = await pool.query(`DELETE FROM horarios_funcionamento_loja WHERE id = $1 RETURNING id`, [req.params.id]);
+    if (!result.rows.length) return res.status(404).json({ ok: false, message: "Registro não encontrado." });
+    res.json({ ok: true, message: "Horário removido (volta a usar a regra padrão do sistema)." });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: "Erro ao remover horário.", error: error.message });
+  }
+});
+
+app.get("/api/admin/configuracoes/horarios-optometrista", requireAdminOuCentral, async (req, res) => {
+  try {
+    const params = [];
+    let where = "";
+    if (clean(req.query.optometrista_id)) {
+      params.push(Number(req.query.optometrista_id));
+      where = "WHERE ho.optometrista_id = $1";
+    }
+    const result = await pool.query(
+      `SELECT ho.*, o.nome AS optometrista_nome, o.loja AS optometrista_loja
+         FROM horarios_optometrista ho
+         JOIN optometristas o ON o.id = ho.optometrista_id
+         ${where}
+        ORDER BY o.nome ASC, ho.dia_semana ASC`,
+      params
+    );
+    res.json({ ok: true, horarios: result.rows });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: "Erro ao carregar horários de optometrista.", error: error.message });
+  }
+});
+
+app.post("/api/admin/configuracoes/horarios-optometrista", requireAdminOuCentral, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const optometristaId = Math.trunc(Number(b.optometrista_id));
+    const diaSemana = Math.trunc(Number(b.dia_semana));
+    const horaInicio = clean(b.hora_inicio);
+    const horaFim = clean(b.hora_fim);
+    if (!optometristaId) return res.status(400).json({ ok: false, message: "Informe o optometrista." });
+    if (!DIA_SEMANA_VALIDOS.includes(diaSemana)) {
+      return res.status(400).json({ ok: false, message: "Dia da semana inválido (use 0 a 6)." });
+    }
+    if (!/^\d{2}:\d{2}$/.test(horaInicio) || !/^\d{2}:\d{2}$/.test(horaFim)) {
+      return res.status(400).json({ ok: false, message: "Informe hora início e hora fim válidas (HH:MM)." });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO horarios_optometrista (optometrista_id, dia_semana, hora_inicio, hora_fim, atualizado_por_email, atualizado_em)
+       VALUES ($1,$2,$3,$4,$5,CURRENT_TIMESTAMP)
+       ON CONFLICT (optometrista_id, dia_semana) DO UPDATE SET
+         hora_inicio = EXCLUDED.hora_inicio,
+         hora_fim = EXCLUDED.hora_fim,
+         atualizado_por_email = EXCLUDED.atualizado_por_email,
+         atualizado_em = CURRENT_TIMESTAMP
+       RETURNING *`,
+      [optometristaId, diaSemana, horaInicio, horaFim, req.session.email]
+    );
+    res.json({ ok: true, message: "Horário do optometrista salvo.", horario: result.rows[0] });
+  } catch (error) {
+    res.status(400).json({ ok: false, message: error.message || "Erro ao salvar horário do optometrista." });
+  }
+});
+
+app.delete("/api/admin/configuracoes/horarios-optometrista/:id", requireAdminOuCentral, async (req, res) => {
+  try {
+    const result = await pool.query(`DELETE FROM horarios_optometrista WHERE id = $1 RETURNING id`, [req.params.id]);
+    if (!result.rows.length) return res.status(404).json({ ok: false, message: "Registro não encontrado." });
+    res.json({ ok: true, message: "Horário removido (optometrista volta a ficar disponível em qualquer horário da loja)." });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: "Erro ao remover horário.", error: error.message });
+  }
+});
+
+app.get("/api/admin/configuracoes/optometristas-loja", requireAdminOuCentral, async (req, res) => {
+  try {
+    const loja = normalizeLojaPublica(req.query.loja || "") || clean(req.query.loja);
+    if (!loja) return res.json({ ok: true, optometristas: [] });
+    const result = await pool.query(
+      `SELECT id, nome, loja FROM optometristas
+       WHERE ativo = true
+         AND LOWER(REGEXP_REPLACE(loja, '\\s*-\\s*', ' ', 'g')) = LOWER(REGEXP_REPLACE($1, '\\s*-\\s*', ' ', 'g'))
+       ORDER BY nome ASC`,
+      [loja]
+    );
+    res.json({ ok: true, optometristas: result.rows });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: "Erro ao carregar optometristas da loja.", error: error.message });
+  }
+});
 
 const META_SELECT = `SELECT m.*, v.nome AS vendedor_consultor_nome
   FROM metas_desempenho m
@@ -5339,6 +5714,7 @@ app.post('/api/admin/lembretes/2h/disparar', requireAdmin, async (req, res) => {
 
 async function startServer() {
   await initDatabase();
+  await carregarConfiguracaoKommoDoBanco();
   startReminderCron();
   startRecoveryCron();
   return new Promise((resolve) => {
@@ -5379,5 +5755,8 @@ module.exports = {
   buildPermissions,
   publicUser,
   normalizeLojaPublica,
-  toPgDate
+  toPgDate,
+  encryptSecret,
+  decryptSecret,
+  hasRole
 };

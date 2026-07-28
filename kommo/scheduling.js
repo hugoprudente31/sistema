@@ -4,6 +4,7 @@
 const crypto = require("crypto");
 const { Pool } = require("pg");
 const mailingboss = require("../mailingboss");
+const { resolverJornadaLoja, estaOptometristaDisponivel, gerarSlotsJornada } = require("../lib/horarios");
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -249,7 +250,7 @@ async function reagendarAgendamentoPorLead({ leadId, data, horario }) {
 
     const appointment = current.rows[0];
     const loja = normalizeLoja(appointment.loja);
-    if (!getHorariosLoja(loja, dataPg).includes(horarioNormalizado)) {
+    if (!(await getHorariosLojaComConfig(loja, dataPg)).includes(horarioNormalizado)) {
       await client.query("ROLLBACK");
       return { ok: false, error: "Esse horario nao faz parte do atendimento da loja nessa data." };
     }
@@ -432,6 +433,20 @@ function getHorariosLoja(loja, data) {
   return slots;
 }
 
+// Versão ciente da jornada semanal cadastrada no painel de Configurações
+// (horarios_funcionamento_loja). Sem nenhuma linha cadastrada para a
+// loja+dia, cai exatamente em getHorariosLoja (comportamento hardcoded
+// de sempre) — só passa a usar o banco quando algo foi configurado.
+async function getHorariosLojaComConfig(loja, data) {
+  const pgDate = toPgDate(data);
+  if (!pgDate) return getHorariosLoja(loja, data);
+
+  const dia = new Date(pgDate + "T12:00:00").getDay();
+  const jornada = await resolverJornadaLoja(pool, loja, dia);
+  if (jornada.origem !== "config") return getHorariosLoja(loja, data);
+  return jornada.aberto ? gerarSlotsJornada(jornada) : [];
+}
+
 function lojaComparableSql(columnSql) {
   return `
     TRANSLATE(
@@ -467,7 +482,17 @@ async function buscarPrimeiroOptometristaLivre(client, loja, data, horario, opto
   }
   if (!candidatos.length) candidatos.push("A definir");
 
+  const pgDateCandidato = toPgDate(data);
+  const diaSemanaCandidato = pgDateCandidato ? new Date(pgDateCandidato + "T12:00:00").getDay() : null;
+
   for (const optometrista of candidatos) {
+    if (diaSemanaCandidato !== null) {
+      const disponivelNoHorario = await estaOptometristaDisponivel(client, {
+        nome: optometrista, loja, diaSemana: diaSemanaCandidato, horario
+      });
+      if (!disponivelNoHorario) continue;
+    }
+
     const ocupado = await client.query(
       `SELECT id
        FROM agendamentos
@@ -507,7 +532,7 @@ async function getHorariosDisponiveis(loja, data) {
   const client = await pool.connect();
   try {
     const horarios = [];
-    for (const horario of getHorariosLoja(lojaNormalizada, dataPg)) {
+    for (const horario of await getHorariosLojaComConfig(lojaNormalizada, dataPg)) {
       if (await estaLojaBloqueada(lojaNormalizada, dataPg, horario)) continue;
       const optometristaLivre = await buscarPrimeiroOptometristaLivre(client, lojaNormalizada, dataPg, horario);
       if (optometristaLivre) horarios.push(horario);
@@ -533,7 +558,7 @@ async function criarAgendamento({ nome, whatsapp, email, loja, data, horario, le
   if (!lojaNormalizada) return { ok: false, error: "Loja nao informada." };
   if (!dataPg) return { ok: false, error: "Data do agendamento invalida." };
   if (!/^\d{2}:\d{2}$/.test(horarioNormalizado)) return { ok: false, error: "Horario invalido." };
-  if (!getHorariosLoja(lojaNormalizada, dataPg).includes(horarioNormalizado)) {
+  if (!(await getHorariosLojaComConfig(lojaNormalizada, dataPg)).includes(horarioNormalizado)) {
     return { ok: false, error: "Esse horario nao faz parte do atendimento da loja nessa data." };
   }
   if (await estaLojaBloqueada(lojaNormalizada, dataPg, horarioNormalizado)) {

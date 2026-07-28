@@ -394,6 +394,7 @@
         <button data-admin-area="operacao" onclick="mostrarAreaAdmin('operacao',this)">Operação e OS</button>
         <button data-admin-area="financeiro" onclick="mostrarAreaAdmin('financeiro',this)">Financeiro</button>
         <button data-admin-area="gestao" onclick="mostrarAreaAdmin('gestao',this)">Metas e Equipe</button>
+        <button data-admin-area="configuracoes" onclick="mostrarAreaAdmin('configuracoes',this)">Configurações</button>
         <button class="hidden" id="adminNavTecnica" data-admin-area="tecnica" onclick="mostrarAreaAdmin('tecnica',this)">Central Técnica</button>
       </div>
       <div class="admin-nav-summary" id="adminAreaResumo">Indicadores estratégicos, lojas, clientes, setores, consultores e alertas.</div>
@@ -408,6 +409,7 @@
         <button data-central-area="painel" onclick="mostrarAreaCentral('painel',this)">Painel de Agendados</button>
         <button data-central-area="agendamento" onclick="mostrarAreaCentral('agendamento',this)">Registro de Agendamento</button>
         <button data-central-area="crm" onclick="mostrarAreaCentral('crm',this)">CRM</button>
+        <button data-central-area="configuracoes" onclick="mostrarAreaCentral('configuracoes',this)">Configurações</button>
       </div>
       <div class="admin-nav-summary" id="centralAreaResumo">Agenda, acompanhamento de OS e indicadores operacionais.</div>
     </div>
@@ -813,6 +815,88 @@
           <tbody id="lixeiraBody"></tbody>
         </table>
       </div>
+    </div>
+
+    <div class="card hidden" id="cardConfigKommo">
+      <div class="topbar" style="margin-bottom:14px;">
+        <div><h3 style="margin:0;">Integração Kommo</h3><span class="legend-mini">Credenciais de conexão com o CRM Kommo</span></div>
+        <button class="btn-relatorio secondary" onclick="carregarConfigKommo()">Atualizar status</button>
+      </div>
+      <p id="configKommoStatus" style="color:#6b7280;font-size:13px;margin-bottom:12px;">Carregando status...</p>
+      <div class="row-4">
+        <div><label>Subdomínio Kommo</label><input id="configKommoSubdomain" type="text" placeholder="ex: minhaempresa"></div>
+        <div><label>Access token</label><input id="configKommoAccessToken" type="password" placeholder="Deixe em branco para manter o atual"></div>
+        <div><label>Webhook secret</label><input id="configKommoWebhookSecret" type="password" placeholder="Deixe em branco para manter o atual"></div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap;">
+        <button id="btnSalvarConfigKommo" onclick="salvarConfigKommo()">Salvar</button>
+        <button class="secondary" onclick="testarConfigKommo()">Testar conexão</button>
+      </div>
+      <div id="msgConfigKommo" class="msg"></div>
+    </div>
+
+    <div class="card hidden" id="cardConfigHorarioLoja">
+      <div class="topbar" style="margin-bottom:14px;">
+        <div><h3 style="margin:0;">Horário de Funcionamento por Loja</h3><span class="legend-mini">Jornada semanal recorrente — some uma loja aqui e ela passa a valer no lugar da regra padrão do sistema.</span></div>
+        <button class="btn-relatorio secondary" onclick="carregarHorariosLoja()">Atualizar</button>
+      </div>
+      <div class="row-4">
+        <div><label>Loja *</label><select id="horLojaSelect" onchange="carregarHorariosLoja()"><option value="">Selecione</option></select></div>
+        <div><label>Dia da semana *</label>
+          <select id="horLojaDia">
+            <option value="1">Segunda-feira</option>
+            <option value="2">Terça-feira</option>
+            <option value="3">Quarta-feira</option>
+            <option value="4">Quinta-feira</option>
+            <option value="5">Sexta-feira</option>
+            <option value="6">Sábado</option>
+            <option value="0">Domingo</option>
+          </select>
+        </div>
+        <div><label>Aberto neste dia?</label><select id="horLojaAberto"><option value="true">Sim</option><option value="false">Não (fechado)</option></select></div>
+      </div>
+      <div class="row-4">
+        <div><label>Abre às</label><input id="horLojaInicio" type="time"></div>
+        <div><label>Fecha às</label><input id="horLojaFim" type="time"></div>
+        <div><label>Intervalo (almoço) início</label><input id="horLojaIntervaloInicio" type="time"></div>
+        <div><label>Intervalo (almoço) fim</label><input id="horLojaIntervaloFim" type="time"></div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:12px;">
+        <button onclick="salvarHorarioLoja()">Salvar dia</button>
+      </div>
+      <div id="msgHorLoja" class="msg"></div>
+      <div class="scroll-x" style="margin-top:18px;"><table><thead><tr><th>Loja</th><th>Dia</th><th>Aberto</th><th>Início</th><th>Fim</th><th>Intervalo</th><th>Ações</th></tr></thead><tbody id="horariosLojaBody"></tbody></table></div>
+    </div>
+
+    <div class="card hidden" id="cardConfigHorarioOptometrista">
+      <div class="topbar" style="margin-bottom:14px;">
+        <div><h3 style="margin:0;">Horário por Optometrista</h3><span class="legend-mini">Sem nenhum dia cadastrado, o optometrista continua disponível em qualquer horário que a loja esteja aberta.</span></div>
+        <button class="btn-relatorio secondary" onclick="carregarHorariosOptometrista()">Atualizar</button>
+      </div>
+      <div class="row-4">
+        <div><label>Loja *</label><select id="horOptoLojaSelect" onchange="carregarOptometristasDaLojaConfig()"><option value="">Selecione</option></select></div>
+        <div><label>Optometrista *</label><select id="horOptoSelect" onchange="carregarHorariosOptometrista()"><option value="">Selecione a loja</option></select></div>
+        <div><label>Dia da semana *</label>
+          <select id="horOptoDia">
+            <option value="1">Segunda-feira</option>
+            <option value="2">Terça-feira</option>
+            <option value="3">Quarta-feira</option>
+            <option value="4">Quinta-feira</option>
+            <option value="5">Sexta-feira</option>
+            <option value="6">Sábado</option>
+            <option value="0">Domingo</option>
+          </select>
+        </div>
+      </div>
+      <div class="row-4">
+        <div><label>Atende das</label><input id="horOptoInicio" type="time"></div>
+        <div><label>Até</label><input id="horOptoFim" type="time"></div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:12px;">
+        <button onclick="salvarHorarioOptometrista()">Salvar dia</button>
+      </div>
+      <div id="msgHorOpto" class="msg"></div>
+      <div class="scroll-x" style="margin-top:18px;"><table><thead><tr><th>Optometrista</th><th>Loja</th><th>Dia</th><th>Início</th><th>Fim</th><th>Ações</th></tr></thead><tbody id="horariosOptometristaBody"></tbody></table></div>
     </div>
 
     <div class="card area-heading hidden" id="areaTecnica">
@@ -1316,6 +1400,12 @@ function fazerLogin() {
       }).then(function() {
         if (state.user && state.user.permissions && (state.user.permissions.isAdmin || roleName() === 'atendimento central')) return carregarCrmKanban();
       }).then(function() {
+        if (state.user && state.user.permissions && (state.user.permissions.isAdmin || roleName() === 'atendimento central')) {
+          prepararLojasConfig();
+          carregarConfigKommo();
+          return carregarHorariosLoja();
+        }
+      }).then(function() {
         return carregarAgendaEDashboard();
       }).then(function() {
         iniciarAutoRefreshPostgres();
@@ -1363,6 +1453,11 @@ var ADMIN_AREAS = {
     resumo: 'Metas do grupo, lojas e consultores, usuários e recuperação de registros.',
     cards: ['areaAdministracao','cardMetasAdmin','cardUsuarios','cardLixeira']
   },
+  configuracoes: {
+    titulo: 'Configurações',
+    resumo: 'Integração Kommo e jornada semanal de horário por loja e por optometrista.',
+    cards: ['cardConfigKommo','cardConfigHorarioLoja','cardConfigHorarioOptometrista']
+  },
   tecnica: {
     titulo: 'Central Técnica',
     resumo: 'Manutenção do sistema, integrações, Kommo e diagnósticos exclusivos do criador.',
@@ -1405,6 +1500,11 @@ var CENTRAL_AREAS = {
     titulo: 'Painel de Agendados',
     resumo: 'Agenda, acompanhamento de OS e indicadores operacionais.',
     cards: ['cardDashboardOperacional', 'cardOperacaoOS']
+  },
+  configuracoes: {
+    titulo: 'Configurações',
+    resumo: 'Jornada semanal de horário por loja e por optometrista (Kommo é somente leitura para este perfil).',
+    cards: ['cardConfigKommo','cardConfigHorarioLoja','cardConfigHorarioOptometrista']
   }
 };
 
@@ -1440,6 +1540,16 @@ function aplicarPermissoesTela() {
   if (p.isSuperAdmin) byId('adminNavTecnica').classList.remove('hidden');
   if (p.isAdmin) byId('btnLixeira').classList.remove('hidden');
   if (p.isAdmin) byId('cardUsuarios').classList.remove('hidden');
+  if (p.isAdmin) {
+    byId('cardConfigKommo').classList.remove('hidden');
+    byId('cardConfigHorarioLoja').classList.remove('hidden');
+    byId('cardConfigHorarioOptometrista').classList.remove('hidden');
+  }
+  // Atendimento Central pode ver e editar horários, mas o Kommo (credenciais)
+  // é somente leitura para este perfil — só o Admin salva/edita.
+  if (roleName() === 'atendimento central') {
+    byId('btnSalvarConfigKommo').classList.add('hidden');
+  }
   if (p.canCreateAgendamento) byId('cardAgendamento').classList.remove('hidden');
   if (p.canViewFinance) {
     byId('cardFinanceiro').classList.remove('hidden');
@@ -3235,6 +3345,206 @@ function limparFormularioMeta() {
   byId('metaTipoEscopo').value = 'grupo'; byId('metaLoja').value = '';
   if (!byId('metaCompetencia').value) byId('metaCompetencia').value = new Date().toISOString().slice(0,7);
   atualizarCamposEscopoMeta(); setMsg('msgMeta', '', '');
+}
+
+// ── CONFIGURAÇÕES — Kommo, horário de loja e de optometrista ────────
+var DIAS_SEMANA_NOMES = ['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'];
+var horariosLojaCache = [];
+var horariosOptometristaCache = [];
+
+function prepararLojasConfig() {
+  var opcoes = '<option value="">Selecione</option>' + (state.lojas || []).map(function(l) {
+    var nome = l.Loja || l.nome || '';
+    return '<option value="' + escapeHtml(nome) + '">' + escapeHtml(nome) + '</option>';
+  }).join('');
+  ['horLojaSelect','horOptoLojaSelect'].forEach(function(id) {
+    var el = byId(id);
+    if (!el) return;
+    var atual = el.value;
+    el.innerHTML = opcoes;
+    el.value = atual;
+  });
+}
+
+function carregarConfigKommo() {
+  return apiGet('/api/admin/configuracoes/kommo').then(function(res) {
+    if (!res.ok) throw new Error(res.message || 'Erro ao carregar configuração do Kommo.');
+    byId('configKommoSubdomain').value = res.subdomain || '';
+    byId('configKommoStatus').textContent =
+      'Subdomínio: ' + (res.subdomain || 'não configurado') +
+      ' · Access token: ' + (res.accessTokenConfigurado ? 'configurado ✓' : 'não configurado') +
+      ' · Webhook secret: ' + (res.webhookSecretConfigurado ? 'configurado ✓' : 'não configurado') +
+      ' · Origem: ' + (res.origem === 'banco' ? 'banco de dados' : 'variável de ambiente');
+  }).catch(function(err) {
+    byId('configKommoStatus').textContent = 'Erro ao carregar status: ' + (err.message || String(err));
+  });
+}
+
+function salvarConfigKommo() {
+  var payload = {
+    subdomain: byId('configKommoSubdomain').value.trim(),
+    accessToken: byId('configKommoAccessToken').value.trim(),
+    webhookSecret: byId('configKommoWebhookSecret').value.trim()
+  };
+  showLoading(true);
+  apiPost('/api/admin/configuracoes/kommo', payload)
+    .then(function(res) {
+      if (!res.ok) throw new Error(res.message || 'Erro ao salvar configuração do Kommo.');
+      toast(res.message || 'Configuração salva.', 'ok');
+      byId('configKommoAccessToken').value = '';
+      byId('configKommoWebhookSecret').value = '';
+      return carregarConfigKommo();
+    })
+    .catch(function(err) { setMsg('msgConfigKommo', err.message || String(err), 'err'); })
+    .finally(function() { showLoading(false); });
+}
+
+function testarConfigKommo() {
+  showLoading(true);
+  apiPost('/api/admin/configuracoes/kommo/testar', {})
+    .then(function(res) {
+      if (!res.ok) throw new Error(res.message || 'Falha ao conectar ao Kommo.');
+      toast(res.message || 'Conexão com o Kommo funcionando.', 'ok');
+    })
+    .catch(function(err) { setMsg('msgConfigKommo', err.message || String(err), 'err'); })
+    .finally(function() { showLoading(false); });
+}
+
+function carregarHorariosLoja() {
+  var loja = byId('horLojaSelect').value;
+  var url = '/api/admin/configuracoes/horarios-loja' + (loja ? '?loja=' + encodeURIComponent(loja) : '');
+  byId('horariosLojaBody').innerHTML = '<tr><td colspan="7">Carregando...</td></tr>';
+  return apiGet(url).then(function(res) {
+    horariosLojaCache = Array.isArray(res.horarios) ? res.horarios : [];
+    if (!horariosLojaCache.length) {
+      byId('horariosLojaBody').innerHTML = '<tr><td colspan="7">Nenhuma jornada cadastrada' + (loja ? ' para esta loja' : '') + ' — usando a regra padrão do sistema.</td></tr>';
+      return;
+    }
+    byId('horariosLojaBody').innerHTML = horariosLojaCache.map(function(h) {
+      var intervalo = (h.intervalo_inicio && h.intervalo_fim) ? (h.intervalo_inicio.slice(0,5) + '–' + h.intervalo_fim.slice(0,5)) : '—';
+      return '<tr>' +
+        '<td>' + escapeHtml(h.loja) + '</td>' +
+        '<td>' + DIAS_SEMANA_NOMES[h.dia_semana] + '</td>' +
+        '<td>' + (h.aberto ? '<span class="status green">Aberto</span>' : '<span class="status red">Fechado</span>') + '</td>' +
+        '<td>' + (h.hora_inicio ? h.hora_inicio.slice(0,5) : '—') + '</td>' +
+        '<td>' + (h.hora_fim ? h.hora_fim.slice(0,5) : '—') + '</td>' +
+        '<td>' + intervalo + '</td>' +
+        '<td><button class="danger icon-btn" onclick="removerHorarioLoja(' + h.id + ')">Remover</button></td></tr>';
+    }).join('');
+  }).catch(function(err) {
+    byId('horariosLojaBody').innerHTML = '<tr><td colspan="7" class="err">' + escapeHtml(err.message||String(err)) + '</td></tr>';
+  });
+}
+
+function salvarHorarioLoja() {
+  var loja = byId('horLojaSelect').value;
+  if (!loja) { setMsg('msgHorLoja', 'Selecione a loja.', 'err'); return; }
+  var payload = {
+    loja: loja,
+    dia_semana: Number(byId('horLojaDia').value),
+    aberto: byId('horLojaAberto').value === 'true',
+    hora_inicio: byId('horLojaInicio').value || null,
+    hora_fim: byId('horLojaFim').value || null,
+    intervalo_inicio: byId('horLojaIntervaloInicio').value || null,
+    intervalo_fim: byId('horLojaIntervaloFim').value || null
+  };
+  showLoading(true);
+  apiPost('/api/admin/configuracoes/horarios-loja', payload)
+    .then(function(res) {
+      if (!res.ok) throw new Error(res.message || 'Erro ao salvar horário.');
+      toast(res.message || 'Horário salvo.', 'ok');
+      setMsg('msgHorLoja', '', '');
+      return carregarHorariosLoja();
+    })
+    .catch(function(err) { setMsg('msgHorLoja', err.message || String(err), 'err'); })
+    .finally(function() { showLoading(false); });
+}
+
+function removerHorarioLoja(id) {
+  if (!confirm('Remover esta jornada? A loja volta a usar a regra padrão do sistema neste dia.')) return;
+  fetch('/api/admin/configuracoes/horarios-loja/' + encodeURIComponent(id), { method: 'DELETE', credentials: 'same-origin' })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      if (!res.ok) throw new Error(res.message || 'Erro ao remover horário.');
+      toast('Horário removido.', 'ok');
+      return carregarHorariosLoja();
+    })
+    .catch(function(err) { setMsg('msgHorLoja', err.message || String(err), 'err'); });
+}
+
+function carregarOptometristasDaLojaConfig() {
+  var loja = byId('horOptoLojaSelect').value;
+  var select = byId('horOptoSelect');
+  if (!loja) { select.innerHTML = '<option value="">Selecione a loja</option>'; horariosOptometristaCache = []; renderizarHorariosOptometrista(); return Promise.resolve(); }
+  select.innerHTML = '<option value="">Carregando...</option>';
+  return apiGet('/api/admin/configuracoes/optometristas-loja?loja=' + encodeURIComponent(loja)).then(function(res) {
+    var optometristas = Array.isArray(res.optometristas) ? res.optometristas : [];
+    select.innerHTML = '<option value="">Selecione</option>' + optometristas.map(function(o) {
+      return '<option value="' + o.id + '">' + escapeHtml(o.nome) + '</option>';
+    }).join('');
+    return carregarHorariosOptometrista();
+  });
+}
+
+function carregarHorariosOptometrista() {
+  var optometristaId = byId('horOptoSelect').value;
+  var url = '/api/admin/configuracoes/horarios-optometrista' + (optometristaId ? '?optometrista_id=' + encodeURIComponent(optometristaId) : '');
+  return apiGet(url).then(function(res) {
+    horariosOptometristaCache = Array.isArray(res.horarios) ? res.horarios : [];
+    renderizarHorariosOptometrista();
+  }).catch(function(err) {
+    byId('horariosOptometristaBody').innerHTML = '<tr><td colspan="6" class="err">' + escapeHtml(err.message||String(err)) + '</td></tr>';
+  });
+}
+
+function renderizarHorariosOptometrista() {
+  if (!horariosOptometristaCache.length) {
+    byId('horariosOptometristaBody').innerHTML = '<tr><td colspan="6">Nenhum horário cadastrado — optometrista disponível em qualquer horário que a loja esteja aberta.</td></tr>';
+    return;
+  }
+  byId('horariosOptometristaBody').innerHTML = horariosOptometristaCache.map(function(h) {
+    return '<tr>' +
+      '<td>' + escapeHtml(h.optometrista_nome||'') + '</td>' +
+      '<td>' + escapeHtml(h.optometrista_loja||'') + '</td>' +
+      '<td>' + DIAS_SEMANA_NOMES[h.dia_semana] + '</td>' +
+      '<td>' + (h.hora_inicio ? h.hora_inicio.slice(0,5) : '—') + '</td>' +
+      '<td>' + (h.hora_fim ? h.hora_fim.slice(0,5) : '—') + '</td>' +
+      '<td><button class="danger icon-btn" onclick="removerHorarioOptometrista(' + h.id + ')">Remover</button></td></tr>';
+  }).join('');
+}
+
+function salvarHorarioOptometrista() {
+  var optometristaId = byId('horOptoSelect').value;
+  if (!optometristaId) { setMsg('msgHorOpto', 'Selecione o optometrista.', 'err'); return; }
+  var payload = {
+    optometrista_id: Number(optometristaId),
+    dia_semana: Number(byId('horOptoDia').value),
+    hora_inicio: byId('horOptoInicio').value,
+    hora_fim: byId('horOptoFim').value
+  };
+  if (!payload.hora_inicio || !payload.hora_fim) { setMsg('msgHorOpto', 'Informe hora início e hora fim.', 'err'); return; }
+  showLoading(true);
+  apiPost('/api/admin/configuracoes/horarios-optometrista', payload)
+    .then(function(res) {
+      if (!res.ok) throw new Error(res.message || 'Erro ao salvar horário.');
+      toast(res.message || 'Horário salvo.', 'ok');
+      setMsg('msgHorOpto', '', '');
+      return carregarHorariosOptometrista();
+    })
+    .catch(function(err) { setMsg('msgHorOpto', err.message || String(err), 'err'); })
+    .finally(function() { showLoading(false); });
+}
+
+function removerHorarioOptometrista(id) {
+  if (!confirm('Remover este horário? O optometrista volta a ficar disponível em qualquer horário da loja.')) return;
+  fetch('/api/admin/configuracoes/horarios-optometrista/' + encodeURIComponent(id), { method: 'DELETE', credentials: 'same-origin' })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      if (!res.ok) throw new Error(res.message || 'Erro ao remover horário.');
+      toast('Horário removido.', 'ok');
+      return carregarHorariosOptometrista();
+    })
+    .catch(function(err) { setMsg('msgHorOpto', err.message || String(err), 'err'); });
 }
 
 function carregarUsuarios() {
