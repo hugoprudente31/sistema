@@ -1464,6 +1464,7 @@ function fazerLogin() {
           carregarConfigKommo();
           return Promise.all([
             carregarHorariosLoja(),
+            carregarGradeHorario(),
             carregarHorariosOptometrista(),
             carregarBloqueiosAgenda(),
             state.user.permissions.isAdmin ? carregarConfiguracaoAdminCompleta() : Promise.resolve()
@@ -1567,8 +1568,8 @@ var CENTRAL_AREAS = {
   },
   configuracoes: {
     titulo: 'Configurações',
-    resumo: 'Jornada semanal de horário por loja e por optometrista (Kommo é somente leitura para este perfil).',
-    cards: ['cardConfigKommo','cardConfigHorarioLoja','cardConfigHorarioOptometrista','cardConfigBloqueiosAgenda']
+    resumo: 'Horários e bloqueios editáveis, sincronizados com painel, landing page e Kommo.',
+    cards: ['cardConfigGradeHorario','cardConfigHorarioOptometrista','cardConfigBloqueiosAgenda','cardConfigKommo']
   }
 };
 
