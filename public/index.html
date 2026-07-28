@@ -817,6 +817,44 @@
       </div>
     </div>
 
+    <div class="card hidden" id="cardConfigUnidades">
+      <div class="topbar" style="margin-bottom:14px;">
+        <div><h3 style="margin:0;">Unidades / Lojas</h3><span class="legend-mini">As unidades aparecem nos formulários de agendamento e na landing page pública.</span></div>
+        <button style="max-width:275px" onclick="abrirModalUnidade()">+ Nova Unidade</button>
+      </div>
+      <div class="scroll-x"><table><thead><tr><th>Nome</th><th>Cidade</th><th>Endereço</th><th>Ativa</th><th>Ações</th></tr></thead><tbody id="configLojasBody"></tbody></table></div>
+    </div>
+
+    <div class="card hidden" id="cardConfigGradeHorario">
+      <div class="topbar" style="margin-bottom:14px;">
+        <div><h3 style="margin:0;">Horários de Atendimento</h3><span class="legend-mini">Edite o padrão global ou selecione uma unidade específica.</span></div>
+        <div style="min-width:390px"><label>Editando:</label><select id="gradeHorarioLoja" onchange="carregarGradeHorario()"><option value="">Padrão Global (vale para todas as unidades)</option></select></div>
+      </div>
+      <div class="scroll-x"><table><thead><tr><th>Dia</th><th>Fechado</th><th>Abre</th><th>Fecha</th><th>Pausa início</th><th>Pausa fim</th></tr></thead><tbody id="gradeHorarioBody"></tbody></table></div>
+      <button style="margin-top:14px" onclick="salvarGradeHorario()">Salvar Horários</button>
+      <div id="msgGradeHorario" class="msg"></div>
+    </div>
+
+    <div class="card hidden" id="cardConfigPermissoes">
+      <h3>Permissões por Perfil</h3>
+      <p class="legend-mini">Admin e Super Admin sempre têm acesso completo. Defina abaixo as permissões dos demais perfis.</p>
+      <div class="scroll-x"><table><thead><tr><th>Perfil</th><th>Ver todos os agendamentos</th><th>Criar agendamento</th><th>Gerenciar OS</th><th>Ver financeiro</th></tr></thead><tbody id="permissoesPerfilBody"></tbody></table></div>
+      <button style="margin-top:14px" onclick="salvarPermissoesPerfil()">Salvar Permissões</button>
+      <div id="msgPermissoesPerfil" class="msg"></div>
+    </div>
+
+    <div class="card hidden" id="cardConfigAparencia">
+      <h3>Aparência do Painel</h3>
+      <p class="legend-mini">Personalize as cores e o logotipo exibido no login. As mudanças valem para todos os usuários.</p>
+      <div class="row">
+        <div><label>Cor primária</label><div style="display:flex;gap:10px"><input id="aparenciaCorPrimariaPicker" type="color" style="max-width:64px" oninput="aparenciaCorPrimaria.value=this.value"><input id="aparenciaCorPrimaria" type="text" value="#fc5102"></div></div>
+        <div><label>Cor secundária</label><div style="display:flex;gap:10px"><input id="aparenciaCorSecundariaPicker" type="color" style="max-width:64px" oninput="aparenciaCorSecundaria.value=this.value"><input id="aparenciaCorSecundaria" type="text" value="#fc7d05"></div></div>
+      </div>
+      <div style="margin-top:14px"><label>Logotipo (PNG ou JPG, até ~650 KB)</label><div id="aparenciaLogoPreview" class="notice">Sem logotipo personalizado</div><input id="aparenciaLogoArquivo" type="file" accept="image/png,image/jpeg"></div>
+      <div style="display:flex;gap:10px;margin-top:14px"><button class="secondary" style="max-width:190px" onclick="removerLogoAparencia()">Remover logotipo</button><button onclick="salvarAparenciaPainel()">Salvar Aparência</button></div>
+      <div id="msgAparencia" class="msg"></div>
+    </div>
+
     <div class="card hidden" id="cardConfigKommo">
       <div class="topbar" style="margin-bottom:14px;">
         <div><h3 style="margin:0;">Integração Kommo</h3><span class="legend-mini">Credenciais de conexão com o CRM Kommo</span></div>
@@ -970,6 +1008,7 @@ var state = {
 
 document.addEventListener('DOMContentLoaded', function() {
   applyDefaultDateWindow90Dias(false);
+  fetch('/api/public/aparencia').then(function(r){return r.json();}).then(function(res){aplicarAparencia(res.aparencia);}).catch(function(){});
 });
 
 function byId(id) { return document.getElementById(id); }
@@ -1426,7 +1465,8 @@ function fazerLogin() {
           return Promise.all([
             carregarHorariosLoja(),
             carregarHorariosOptometrista(),
-            carregarBloqueiosAgenda()
+            carregarBloqueiosAgenda(),
+            state.user.permissions.isAdmin ? carregarConfiguracaoAdminCompleta() : Promise.resolve()
           ]);
         }
       }).then(function() {
@@ -1479,8 +1519,8 @@ var ADMIN_AREAS = {
   },
   configuracoes: {
     titulo: 'Configurações',
-    resumo: 'Integração Kommo e jornada semanal de horário por loja e por optometrista.',
-    cards: ['cardConfigKommo','cardConfigHorarioLoja','cardConfigHorarioOptometrista','cardConfigBloqueiosAgenda']
+    resumo: 'Usuários, unidades, horários, permissões, aparência e integrações.',
+    cards: ['cardUsuarios','cardConfigUnidades','cardConfigGradeHorario','cardConfigPermissoes','cardConfigAparencia','cardConfigHorarioOptometrista','cardConfigBloqueiosAgenda','cardConfigKommo']
   },
   tecnica: {
     titulo: 'Central Técnica',
@@ -1569,6 +1609,10 @@ function aplicarPermissoesTela() {
     byId('cardConfigHorarioLoja').classList.remove('hidden');
     byId('cardConfigHorarioOptometrista').classList.remove('hidden');
     byId('cardConfigBloqueiosAgenda').classList.remove('hidden');
+    byId('cardConfigUnidades').classList.remove('hidden');
+    byId('cardConfigGradeHorario').classList.remove('hidden');
+    byId('cardConfigPermissoes').classList.remove('hidden');
+    byId('cardConfigAparencia').classList.remove('hidden');
   }
   // Atendimento Central pode ver e editar horários, mas o Kommo (credenciais)
   // é somente leitura para este perfil — só o Admin salva/edita.
@@ -3376,6 +3420,157 @@ function limparFormularioMeta() {
 var DIAS_SEMANA_NOMES = ['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'];
 var horariosLojaCache = [];
 var horariosOptometristaCache = [];
+var permissoesPerfilCache = {};
+var removerLogoPendente = false;
+
+function carregarConfiguracaoAdminCompleta() {
+  return Promise.all([
+    carregarLojasConfigAdmin(),
+    carregarGradeHorario(),
+    carregarPermissoesPerfil(),
+    carregarAparenciaPainel()
+  ]);
+}
+
+function carregarLojasConfigAdmin() {
+  return apiGet('/api/lojas').then(function(res) {
+    var lojas = Array.isArray(res.lojas) ? res.lojas : [];
+    byId('configLojasBody').innerHTML = lojas.map(function(l) {
+      return '<tr><td><strong>' + escapeHtml(l.nome||'') + '</strong></td>' +
+        '<td>' + escapeHtml(l.cidade||'—') + '</td><td>' + escapeHtml(l.endereco||'—') + '</td>' +
+        '<td><span class="status green">Ativa</span></td>' +
+        '<td><button class="secondary icon-btn" onclick="editarUnidade(' + l.id + ')">Editar</button> ' +
+        '<button class="danger icon-btn" onclick="desativarUnidade(' + l.id + ')">Desativar</button></td></tr>';
+    }).join('') || '<tr><td colspan="5">Nenhuma unidade cadastrada.</td></tr>';
+  });
+}
+
+function abrirModalUnidade() {
+  var nome = prompt('Nome da nova unidade:');
+  if (!nome) return;
+  var cidade = prompt('Cidade (opcional):') || '';
+  var endereco = prompt('Endereço (opcional):') || '';
+  apiPost('/api/admin/configuracoes/lojas', { nome:nome, cidade:cidade, endereco:endereco })
+    .then(function(res) { if (!res.ok) throw new Error(res.message); toast('Unidade criada.', 'ok'); return carregarInfoBase(); })
+    .then(function(){ prepararLojasConfig(); return carregarLojasConfigAdmin(); })
+    .catch(function(err){ toast(err.message||String(err), 'err'); });
+}
+
+function editarUnidade(id) {
+  var atual = (state.lojas||[]).find(function(l){ return Number(l.id) === Number(id); }) || {};
+  var nome = prompt('Nome da unidade:', atual.nome||atual.Loja||'');
+  if (!nome) return;
+  var cidade = prompt('Cidade:', atual.cidade||'') || '';
+  var endereco = prompt('Endereço:', atual.endereco||'') || '';
+  fetch('/api/admin/configuracoes/lojas/' + id, { method:'PATCH', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body:JSON.stringify({nome:nome,cidade:cidade,endereco:endereco}) })
+    .then(function(r){return r.json();}).then(function(res){if(!res.ok)throw new Error(res.message);toast('Unidade atualizada.','ok');return carregarInfoBase();})
+    .then(function(){ prepararLojasConfig(); return carregarLojasConfigAdmin(); }).catch(function(err){toast(err.message||String(err),'err');});
+}
+
+function desativarUnidade(id) {
+  if (!confirm('Desativar esta unidade? Ela deixará de aparecer em novos agendamentos.')) return;
+  fetch('/api/admin/configuracoes/lojas/' + id, { method:'PATCH', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ativo:false}) })
+    .then(function(r){return r.json();}).then(function(res){if(!res.ok)throw new Error(res.message);toast('Unidade desativada.','ok');return carregarInfoBase();})
+    .then(function(){ prepararLojasConfig(); return carregarLojasConfigAdmin(); }).catch(function(err){toast(err.message||String(err),'err');});
+}
+
+function horarioPadraoGrade(dia) {
+  if (dia === 0) return { aberto:false, hora_inicio:'', hora_fim:'', intervalo_inicio:'', intervalo_fim:'' };
+  return { aberto:true, hora_inicio:'10:00', hora_fim:dia === 6 ? '16:00' : '18:00', intervalo_inicio:dia === 6 ? '' : '13:00', intervalo_fim:dia === 6 ? '' : '14:00' };
+}
+
+function renderizarGradeHorario(rows) {
+  var porDia = {};
+  (rows||[]).forEach(function(r){ porDia[Number(r.dia_semana)] = r; });
+  byId('gradeHorarioBody').innerHTML = [0,1,2,3,4,5,6].map(function(dia) {
+    var h = porDia[dia] || horarioPadraoGrade(dia);
+    return '<tr data-grade-dia="' + dia + '"><td><strong>' + DIAS_SEMANA_NOMES[dia] + '</strong></td>' +
+      '<td><input class="grade-fechado" type="checkbox" ' + (!h.aberto?'checked':'') + '></td>' +
+      '<td><input class="grade-inicio" type="time" value="' + (h.hora_inicio||'').slice(0,5) + '"></td>' +
+      '<td><input class="grade-fim" type="time" value="' + (h.hora_fim||'').slice(0,5) + '"></td>' +
+      '<td><input class="grade-pausa-inicio" type="time" value="' + (h.intervalo_inicio||'').slice(0,5) + '"></td>' +
+      '<td><input class="grade-pausa-fim" type="time" value="' + (h.intervalo_fim||'').slice(0,5) + '"></td></tr>';
+  }).join('');
+}
+
+function carregarGradeHorario() {
+  var loja = byId('gradeHorarioLoja') ? byId('gradeHorarioLoja').value : '';
+  if (!loja) { renderizarGradeHorario([]); return Promise.resolve(); }
+  return apiGet('/api/admin/configuracoes/horarios-loja?loja=' + encodeURIComponent(loja))
+    .then(function(res){ renderizarGradeHorario(res.horarios||[]); });
+}
+
+function salvarGradeHorario() {
+  var lojaSelecionada = byId('gradeHorarioLoja').value;
+  var lojas = lojaSelecionada ? [lojaSelecionada] : (state.lojas||[]).map(function(l){return l.nome||l.Loja;});
+  var linhas = byId('gradeHorarioBody').querySelectorAll('tr[data-grade-dia]');
+  var requisicoes = [];
+  linhas.forEach(function(tr) {
+    var payloadBase = {
+      dia_semana:Number(tr.getAttribute('data-grade-dia')),
+      aberto:!tr.querySelector('.grade-fechado').checked,
+      hora_inicio:tr.querySelector('.grade-inicio').value||null,
+      hora_fim:tr.querySelector('.grade-fim').value||null,
+      intervalo_inicio:tr.querySelector('.grade-pausa-inicio').value||null,
+      intervalo_fim:tr.querySelector('.grade-pausa-fim').value||null
+    };
+    lojas.forEach(function(loja){ requisicoes.push(apiPost('/api/admin/configuracoes/horarios-loja', Object.assign({loja:loja}, payloadBase))); });
+  });
+  showLoading(true);
+  Promise.all(requisicoes).then(function(){toast('Horários salvos e sincronizados.','ok');return carregarHorariosLoja();})
+    .catch(function(err){setMsg('msgGradeHorario',err.message||String(err),'err');}).finally(function(){showLoading(false);});
+}
+
+function carregarPermissoesPerfil() {
+  return apiGet('/api/admin/configuracoes/permissoes').then(function(res) {
+    permissoesPerfilCache = res.permissoes || {};
+    var nomes = {'atendimento central':'Atendimento Central','gerente de loja':'Gerente de Loja','comprador':'Comprador','consultor de vendas':'Consultor de Vendas','vendedor':'Vendedor','optometrista':'Profissional'};
+    byId('permissoesPerfilBody').innerHTML = Object.keys(nomes).map(function(role) {
+      var p = permissoesPerfilCache[role] || {};
+      function chk(key){return '<input type="checkbox" data-perm="' + key + '" ' + (p[key]?'checked':'') + '>';}
+      return '<tr data-role="' + role + '"><td><strong>' + nomes[role] + '</strong></td><td>' + chk('canViewAll') + '</td><td>' + chk('canCreateAgendamento') + '</td><td>' + chk('canManageOS') + '</td><td>' + chk('canViewFinance') + '</td></tr>';
+    }).join('');
+  });
+}
+
+function salvarPermissoesPerfil() {
+  var permissoes = {};
+  byId('permissoesPerfilBody').querySelectorAll('tr[data-role]').forEach(function(tr) {
+    var p={}; tr.querySelectorAll('[data-perm]').forEach(function(c){p[c.getAttribute('data-perm')]=c.checked;});
+    permissoes[tr.getAttribute('data-role')]=p;
+  });
+  apiPost('/api/admin/configuracoes/permissoes',{permissoes:permissoes})
+    .then(function(res){if(!res.ok)throw new Error(res.message);toast('Permissões salvas.','ok');})
+    .catch(function(err){setMsg('msgPermissoesPerfil',err.message||String(err),'err');});
+}
+
+function aplicarAparencia(a) {
+  if (!a) return;
+  document.documentElement.style.setProperty('--p', a.primaryColor||'#fc5102');
+  document.documentElement.style.setProperty('--s', a.secondaryColor||'#fc7d05');
+  if (a.logoDataUrl) document.querySelectorAll('.logo-item img').forEach(function(img){img.src=a.logoDataUrl;});
+}
+
+function carregarAparenciaPainel() {
+  return apiGet('/api/admin/configuracoes/aparencia').then(function(res) {
+    var a=res.aparencia||{}; aplicarAparencia(a);
+    byId('aparenciaCorPrimaria').value=a.primaryColor||'#fc5102'; byId('aparenciaCorPrimariaPicker').value=byId('aparenciaCorPrimaria').value;
+    byId('aparenciaCorSecundaria').value=a.secondaryColor||'#fc7d05'; byId('aparenciaCorSecundariaPicker').value=byId('aparenciaCorSecundaria').value;
+    byId('aparenciaLogoPreview').innerHTML=a.logoDataUrl?'<img src="'+a.logoDataUrl+'" style="max-height:80px;max-width:260px">':'Sem logotipo personalizado';
+  });
+}
+
+function removerLogoAparencia(){ removerLogoPendente=true; byId('aparenciaLogoArquivo').value=''; byId('aparenciaLogoPreview').textContent='Logotipo será removido ao salvar'; }
+
+function salvarAparenciaPainel() {
+  var arquivo=byId('aparenciaLogoArquivo').files[0];
+  function enviar(logo){return apiPost('/api/admin/configuracoes/aparencia',{primaryColor:byId('aparenciaCorPrimaria').value,secondaryColor:byId('aparenciaCorSecundaria').value,logoDataUrl:logo||'',removerLogo:removerLogoPendente});}
+  var promessa;
+  if (arquivo) { promessa=new Promise(function(resolve,reject){var r=new FileReader();r.onload=function(){resolve(enviar(r.result));};r.onerror=reject;r.readAsDataURL(arquivo);}); }
+  else promessa=enviar('');
+  Promise.resolve(promessa).then(function(res){if(!res.ok)throw new Error(res.message);removerLogoPendente=false;aplicarAparencia(res.aparencia);toast('Aparência salva.','ok');return carregarAparenciaPainel();})
+    .catch(function(err){setMsg('msgAparencia',err.message||String(err),'err');});
+}
 
 function prepararLojasConfig() {
   var opcoes = '<option value="">Selecione</option>' + (state.lojas || []).map(function(l) {
@@ -3389,6 +3584,16 @@ function prepararLojasConfig() {
     el.innerHTML = opcoes;
     el.value = atual;
   });
+  var grade = byId('gradeHorarioLoja');
+  if (grade) {
+    var gradeAtual = grade.value;
+    grade.innerHTML = '<option value="">Padrão Global (vale para todas as unidades)</option>' +
+      (state.lojas || []).map(function(l) {
+        var nome = l.Loja || l.nome || '';
+        return '<option value="' + escapeHtml(nome) + '">' + escapeHtml(nome) + '</option>';
+      }).join('');
+    grade.value = gradeAtual;
+  }
 }
 
 function carregarConfigKommo() {

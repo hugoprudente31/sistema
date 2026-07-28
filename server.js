@@ -425,6 +425,30 @@ function isGonzagaSantosStore(value) {
   return normalizeStoreKey(value).includes("gonzaga");
 }
 
+async function carregarConfiguracoesPainelDoBanco() {
+  try {
+    const permissoes = await getConfigValor("permissoes_perfil");
+    const aparencia = await getConfigValor("aparencia_painel");
+    rolePermissionsCache = permissoes ? JSON.parse(permissoes) : {};
+    appearanceCache = aparencia
+      ? { ...appearanceCache, ...JSON.parse(aparencia) }
+      : appearanceCache;
+  } catch (error) {
+    console.error("Não foi possível carregar permissões/aparência:", error.message);
+  }
+}
+
+const DEFAULT_ROLE_PERMISSIONS = {
+  "atendimento central": { canViewAll: true, canCreateAgendamento: true, canManageOS: true, canViewFinance: false },
+  "gerente de loja": { canViewAll: false, canCreateAgendamento: true, canManageOS: true, canViewFinance: true },
+  "comprador": { canViewAll: false, canCreateAgendamento: true, canManageOS: true, canViewFinance: true },
+  "consultor de vendas": { canViewAll: false, canCreateAgendamento: true, canManageOS: false, canViewFinance: false },
+  "vendedor": { canViewAll: false, canCreateAgendamento: true, canManageOS: false, canViewFinance: false },
+  "optometrista": { canViewAll: false, canCreateAgendamento: false, canManageOS: false, canViewFinance: false }
+};
+let rolePermissionsCache = {};
+let appearanceCache = { primaryColor: "#fc5102", secondaryColor: "#fc7d05", logoDataUrl: "" };
+
 function storeSql(column, parameter = "$1") {
   return `TRANSLATE(LOWER(TRIM(COALESCE(${column},''))), 'áàâãäéèêëíìîïóòôõöúùûüç', 'aaaaaeeeeiiiiooooouuuuc') = TRANSLATE(LOWER(TRIM(${parameter})), 'áàâãäéèêëíìîïóòôõöúùûüç', 'aaaaaeeeeiiiiooooouuuuc')`;
 }
@@ -439,7 +463,8 @@ function buildPermissions(user) {
   const buyer = role === "comprador";
   const seller = ["consultor de vendas", "vendedor"].includes(role);
   const sellerGonzaga = seller && isGonzagaSantosStore(user?.loja);
-  const canViewFinance = admin || manager || buyer || Boolean(user?.can_view_finance);
+  const configured = rolePermissionsCache[storedRole] || DEFAULT_ROLE_PERMISSIONS[storedRole] || {};
+  const canViewFinance = admin || Boolean(configured.canViewFinance) || Boolean(user?.can_view_finance);
 
   return {
     isSuperAdmin: superAdmin,
@@ -447,9 +472,9 @@ function buildPermissions(user) {
     canManageSystem: superAdmin,
     canManageKommo: superAdmin,
     canManageLandingPages: superAdmin,
-    canViewAll: admin || central,
-    canCreateAgendamento: admin || central || manager || buyer || seller,
-    canManageOS: admin || central || manager || buyer || sellerGonzaga,
+    canViewAll: admin || Boolean(configured.canViewAll),
+    canCreateAgendamento: admin || Boolean(configured.canCreateAgendamento),
+    canManageOS: admin || Boolean(configured.canManageOS) || sellerGonzaga,
     canViewFinance,
     canExportFinance: canViewFinance
   };
@@ -3734,6 +3759,86 @@ app.post("/api/admin/configuracoes/kommo/testar", requireAdminOuCentral, async (
   }
 });
 
+app.get("/api/public/aparencia", (_req, res) => {
+  res.json({ ok: true, aparencia: appearanceCache });
+});
+
+app.get("/api/admin/configuracoes/permissoes", requireAdmin, (_req, res) => {
+  res.json({
+    ok: true,
+    permissoes: { ...DEFAULT_ROLE_PERMISSIONS, ...rolePermissionsCache }
+  });
+});
+
+app.post("/api/admin/configuracoes/permissoes", requireAdmin, async (req, res) => {
+  const recebidas = req.body?.permissoes || {};
+  const permitidas = {};
+  for (const role of Object.keys(DEFAULT_ROLE_PERMISSIONS)) {
+    const p = recebidas[role] || {};
+    permitidas[role] = {
+      canViewAll: !!p.canViewAll,
+      canCreateAgendamento: !!p.canCreateAgendamento,
+      canManageOS: !!p.canManageOS,
+      canViewFinance: !!p.canViewFinance
+    };
+  }
+  rolePermissionsCache = permitidas;
+  await setConfigValor("permissoes_perfil", JSON.stringify(permitidas), { email: req.session.email });
+  sessionRefreshCache.clear();
+  res.json({ ok: true, message: "Permissões salvas.", permissoes: permitidas });
+});
+
+app.get("/api/admin/configuracoes/aparencia", requireAdmin, (_req, res) => {
+  res.json({ ok: true, aparencia: appearanceCache });
+});
+
+app.post("/api/admin/configuracoes/aparencia", requireAdmin, async (req, res) => {
+  const b = req.body || {};
+  const hex = (value, fallback) => /^#[0-9a-f]{6}$/i.test(clean(value)) ? clean(value) : fallback;
+  const logoDataUrl = b.removerLogo
+    ? ""
+    : (clean(b.logoDataUrl) || appearanceCache.logoDataUrl || "");
+  if (logoDataUrl && !/^data:image\/(png|jpeg);base64,/i.test(logoDataUrl)) {
+    return res.status(400).json({ ok: false, message: "Use uma imagem PNG ou JPG válida." });
+  }
+  if (logoDataUrl.length > 900000) {
+    return res.status(400).json({ ok: false, message: "O logotipo deve ter no máximo aproximadamente 650 KB." });
+  }
+  appearanceCache = {
+    primaryColor: hex(b.primaryColor, appearanceCache.primaryColor),
+    secondaryColor: hex(b.secondaryColor, appearanceCache.secondaryColor),
+    logoDataUrl
+  };
+  await setConfigValor("aparencia_painel", JSON.stringify(appearanceCache), { email: req.session.email });
+  res.json({ ok: true, message: "Aparência salva.", aparencia: appearanceCache });
+});
+
+app.post("/api/admin/configuracoes/lojas", requireAdmin, async (req, res) => {
+  const b = req.body || {};
+  const nome = clean(b.nome);
+  if (!nome) return res.status(400).json({ ok: false, message: "Informe o nome da unidade." });
+  const result = await pool.query(
+    `INSERT INTO lojas (gas_id, nome, cidade, endereco, ativo, origem_sync, atualizado_em)
+     VALUES ($1,$2,$3,$4,true,'postgres',CURRENT_TIMESTAMP)
+     RETURNING *`,
+    [makeGasId("loja", nome), nome, clean(b.cidade) || null, clean(b.endereco) || null]
+  );
+  res.json({ ok: true, message: "Unidade criada.", loja: result.rows[0] });
+});
+
+app.patch("/api/admin/configuracoes/lojas/:id", requireAdmin, async (req, res) => {
+  const b = req.body || {};
+  const result = await pool.query(
+    `UPDATE lojas SET nome=COALESCE($1,nome), cidade=COALESCE($2,cidade),
+       endereco=COALESCE($3,endereco), ativo=COALESCE($4,ativo), atualizado_em=CURRENT_TIMESTAMP
+     WHERE id=$5 RETURNING *`,
+    [clean(b.nome) || null, clean(b.cidade) || null, clean(b.endereco) || null,
+      b.ativo === undefined ? null : !!b.ativo, req.params.id]
+  );
+  if (!result.rows.length) return res.status(404).json({ ok: false, message: "Unidade não encontrada." });
+  res.json({ ok: true, message: "Unidade atualizada.", loja: result.rows[0] });
+});
+
 const DIA_SEMANA_VALIDOS = [0, 1, 2, 3, 4, 5, 6];
 
 app.get("/api/admin/configuracoes/bloqueios-agenda", requireAdminOuCentral, async (_req, res) => {
@@ -5910,6 +6015,7 @@ app.post('/api/admin/lembretes/2h/disparar', requireAdmin, async (req, res) => {
 async function startServer() {
   await initDatabase();
   await carregarConfiguracaoKommoDoBanco();
+  await carregarConfiguracoesPainelDoBanco();
   startReminderCron();
   startRecoveryCron();
   return new Promise((resolve) => {
