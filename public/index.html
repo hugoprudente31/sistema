@@ -1521,7 +1521,7 @@ var ADMIN_AREAS = {
   configuracoes: {
     titulo: 'Configurações',
     resumo: 'Usuários, unidades, horários, permissões, aparência e integrações.',
-    cards: ['cardUsuarios','cardConfigUnidades','cardConfigGradeHorario','cardConfigPermissoes','cardConfigAparencia','cardConfigHorarioOptometrista','cardConfigBloqueiosAgenda','cardConfigKommo']
+    cards: ['cardUsuarios','cardConfigUnidades','cardConfigHorarioOptometrista','cardConfigPermissoes','cardConfigAparencia','cardConfigGradeHorario','cardConfigBloqueiosAgenda','cardConfigKommo']
   },
   tecnica: {
     titulo: 'Central Técnica',
@@ -1537,6 +1537,10 @@ function mostrarAreaAdmin(area, botao) {
     ADMIN_AREAS[chave].cards.forEach(function(id) {
       var card = byId(id); if (card) card.classList.add('admin-focused-hidden');
     });
+  });
+  config.cards.forEach(function(id) {
+    var card = byId(id);
+    if (card && card.parentNode) card.parentNode.appendChild(card);
   });
   config.cards.forEach(function(id) { var card = byId(id); if (card) card.classList.remove('admin-focused-hidden'); });
   document.querySelectorAll('[data-admin-area]').forEach(function(el) { el.classList.remove('active'); });
@@ -1569,7 +1573,7 @@ var CENTRAL_AREAS = {
   configuracoes: {
     titulo: 'Configurações',
     resumo: 'Horários e bloqueios editáveis, sincronizados com painel, landing page e Kommo.',
-    cards: ['cardConfigGradeHorario','cardConfigHorarioOptometrista','cardConfigBloqueiosAgenda','cardConfigKommo']
+    cards: ['cardConfigHorarioOptometrista','cardConfigGradeHorario','cardConfigBloqueiosAgenda','cardConfigKommo']
   }
 };
 
@@ -1583,6 +1587,10 @@ function mostrarAreaCentral(area, botao) {
     CENTRAL_AREAS[chave].cards.forEach(function(id) {
       var card = byId(id); if (card) card.classList.add('hidden');
     });
+  });
+  config.cards.forEach(function(id) {
+    var card = byId(id);
+    if (card && card.parentNode) card.parentNode.appendChild(card);
   });
   config.cards.forEach(function(id) { var card = byId(id); if (card) card.classList.remove('hidden'); });
   document.querySelectorAll('[data-central-area]').forEach(function(el) { el.classList.remove('active'); });
