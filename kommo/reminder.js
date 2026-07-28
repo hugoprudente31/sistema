@@ -9,6 +9,9 @@ const pool = new Pool({
   ssl: process.env.DATABASE_SSL === "false" ? false : { rejectUnauthorized: false },
 });
 
+let reminder24hRunning = false;
+let reminder2hRunning = false;
+
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
 function firstName(name) {
@@ -92,33 +95,39 @@ async function runReminders() {
   if (process.env.BOT_ENABLED === "false" || process.env.REMINDER_AUTOMATION_ENABLED === "false") {
     return { enviados: 0, erros: 0, desativado: true };
   }
+  if (reminder24hRunning) return { enviados: 0, erros: 0, em_execucao: true };
+  reminder24hRunning = true;
 
-  const date = tomorrowForDatabase();
-  console.log(`[Reminder] Buscando agendamentos para ${date}`);
-
-  let appointments;
   try {
-    appointments = await getAppointments(date);
-  } catch (error) {
-    console.error("[Reminder] Erro ao consultar banco:", error.message);
-    return { enviados: 0, erros: 1 };
-  }
+    const date = tomorrowForDatabase();
+    console.log(`[Reminder] Buscando agendamentos para ${date}`);
 
-  let enviados = 0;
-  let erros = 0;
-  for (const appointment of appointments) {
+    let appointments;
     try {
-      await sendReminder(appointment);
-      enviados++;
+      appointments = await getAppointments(date);
     } catch (error) {
-      erros++;
-      console.error(`[Reminder] Erro no lead ${appointment.kommo_lead_id}:`, error.message);
+      console.error("[Reminder] Erro ao consultar banco:", error.message);
+      return { enviados: 0, erros: 1 };
     }
-    await sleep(2000);
-  }
 
-  console.log(`[Reminder] Concluido: ${enviados} enviados, ${erros} erros.`);
-  return { enviados, erros };
+    let enviados = 0;
+    let erros = 0;
+    for (const appointment of appointments) {
+      try {
+        await sendReminder(appointment);
+        enviados++;
+      } catch (error) {
+        erros++;
+        console.error(`[Reminder] Erro no lead ${appointment.kommo_lead_id}:`, error.message);
+      }
+      await sleep(2000);
+    }
+
+    console.log(`[Reminder] Concluido: ${enviados} enviados, ${erros} erros.`);
+    return { enviados, erros };
+  } finally {
+    reminder24hRunning = false;
+  }
 }
 
 async function getTwoHourAppointments() {
@@ -142,7 +151,7 @@ async function getTwoHourAppointments() {
 async function sendTwoHourReminder(appointment) {
   if (!appointment.kommo_lead_id) throw new Error("Agendamento sem lead vinculado");
   const message = buildTwoHourMessage(appointment);
-  await kommo.sendMessageToLead(String(appointment.kommo_lead_id), message);
+  await kommo.sendProactiveMessage(String(appointment.kommo_lead_id), message);
   await kommo.addNote(
     String(appointment.kommo_lead_id),
     `Lembrete 2h enviado - ${appointment.data_agendamento} as ${appointment.horario}`
@@ -157,29 +166,35 @@ async function runTwoHourReminders() {
   if (process.env.BOT_ENABLED === "false" || process.env.REMINDER_2H_AUTOMATION_ENABLED === "false") {
     return { enviados: 0, erros: 0, desativado: true };
   }
+  if (reminder2hRunning) return { enviados: 0, erros: 0, em_execucao: true };
+  reminder2hRunning = true;
 
-  let appointments;
   try {
-    appointments = await getTwoHourAppointments();
-  } catch (error) {
-    console.error("[Reminder2h] Erro ao consultar banco:", error.message);
-    return { enviados: 0, erros: 1 };
-  }
-
-  let enviados = 0;
-  let erros = 0;
-  for (const appointment of appointments) {
+    let appointments;
     try {
-      await sendTwoHourReminder(appointment);
-      enviados++;
+      appointments = await getTwoHourAppointments();
     } catch (error) {
-      erros++;
-      console.error(`[Reminder2h] Erro no agendamento ${appointment.id}:`, error.message);
+      console.error("[Reminder2h] Erro ao consultar banco:", error.message);
+      return { enviados: 0, erros: 1 };
     }
-    await sleep(800);
+
+    let enviados = 0;
+    let erros = 0;
+    for (const appointment of appointments) {
+      try {
+        await sendTwoHourReminder(appointment);
+        enviados++;
+      } catch (error) {
+        erros++;
+        console.error(`[Reminder2h] Erro no agendamento ${appointment.id}:`, error.message);
+      }
+      await sleep(800);
+    }
+    if (appointments.length) console.log(`[Reminder2h] Concluido: ${enviados} enviados, ${erros} erros.`);
+    return { enviados, erros };
+  } finally {
+    reminder2hRunning = false;
   }
-  if (appointments.length) console.log(`[Reminder2h] Concluido: ${enviados} enviados, ${erros} erros.`);
-  return { enviados, erros };
 }
 
 function scheduleDaily(label, targetHour, job) {
@@ -218,6 +233,14 @@ function startReminderCron() {
   } else {
     const targetHour = Number.parseInt(process.env.REMINDER_HOUR || "8", 10);
     scheduleDaily("Reminder", targetHour, runReminders);
+    // Se o container reiniciar depois das 8h, o timer diário apontaria apenas
+    // para amanhã e os lembretes do dia seriam perdidos. Esta verificação
+    // periódica recupera reinícios e falhas transitórias; a coluna
+    // lembrete_24h_em mantém o envio idempotente.
+    const retryMinutes = Number.parseInt(process.env.REMINDER_RETRY_INTERVAL_MINUTES || "30", 10);
+    scheduleEveryMinutes("ReminderCatchup", retryMinutes, async () => {
+      if (new Date().getHours() >= targetHour) await runReminders();
+    });
     console.log(`    Reminder: cron ativo (${targetHour}h)`);
   }
   if (process.env.REMINDER_2H_AUTOMATION_ENABLED !== "false") {

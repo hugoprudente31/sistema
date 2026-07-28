@@ -192,6 +192,25 @@ class KommoClient {
     return this.sendMessage(talk.id ? String(talk.id) : null, text, talk.chat_id || null);
   }
 
+  // Mensagens proativas do WhatsApp precisam sair por um Salesbot nativo.
+  // A API v4 de chats não permite que esta integração publique diretamente
+  // em canais pertencentes ao WhatsApp/WABA conectado à conta.
+  async sendProactiveMessage(leadId, text) {
+    const botId = Number(process.env.KOMMO_GENERIC_MESSAGE_SALESBOT_ID || 58737);
+    const fieldId = Number(process.env.KOMMO_GENERIC_MESSAGE_FIELD_ID || 773487);
+    if (!leadId) throw new Error("ID do lead nao informado");
+    if (!text || !String(text).trim()) throw new Error("Mensagem proativa vazia");
+    if (!botId || !fieldId) throw new Error("Salesbot generico de mensagens nao configurado");
+
+    await this.updateLead(leadId, {
+      custom_fields_values: [{
+        field_id: fieldId,
+        values: [{ value: String(text).trim() }],
+      }],
+    });
+    return this.launchSalesbot(botId, leadId);
+  }
+
   // ── Notas ─────────────────────────────────────────────────────
 
   async addNote(leadId, text) {

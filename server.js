@@ -5978,15 +5978,14 @@ async function disparadorLembretes24h() {
       const mensagem = linhas.join('\n');
 
       try {
-        await kommoClient.sendMessageToLead(String(ag.kommo_lead_id), mensagem);
+        await kommoClient.sendProactiveMessage(String(ag.kommo_lead_id), mensagem);
         await pool.query(`UPDATE agendamentos SET lembrete_24h_em = NOW() WHERE id = $1`, [ag.id]);
         console.log(`[lembretes24h] ✅ Enviado para ${ag.nome} (id=${ag.id})`);
         enviados++;
       } catch (e) {
         console.error(`[lembretes24h] ❌ Erro no id=${ag.id} (${ag.nome}):`, e.message);
         erros++;
-        // Marca mesmo com erro para não re-tentar em loop infinito
-        await pool.query(`UPDATE agendamentos SET lembrete_24h_em = NOW() WHERE id = $1`, [ag.id]).catch(() => null);
+        // Não marca como enviado: a próxima verificação poderá tentar novamente.
       }
 
       // Pequena pausa para não sobrecarregar a API do Kommo

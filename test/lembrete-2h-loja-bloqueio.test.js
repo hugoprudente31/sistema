@@ -27,11 +27,20 @@ test('mensagem de 2 horas é agradável e identifica avaliação, horário e loj
 });
 
 test('lembrete 2h usa janela de execução e trava de duplicidade', function() {
+  const reminderSource = fs.readFileSync(path.join(__dirname, '..', 'kommo', 'reminder.js'), 'utf8');
   assert.match(server, /lembrete_2h_em TIMESTAMPTZ/);
-  assert.match(fs.readFileSync(path.join(__dirname, '..', 'kommo', 'reminder.js'), 'utf8'), /lembrete_2h_em IS NULL/);
-  assert.match(fs.readFileSync(path.join(__dirname, '..', 'kommo', 'reminder.js'), 'utf8'), /INTERVAL '105 minutes'/);
-  assert.match(fs.readFileSync(path.join(__dirname, '..', 'kommo', 'reminder.js'), 'utf8'), /INTERVAL '125 minutes'/);
-  assert.match(fs.readFileSync(path.join(__dirname, '..', 'kommo', 'reminder.js'), 'utf8'), /scheduleEveryMinutes\("Reminder2h"/);
+  assert.match(reminderSource, /lembrete_2h_em IS NULL/);
+  assert.match(reminderSource, /INTERVAL '105 minutes'/);
+  assert.match(reminderSource, /INTERVAL '125 minutes'/);
+  assert.match(reminderSource, /scheduleEveryMinutes\("Reminder2h"/);
+  assert.match(reminderSource, /sendProactiveMessage/);
+});
+
+test('lembrete 24h recupera reinício após o horário e não marca falha como enviada', function() {
+  const reminderSource = fs.readFileSync(path.join(__dirname, '..', 'kommo', 'reminder.js'), 'utf8');
+  assert.match(reminderSource, /scheduleEveryMinutes\("ReminderCatchup"/);
+  assert.match(reminderSource, /new Date\(\)\.getHours\(\) >= targetHour/);
+  assert.doesNotMatch(server, /Marca mesmo com erro para não re-tentar/);
 });
 
 test('bloqueio parcial é aplicado no bot, landing page e sistema interno', function() {

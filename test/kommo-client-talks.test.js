@@ -77,3 +77,40 @@ test("Kommo inicia Salesbot nativo no lead", async () => {
     kommo.request = originalRequest;
   }
 });
+
+test("Kommo envia mensagem proativa pelo campo e Salesbot genéricos", async () => {
+  const originalUpdateLead = kommo.updateLead;
+  const originalLaunchSalesbot = kommo.launchSalesbot;
+  const originalBotId = process.env.KOMMO_GENERIC_MESSAGE_SALESBOT_ID;
+  const originalFieldId = process.env.KOMMO_GENERIC_MESSAGE_FIELD_ID;
+  const calls = [];
+
+  process.env.KOMMO_GENERIC_MESSAGE_SALESBOT_ID = "58737";
+  process.env.KOMMO_GENERIC_MESSAGE_FIELD_ID = "773487";
+  kommo.updateLead = async (leadId, body) => calls.push({ action: "update", leadId, body });
+  kommo.launchSalesbot = async (botId, leadId) => calls.push({ action: "launch", botId, leadId });
+
+  try {
+    await kommo.sendProactiveMessage(26946145, " Lembrete de teste ");
+    assert.deepEqual(calls, [
+      {
+        action: "update",
+        leadId: 26946145,
+        body: {
+          custom_fields_values: [{
+            field_id: 773487,
+            values: [{ value: "Lembrete de teste" }],
+          }],
+        },
+      },
+      { action: "launch", botId: 58737, leadId: 26946145 },
+    ]);
+  } finally {
+    kommo.updateLead = originalUpdateLead;
+    kommo.launchSalesbot = originalLaunchSalesbot;
+    if (originalBotId === undefined) delete process.env.KOMMO_GENERIC_MESSAGE_SALESBOT_ID;
+    else process.env.KOMMO_GENERIC_MESSAGE_SALESBOT_ID = originalBotId;
+    if (originalFieldId === undefined) delete process.env.KOMMO_GENERIC_MESSAGE_FIELD_ID;
+    else process.env.KOMMO_GENERIC_MESSAGE_FIELD_ID = originalFieldId;
+  }
+});
