@@ -4,8 +4,8 @@ const kommo = require("./client");
 const SM = require("./bot/stateManager");
 const labels = require("./labels");
 
-const HOURS_48 = 48 * 60 * 60 * 1000;
 const HOURS_72 = 72 * 60 * 60 * 1000;
+let recoveryRunning = false;
 
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
@@ -59,6 +59,8 @@ async function runRecovery() {
     return { enviados: 0, erros: 0, desativado: true };
   }
 
+  if (recoveryRunning) return { enviados: 0, erros: 0, em_execucao: true };
+  recoveryRunning = true;
   console.log("[Recovery] Iniciando job de recuperacao...");
   let enviados = 0;
   let erros = 0;
@@ -77,38 +79,40 @@ async function runRecovery() {
     await sleep(2000);
   };
 
-  const missed = await kommo.searchLeadsByTag(labels.LABELS.NAO_COMPARECEU);
-  console.log(`[Recovery] Nao compareceram: ${missed.length}`);
-  for (const lead of missed) await processCandidate(lead);
-
-  const cold = await kommo.searchLeadsByTag(labels.LABELS.LEAD_FRIO);
-  console.log(`[Recovery] Leads frios: ${cold.length}`);
-  for (const lead of cold) {
-    const state = await SM.getState(lead.id);
-    const lastActivity = state.last_client_at || state.updated_at || 0;
-    if (Date.now() - lastActivity >= HOURS_48) await processCandidate(lead);
-  }
-
-  const recovering = await kommo.searchLeadsByTag(labels.LABELS.EM_RECUPERACAO);
-  console.log(`[Recovery] Em recuperacao: ${recovering.length}`);
-  for (const lead of recovering) {
-    const state = await SM.getState(lead.id);
-    const lastActivity = Number(state.last_client_at || state.updated_at || 0);
-    // Legacy tags have no reliable recovery timestamp. Never close those
-    // automatically; only close leads started by this job and persisted in state.
-    const startedByThisJob = state.etapa === "recuperacao_menu" && lastActivity > 0;
-    if (startedByThisJob && Date.now() - lastActivity > HOURS_72) {
-      try { await closeAsLost(String(lead.id)); }
-      catch (error) {
-        erros++;
-        console.error(`[Recovery] Erro ao fechar lead ${lead.id}:`, error.message);
+  try {
+    const cold = await kommo.searchLeadsByTag(labels.LABELS.LEAD_FRIO);
+    console.log(`[Recovery] Leads frios: ${cold.length}`);
+    for (const lead of cold) {
+      const state = await SM.getState(lead.id);
+      const lastActivity = Number(state.last_client_at || state.updated_at || 0);
+      if (lastActivity > 0 && Date.now() - lastActivity >= HOURS_72) {
+        await processCandidate(lead);
       }
-      await sleep(2000);
     }
-  }
 
-  console.log(`[Recovery] Concluido: ${enviados} enviados, ${erros} erros.`);
-  return { enviados, erros };
+    const recovering = await kommo.searchLeadsByTag(labels.LABELS.EM_RECUPERACAO);
+    console.log(`[Recovery] Em recuperacao: ${recovering.length}`);
+    for (const lead of recovering) {
+      const state = await SM.getState(lead.id);
+      const lastActivity = Number(state.last_client_at || state.updated_at || 0);
+      // Legacy tags have no reliable recovery timestamp. Never close those
+      // automatically; only close leads started by this job and persisted in state.
+      const startedByThisJob = state.etapa === "recuperacao_menu" && lastActivity > 0;
+      if (startedByThisJob && Date.now() - lastActivity > HOURS_72) {
+        try { await closeAsLost(String(lead.id)); }
+        catch (error) {
+          erros++;
+          console.error(`[Recovery] Erro ao fechar lead ${lead.id}:`, error.message);
+        }
+        await sleep(2000);
+      }
+    }
+
+    console.log(`[Recovery] Concluido: ${enviados} enviados, ${erros} erros.`);
+    return { enviados, erros };
+  } finally {
+    recoveryRunning = false;
+  }
 }
 
 function startRecoveryCron() {
@@ -116,24 +120,18 @@ function startRecoveryCron() {
     console.log("    Recovery: desativado para validacao");
     return;
   }
-  const targetHour = Number.parseInt(process.env.RECOVERY_HOUR || "9", 10);
-  const scheduleNext = () => {
-    const now = new Date();
-    const next = new Date(now);
-    next.setHours(targetHour, 0, 0, 0);
-    if (next <= now) next.setDate(next.getDate() + 1);
-
-    const timer = setTimeout(async () => {
-      try { await runRecovery(); }
-      catch (error) { console.error("[Recovery] Erro no job:", error.message); }
-      scheduleNext();
-    }, next.getTime() - now.getTime());
-    timer.unref?.();
-    console.log(`[Recovery] Proxima execucao: ${next.toString()}`);
+  const intervalMinutes = Math.max(
+    5,
+    Number.parseInt(process.env.RECOVERY_INTERVAL_MINUTES || "15", 10) || 15
+  );
+  const execute = async () => {
+    try { await runRecovery(); }
+    catch (error) { console.error("[Recovery] Erro no job:", error.message); }
   };
-
-  scheduleNext();
-  console.log(`    Recovery: cron ativo (${targetHour}h)`);
+  execute();
+  const timer = setInterval(execute, intervalMinutes * 60 * 1000);
+  timer.unref?.();
+  console.log(`    Recovery: verificacao ativa a cada ${intervalMinutes} minuto(s)`);
 }
 
-module.exports = { startRecoveryCron, runRecovery };
+module.exports = { startRecoveryCron, runRecovery, sendRecovery, HOURS_72 };

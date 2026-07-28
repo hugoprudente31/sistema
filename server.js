@@ -9,6 +9,7 @@ require("dotenv").config();
 
 const { startRecoveryCron } = require("./kommo/recovery");
 const { startReminderCron, runReminders, runTwoHourReminders } = require("./kommo/reminder");
+const { startFollowupCron } = require("./kommo/followups");
 const mailingboss = require("./mailingboss");
 const kommoClient = require("./kommo/client");
 const { jornadaPadrao, resolverJornadaLoja, estaOptometristaDisponivel, gerarSlotsJornada } = require("./lib/horarios");
@@ -1208,6 +1209,8 @@ async function initDatabase() {
   await addColumnIfMissing("agendamentos", "resultado_optometrista", "TEXT DEFAULT 'Pendente'");
   await addColumnIfMissing("agendamentos", "atendimento_semaforo", "TEXT DEFAULT ''");
   await addColumnIfMissing("agendamentos", "atendimento_semaforo_label", "TEXT DEFAULT ''");
+  await addColumnIfMissing("agendamentos", "nao_compareceu_em", "TIMESTAMPTZ");
+  await addColumnIfMissing("agendamentos", "nao_compareceu_lembrete_em", "TIMESTAMPTZ");
 
   await pool.query(`
     CREATE OR REPLACE FUNCTION normalizar_identidade_comercial_tgt(valor TEXT)
@@ -1266,6 +1269,54 @@ async function initDatabase() {
     )
     WHERE vendedor_consultor_id IS NULL
       AND COALESCE(NULLIF(vendedor_atendeu_nome, ''), NULLIF(vendedor_nome, ''), NULLIF(consultor_responsavel, '')) IS NOT NULL;
+  `);
+
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION agendar_followup_nao_compareceu_tgt()
+    RETURNS trigger AS $$
+    DECLARE
+      novo_compareceu TEXT := TRANSLATE(
+        LOWER(TRIM(COALESCE(NEW.compareceu, ''))),
+        'áàâãäéèêëíìîïóòôõöúùûüç',
+        'aaaaaeeeeiiiiooooouuuuc'
+      );
+      novo_status TEXT := TRANSLATE(
+        LOWER(TRIM(COALESCE(NEW.status, ''))),
+        'áàâãäéèêëíìîïóòôõöúùûüç',
+        'aaaaaeeeeiiiiooooouuuuc'
+      );
+      antigo_nao_compareceu BOOLEAN := false;
+    BEGIN
+      IF TG_OP = 'UPDATE' THEN
+        antigo_nao_compareceu :=
+          TRANSLATE(LOWER(TRIM(COALESCE(OLD.compareceu, ''))),
+            'áàâãäéèêëíìîïóòôõöúùûüç','aaaaaeeeeiiiiooooouuuuc')
+            IN ('nao', 'nao compareceu')
+          OR TRANSLATE(LOWER(TRIM(COALESCE(OLD.status, ''))),
+            'áàâãäéèêëíìîïóòôõöúùûüç','aaaaaeeeeiiiiooooouuuuc')
+            = 'nao compareceu';
+      END IF;
+
+      IF novo_compareceu IN ('nao', 'nao compareceu') OR novo_status = 'nao compareceu' THEN
+        IF TG_OP = 'INSERT' OR NOT antigo_nao_compareceu THEN
+          NEW.nao_compareceu_em := NOW();
+          NEW.nao_compareceu_lembrete_em := NULL;
+        ELSE
+          NEW.nao_compareceu_em := COALESCE(NEW.nao_compareceu_em, NOW());
+        END IF;
+      ELSE
+        NEW.nao_compareceu_em := NULL;
+        NEW.nao_compareceu_lembrete_em := NULL;
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS trg_zz_followup_nao_compareceu_tgt ON agendamentos;
+    CREATE TRIGGER trg_zz_followup_nao_compareceu_tgt
+    BEFORE INSERT OR UPDATE OF compareceu, status
+    ON agendamentos
+    FOR EACH ROW EXECUTE FUNCTION agendar_followup_nao_compareceu_tgt();
   `);
 
   await pool.query(`
@@ -6017,6 +6068,7 @@ async function startServer() {
   await carregarConfiguracoesPainelDoBanco();
   startReminderCron();
   startRecoveryCron();
+  startFollowupCron();
   return new Promise((resolve) => {
     const server = app.listen(PORT, "0.0.0.0", () => {
       console.log(`Sistema rodando na porta ${PORT}`);

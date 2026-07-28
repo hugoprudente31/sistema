@@ -201,6 +201,14 @@ module.exports = {
       `2️⃣ Prefiro em outro momento`;
   },
 
+  naoCompareceu45: (nome, loja) => {
+    var primeiro = nome ? nome.trim().split(" ")[0] : "";
+    return `Olá${primeiro ? ", " + primeiro : ""}! Tudo bem? 😊\n\n` +
+      `Sentimos sua falta no horário da sua Avaliação Visual${loja ? " na " + loja : ""}.\n\n` +
+      `Sabemos que imprevistos acontecem. Se desejar, podemos ajudar você a escolher um novo horário.\n\n` +
+      `Responda esta mensagem e nossa equipe fará o reagendamento com você. 👓✨`;
+  },
+
   notaParaAtendente: (state) => [
     "RESUMO DO ATENDIMENTO BOT",
     `Nome: ${state.nome || "Desconhecido"}`,
