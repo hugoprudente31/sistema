@@ -865,7 +865,7 @@
         <button onclick="salvarHorarioLoja()">Salvar dia</button>
       </div>
       <div id="msgHorLoja" class="msg"></div>
-      <div class="scroll-x" style="margin-top:18px;"><table><thead><tr><th>Loja</th><th>Dia</th><th>Aberto</th><th>Início</th><th>Fim</th><th>Intervalo</th><th>Ações</th></tr></thead><tbody id="horariosLojaBody"></tbody></table></div>
+      <div class="scroll-x" style="margin-top:18px;"><table><thead><tr><th>Loja</th><th>Dia</th><th>Aberto</th><th>Início</th><th>Fim</th><th>Intervalo</th><th>Origem</th><th>Ações</th></tr></thead><tbody id="horariosLojaBody"></tbody></table></div>
     </div>
 
     <div class="card hidden" id="cardConfigHorarioOptometrista">
@@ -896,7 +896,27 @@
         <button onclick="salvarHorarioOptometrista()">Salvar dia</button>
       </div>
       <div id="msgHorOpto" class="msg"></div>
-      <div class="scroll-x" style="margin-top:18px;"><table><thead><tr><th>Optometrista</th><th>Loja</th><th>Dia</th><th>Início</th><th>Fim</th><th>Ações</th></tr></thead><tbody id="horariosOptometristaBody"></tbody></table></div>
+      <div class="scroll-x" style="margin-top:18px;"><table><thead><tr><th>Optometrista</th><th>Loja</th><th>Dia</th><th>Início</th><th>Fim</th><th>Origem</th><th>Ações</th></tr></thead><tbody id="horariosOptometristaBody"></tbody></table></div>
+    </div>
+
+    <div class="card hidden" id="cardConfigBloqueiosAgenda">
+      <div class="topbar" style="margin-bottom:14px;">
+        <div><h3 style="margin:0;">Bloqueios por Data</h3><span class="legend-mini">A alteração passa a valer imediatamente no painel, na landing page e no Kommo.</span></div>
+        <button class="btn-relatorio secondary" onclick="carregarBloqueiosAgenda()">Atualizar</button>
+      </div>
+      <div class="row-4">
+        <div><label>Loja *</label><select id="bloqueioLoja"><option value="">Selecione</option></select></div>
+        <div><label>Data *</label><input id="bloqueioData" type="date"></div>
+        <div><label>Bloquear das</label><input id="bloqueioInicio" type="time"></div>
+        <div><label>Até</label><input id="bloqueioFim" type="time"></div>
+      </div>
+      <div class="row-3">
+        <div><label>Motivo</label><input id="bloqueioMotivo" type="text" placeholder="Ex.: optometrista indisponível"></div>
+        <div style="display:flex;align-items:flex-end;"><button onclick="salvarBloqueioAgenda()">Salvar bloqueio</button></div>
+      </div>
+      <p class="legend-mini" style="margin-top:10px;">Deixe início e fim vazios para bloquear o dia inteiro. Para bloqueio parcial, informe os dois horários.</p>
+      <div id="msgBloqueioAgenda" class="msg"></div>
+      <div class="scroll-x" style="margin-top:18px;"><table><thead><tr><th>Loja</th><th>Data</th><th>Faixa</th><th>Motivo</th><th>Criado por</th><th>Ações</th></tr></thead><tbody id="bloqueiosAgendaBody"></tbody></table></div>
     </div>
 
     <div class="card area-heading hidden" id="areaTecnica">
@@ -1403,7 +1423,11 @@ function fazerLogin() {
         if (state.user && state.user.permissions && (state.user.permissions.isAdmin || roleName() === 'atendimento central')) {
           prepararLojasConfig();
           carregarConfigKommo();
-          return carregarHorariosLoja();
+          return Promise.all([
+            carregarHorariosLoja(),
+            carregarHorariosOptometrista(),
+            carregarBloqueiosAgenda()
+          ]);
         }
       }).then(function() {
         return carregarAgendaEDashboard();
@@ -1456,7 +1480,7 @@ var ADMIN_AREAS = {
   configuracoes: {
     titulo: 'Configurações',
     resumo: 'Integração Kommo e jornada semanal de horário por loja e por optometrista.',
-    cards: ['cardConfigKommo','cardConfigHorarioLoja','cardConfigHorarioOptometrista']
+    cards: ['cardConfigKommo','cardConfigHorarioLoja','cardConfigHorarioOptometrista','cardConfigBloqueiosAgenda']
   },
   tecnica: {
     titulo: 'Central Técnica',
@@ -1504,7 +1528,7 @@ var CENTRAL_AREAS = {
   configuracoes: {
     titulo: 'Configurações',
     resumo: 'Jornada semanal de horário por loja e por optometrista (Kommo é somente leitura para este perfil).',
-    cards: ['cardConfigKommo','cardConfigHorarioLoja','cardConfigHorarioOptometrista']
+    cards: ['cardConfigKommo','cardConfigHorarioLoja','cardConfigHorarioOptometrista','cardConfigBloqueiosAgenda']
   }
 };
 
@@ -1544,6 +1568,7 @@ function aplicarPermissoesTela() {
     byId('cardConfigKommo').classList.remove('hidden');
     byId('cardConfigHorarioLoja').classList.remove('hidden');
     byId('cardConfigHorarioOptometrista').classList.remove('hidden');
+    byId('cardConfigBloqueiosAgenda').classList.remove('hidden');
   }
   // Atendimento Central pode ver e editar horários, mas o Kommo (credenciais)
   // é somente leitura para este perfil — só o Admin salva/edita.
@@ -3357,7 +3382,7 @@ function prepararLojasConfig() {
     var nome = l.Loja || l.nome || '';
     return '<option value="' + escapeHtml(nome) + '">' + escapeHtml(nome) + '</option>';
   }).join('');
-  ['horLojaSelect','horOptoLojaSelect'].forEach(function(id) {
+  ['horLojaSelect','horOptoLojaSelect','bloqueioLoja'].forEach(function(id) {
     var el = byId(id);
     if (!el) return;
     var atual = el.value;
@@ -3413,11 +3438,11 @@ function testarConfigKommo() {
 function carregarHorariosLoja() {
   var loja = byId('horLojaSelect').value;
   var url = '/api/admin/configuracoes/horarios-loja' + (loja ? '?loja=' + encodeURIComponent(loja) : '');
-  byId('horariosLojaBody').innerHTML = '<tr><td colspan="7">Carregando...</td></tr>';
+  byId('horariosLojaBody').innerHTML = '<tr><td colspan="8">Carregando...</td></tr>';
   return apiGet(url).then(function(res) {
     horariosLojaCache = Array.isArray(res.horarios) ? res.horarios : [];
     if (!horariosLojaCache.length) {
-      byId('horariosLojaBody').innerHTML = '<tr><td colspan="7">Nenhuma jornada cadastrada' + (loja ? ' para esta loja' : '') + ' — usando a regra padrão do sistema.</td></tr>';
+      byId('horariosLojaBody').innerHTML = '<tr><td colspan="8">Nenhuma jornada disponível.</td></tr>';
       return;
     }
     byId('horariosLojaBody').innerHTML = horariosLojaCache.map(function(h) {
@@ -3429,10 +3454,11 @@ function carregarHorariosLoja() {
         '<td>' + (h.hora_inicio ? h.hora_inicio.slice(0,5) : '—') + '</td>' +
         '<td>' + (h.hora_fim ? h.hora_fim.slice(0,5) : '—') + '</td>' +
         '<td>' + intervalo + '</td>' +
-        '<td><button class="danger icon-btn" onclick="removerHorarioLoja(' + h.id + ')">Remover</button></td></tr>';
+        '<td>' + escapeHtml(h.origem||'configurado') + '</td>' +
+        '<td>' + (h.id ? '<button class="danger icon-btn" onclick="removerHorarioLoja(' + h.id + ')">Restaurar padrão</button>' : '—') + '</td></tr>';
     }).join('');
   }).catch(function(err) {
-    byId('horariosLojaBody').innerHTML = '<tr><td colspan="7" class="err">' + escapeHtml(err.message||String(err)) + '</td></tr>';
+    byId('horariosLojaBody').innerHTML = '<tr><td colspan="8" class="err">' + escapeHtml(err.message||String(err)) + '</td></tr>';
   });
 }
 
@@ -3493,13 +3519,13 @@ function carregarHorariosOptometrista() {
     horariosOptometristaCache = Array.isArray(res.horarios) ? res.horarios : [];
     renderizarHorariosOptometrista();
   }).catch(function(err) {
-    byId('horariosOptometristaBody').innerHTML = '<tr><td colspan="6" class="err">' + escapeHtml(err.message||String(err)) + '</td></tr>';
+    byId('horariosOptometristaBody').innerHTML = '<tr><td colspan="7" class="err">' + escapeHtml(err.message||String(err)) + '</td></tr>';
   });
 }
 
 function renderizarHorariosOptometrista() {
   if (!horariosOptometristaCache.length) {
-    byId('horariosOptometristaBody').innerHTML = '<tr><td colspan="6">Nenhum horário cadastrado — optometrista disponível em qualquer horário que a loja esteja aberta.</td></tr>';
+    byId('horariosOptometristaBody').innerHTML = '<tr><td colspan="7">Nenhum optometrista ativo encontrado.</td></tr>';
     return;
   }
   byId('horariosOptometristaBody').innerHTML = horariosOptometristaCache.map(function(h) {
@@ -3509,7 +3535,8 @@ function renderizarHorariosOptometrista() {
       '<td>' + DIAS_SEMANA_NOMES[h.dia_semana] + '</td>' +
       '<td>' + (h.hora_inicio ? h.hora_inicio.slice(0,5) : '—') + '</td>' +
       '<td>' + (h.hora_fim ? h.hora_fim.slice(0,5) : '—') + '</td>' +
-      '<td><button class="danger icon-btn" onclick="removerHorarioOptometrista(' + h.id + ')">Remover</button></td></tr>';
+      '<td>' + escapeHtml(h.origem||'configurado') + '</td>' +
+      '<td>' + (h.id ? '<button class="danger icon-btn" onclick="removerHorarioOptometrista(' + h.id + ')">Restaurar padrão</button>' : '—') + '</td></tr>';
   }).join('');
 }
 
@@ -3545,6 +3572,72 @@ function removerHorarioOptometrista(id) {
       return carregarHorariosOptometrista();
     })
     .catch(function(err) { setMsg('msgHorOpto', err.message || String(err), 'err'); });
+}
+
+function carregarBloqueiosAgenda() {
+  var body = byId('bloqueiosAgendaBody');
+  body.innerHTML = '<tr><td colspan="6">Carregando...</td></tr>';
+  return apiGet('/api/admin/configuracoes/bloqueios-agenda').then(function(res) {
+    var bloqueios = Array.isArray(res.bloqueios) ? res.bloqueios : [];
+    if (!bloqueios.length) {
+      body.innerHTML = '<tr><td colspan="6">Nenhum bloqueio futuro cadastrado.</td></tr>';
+      return;
+    }
+    body.innerHTML = bloqueios.map(function(b) {
+      var faixa = (b.hora_inicio && b.hora_fim)
+        ? b.hora_inicio.slice(0,5) + '–' + b.hora_fim.slice(0,5)
+        : 'Dia inteiro';
+      return '<tr>' +
+        '<td>' + escapeHtml(b.loja||'') + '</td>' +
+        '<td>' + formatDateBR(b.data) + '</td>' +
+        '<td>' + faixa + '</td>' +
+        '<td>' + escapeHtml(b.motivo||'—') + '</td>' +
+        '<td>' + escapeHtml(b.criado_por||'—') + '</td>' +
+        '<td><button class="danger icon-btn" onclick="removerBloqueioAgenda(' + b.id + ')">Remover</button></td></tr>';
+    }).join('');
+  }).catch(function(err) {
+    body.innerHTML = '<tr><td colspan="6" class="err">' + escapeHtml(err.message||String(err)) + '</td></tr>';
+  });
+}
+
+function salvarBloqueioAgenda() {
+  var payload = {
+    loja: byId('bloqueioLoja').value,
+    data: byId('bloqueioData').value,
+    hora_inicio: byId('bloqueioInicio').value || null,
+    hora_fim: byId('bloqueioFim').value || null,
+    motivo: byId('bloqueioMotivo').value.trim()
+  };
+  if (!payload.loja || !payload.data) {
+    setMsg('msgBloqueioAgenda', 'Informe a loja e a data.', 'err');
+    return;
+  }
+  if (!!payload.hora_inicio !== !!payload.hora_fim) {
+    setMsg('msgBloqueioAgenda', 'Informe início e fim, ou deixe os dois vazios para bloquear o dia inteiro.', 'err');
+    return;
+  }
+  showLoading(true);
+  apiPost('/api/admin/configuracoes/bloqueios-agenda', payload)
+    .then(function(res) {
+      if (!res.ok) throw new Error(res.message || 'Erro ao salvar bloqueio.');
+      toast('Bloqueio salvo e sincronizado com painel, landing page e Kommo.', 'ok');
+      setMsg('msgBloqueioAgenda', '', '');
+      return carregarBloqueiosAgenda();
+    })
+    .catch(function(err) { setMsg('msgBloqueioAgenda', err.message || String(err), 'err'); })
+    .finally(function() { showLoading(false); });
+}
+
+function removerBloqueioAgenda(id) {
+  if (!confirm('Remover este bloqueio e liberar novamente os horários?')) return;
+  fetch('/api/admin/configuracoes/bloqueios-agenda/' + encodeURIComponent(id), { method:'DELETE', credentials:'same-origin' })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      if (!res.ok) throw new Error(res.message || 'Erro ao remover bloqueio.');
+      toast('Bloqueio removido. A liberação já vale no painel, landing page e Kommo.', 'ok');
+      return carregarBloqueiosAgenda();
+    })
+    .catch(function(err) { setMsg('msgBloqueioAgenda', err.message || String(err), 'err'); });
 }
 
 function carregarUsuarios() {

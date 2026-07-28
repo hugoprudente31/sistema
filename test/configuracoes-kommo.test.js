@@ -88,6 +88,11 @@ test("Perfil de loja não acessa nenhuma rota de Configurações", async () => {
     headers: { cookie: `tgt_session=${tokenVendedor}` }
   });
   assert.equal(respHorariosOpto.status, 403);
+
+  const respBloqueios = await fetch(baseUrl + "/api/admin/configuracoes/bloqueios-agenda", {
+    headers: { cookie: `tgt_session=${tokenVendedor}` }
+  });
+  assert.equal(respBloqueios.status, 403);
 });
 
 test("Admin e Atendimento Central acessam horários de loja e de optometrista", async () => {
@@ -102,5 +107,10 @@ test("Admin e Atendimento Central acessam horários de loja e de optometrista", 
       headers: { cookie: `tgt_session=${token}` }
     });
     assert.notEqual(respOpto.status, 403);
+
+    const respBloqueios = await fetch(baseUrl + "/api/admin/configuracoes/bloqueios-agenda", {
+      headers: { cookie: `tgt_session=${token}` }
+    });
+    assert.notEqual(respBloqueios.status, 403);
   }
 });

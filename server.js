@@ -11,7 +11,7 @@ const { startRecoveryCron } = require("./kommo/recovery");
 const { startReminderCron, runReminders, runTwoHourReminders } = require("./kommo/reminder");
 const mailingboss = require("./mailingboss");
 const kommoClient = require("./kommo/client");
-const { resolverJornadaLoja, estaOptometristaDisponivel, gerarSlotsJornada } = require("./lib/horarios");
+const { jornadaPadrao, resolverJornadaLoja, estaOptometristaDisponivel, gerarSlotsJornada } = require("./lib/horarios");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -3736,19 +3736,138 @@ app.post("/api/admin/configuracoes/kommo/testar", requireAdminOuCentral, async (
 
 const DIA_SEMANA_VALIDOS = [0, 1, 2, 3, 4, 5, 6];
 
+app.get("/api/admin/configuracoes/bloqueios-agenda", requireAdminOuCentral, async (_req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, loja, data,
+              TO_CHAR(hora_inicio,'HH24:MI') AS hora_inicio,
+              TO_CHAR(hora_fim,'HH24:MI') AS hora_fim,
+              motivo, criado_por, criado_em
+         FROM bloqueios_disponibilidade
+        WHERE data >= CURRENT_DATE
+        ORDER BY data ASC, loja ASC`
+    );
+    res.json({
+      ok: true,
+      bloqueios: result.rows,
+      sincronizadoCom: ["painel", "landing_page", "kommo"]
+    });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: "Erro ao carregar bloqueios da agenda.", error: error.message });
+  }
+});
+
+app.post("/api/admin/configuracoes/bloqueios-agenda", requireAdminOuCentral, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const loja = normalizeLojaPublica(b.loja) || clean(b.loja);
+    const data = toPgDate(b.data);
+    const horaInicio = clean(b.hora_inicio) || null;
+    const horaFim = clean(b.hora_fim) || null;
+    const motivo = clean(b.motivo) || "Indisponibilidade configurada";
+
+    if (!loja) return res.status(400).json({ ok: false, message: "Informe a loja." });
+    if (!data) return res.status(400).json({ ok: false, message: "Informe uma data válida." });
+    if (!!horaInicio !== !!horaFim) {
+      return res.status(400).json({ ok: false, message: "Informe hora inicial e final, ou deixe ambas vazias para bloquear o dia inteiro." });
+    }
+    if (horaInicio && (
+      !/^\d{2}:\d{2}$/.test(horaInicio) ||
+      !/^\d{2}:\d{2}$/.test(horaFim) ||
+      horaInicio >= horaFim
+    )) {
+      return res.status(400).json({ ok: false, message: "A faixa de horário informada é inválida." });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO bloqueios_disponibilidade
+         (loja, data, hora_inicio, hora_fim, motivo, criado_por, criado_em)
+       VALUES ($1,$2,$3,$4,$5,$6,CURRENT_TIMESTAMP)
+       ON CONFLICT (loja, data) DO UPDATE SET
+         hora_inicio = EXCLUDED.hora_inicio,
+         hora_fim = EXCLUDED.hora_fim,
+         motivo = EXCLUDED.motivo,
+         criado_por = EXCLUDED.criado_por,
+         criado_em = CURRENT_TIMESTAMP
+       RETURNING id, loja, data,
+                 TO_CHAR(hora_inicio,'HH24:MI') AS hora_inicio,
+                 TO_CHAR(hora_fim,'HH24:MI') AS hora_fim,
+                 motivo, criado_por, criado_em`,
+      [loja, data, horaInicio, horaFim, motivo, req.session.email]
+    );
+    res.json({
+      ok: true,
+      message: "Bloqueio salvo e sincronizado com painel, landing page e Kommo.",
+      bloqueio: result.rows[0],
+      sincronizadoCom: ["painel", "landing_page", "kommo"]
+    });
+  } catch (error) {
+    res.status(400).json({ ok: false, message: error.message || "Erro ao salvar bloqueio da agenda." });
+  }
+});
+
+app.delete("/api/admin/configuracoes/bloqueios-agenda/:id", requireAdminOuCentral, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `DELETE FROM bloqueios_disponibilidade WHERE id = $1
+       RETURNING id, loja, data`,
+      [req.params.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ ok: false, message: "Bloqueio não encontrado." });
+    res.json({
+      ok: true,
+      message: "Bloqueio removido e horários liberados no painel, landing page e Kommo.",
+      removido: result.rows[0],
+      sincronizadoCom: ["painel", "landing_page", "kommo"]
+    });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: "Erro ao remover bloqueio da agenda.", error: error.message });
+  }
+});
+
 app.get("/api/admin/configuracoes/horarios-loja", requireAdminOuCentral, async (req, res) => {
   try {
     const params = [];
     let where = "";
-    if (clean(req.query.loja)) {
-      params.push(clean(req.query.loja));
+    const lojaFiltro = clean(req.query.loja);
+    if (lojaFiltro) {
+      params.push(lojaFiltro);
       where = "WHERE LOWER(loja) = LOWER($1)";
     }
     const result = await pool.query(
       `SELECT * FROM horarios_funcionamento_loja ${where} ORDER BY loja ASC, dia_semana ASC`,
       params
     );
-    res.json({ ok: true, horarios: result.rows });
+    const lojasResult = lojaFiltro
+      ? { rows: [{ nome: normalizeLojaPublica(lojaFiltro) || lojaFiltro }] }
+      : await pool.query(`SELECT nome FROM lojas WHERE ativo = true ORDER BY nome ASC`);
+    const configurados = new Map(
+      result.rows.map((row) => [`${clean(row.loja).toLowerCase()}|${row.dia_semana}`, row])
+    );
+    const horarios = [];
+    for (const lojaRow of lojasResult.rows) {
+      for (const diaSemana of DIA_SEMANA_VALIDOS) {
+        const loja = lojaRow.nome;
+        const configurado = configurados.get(`${clean(loja).toLowerCase()}|${diaSemana}`);
+        if (configurado) {
+          horarios.push({ ...configurado, origem: "configurado" });
+          continue;
+        }
+        const padrao = jornadaPadrao(loja, diaSemana);
+        horarios.push({
+          id: null,
+          loja,
+          dia_semana: diaSemana,
+          aberto: padrao.aberto,
+          hora_inicio: padrao.horaInicio,
+          hora_fim: padrao.horaFim,
+          intervalo_inicio: padrao.intervaloInicio,
+          intervalo_fim: padrao.intervaloFim,
+          origem: "padrão"
+        });
+      }
+    }
+    res.json({ ok: true, horarios });
   } catch (error) {
     res.status(500).json({ ok: false, message: "Erro ao carregar horários de funcionamento.", error: error.message });
   }
@@ -3784,7 +3903,12 @@ app.post("/api/admin/configuracoes/horarios-loja", requireAdminOuCentral, async 
        RETURNING *`,
       [loja, diaSemana, aberto, horaInicio, horaFim, intervaloInicio, intervaloFim, req.session.email]
     );
-    res.json({ ok: true, message: "Horário de funcionamento salvo.", horario: result.rows[0] });
+    res.json({
+      ok: true,
+      message: "Horário salvo e sincronizado com painel, landing page e Kommo.",
+      horario: result.rows[0],
+      sincronizadoCom: ["painel", "landing_page", "kommo"]
+    });
   } catch (error) {
     res.status(400).json({ ok: false, message: error.message || "Erro ao salvar horário de funcionamento." });
   }
@@ -3794,7 +3918,11 @@ app.delete("/api/admin/configuracoes/horarios-loja/:id", requireAdminOuCentral, 
   try {
     const result = await pool.query(`DELETE FROM horarios_funcionamento_loja WHERE id = $1 RETURNING id`, [req.params.id]);
     if (!result.rows.length) return res.status(404).json({ ok: false, message: "Registro não encontrado." });
-    res.json({ ok: true, message: "Horário removido (volta a usar a regra padrão do sistema)." });
+    res.json({
+      ok: true,
+      message: "Horário removido; a regra padrão já vale no painel, landing page e Kommo.",
+      sincronizadoCom: ["painel", "landing_page", "kommo"]
+    });
   } catch (error) {
     res.status(500).json({ ok: false, message: "Erro ao remover horário.", error: error.message });
   }
@@ -3804,8 +3932,9 @@ app.get("/api/admin/configuracoes/horarios-optometrista", requireAdminOuCentral,
   try {
     const params = [];
     let where = "";
-    if (clean(req.query.optometrista_id)) {
-      params.push(Number(req.query.optometrista_id));
+    const optometristaFiltro = clean(req.query.optometrista_id);
+    if (optometristaFiltro) {
+      params.push(Number(optometristaFiltro));
       where = "WHERE ho.optometrista_id = $1";
     }
     const result = await pool.query(
@@ -3816,7 +3945,56 @@ app.get("/api/admin/configuracoes/horarios-optometrista", requireAdminOuCentral,
         ORDER BY o.nome ASC, ho.dia_semana ASC`,
       params
     );
-    res.json({ ok: true, horarios: result.rows });
+    const optometristas = await pool.query(
+      `SELECT id, nome, loja FROM optometristas
+       WHERE ativo = true ${optometristaFiltro ? "AND id = $1" : ""}
+       ORDER BY nome ASC`,
+      optometristaFiltro ? [Number(optometristaFiltro)] : []
+    );
+    const porOptometrista = new Map();
+    for (const row of result.rows) {
+      const id = Number(row.optometrista_id);
+      if (!porOptometrista.has(id)) porOptometrista.set(id, new Map());
+      porOptometrista.get(id).set(Number(row.dia_semana), row);
+    }
+    const horarios = [];
+    for (const optometrista of optometristas.rows) {
+      const configurados = porOptometrista.get(Number(optometrista.id));
+      for (const diaSemana of DIA_SEMANA_VALIDOS) {
+        const configurado = configurados?.get(diaSemana);
+        if (configurado) {
+          horarios.push({ ...configurado, disponivel: true, origem: "configurado" });
+          continue;
+        }
+        if (configurados?.size) {
+          horarios.push({
+            id: null,
+            optometrista_id: optometrista.id,
+            optometrista_nome: optometrista.nome,
+            optometrista_loja: optometrista.loja,
+            dia_semana: diaSemana,
+            hora_inicio: null,
+            hora_fim: null,
+            disponivel: false,
+            origem: "não atende"
+          });
+          continue;
+        }
+        const jornadaLoja = await resolverJornadaLoja(pool, optometrista.loja, diaSemana);
+        horarios.push({
+          id: null,
+          optometrista_id: optometrista.id,
+          optometrista_nome: optometrista.nome,
+          optometrista_loja: optometrista.loja,
+          dia_semana: diaSemana,
+          hora_inicio: jornadaLoja.horaInicio,
+          hora_fim: jornadaLoja.horaFim,
+          disponivel: jornadaLoja.aberto,
+          origem: "segue a loja"
+        });
+      }
+    }
+    res.json({ ok: true, horarios });
   } catch (error) {
     res.status(500).json({ ok: false, message: "Erro ao carregar horários de optometrista.", error: error.message });
   }
@@ -3848,7 +4026,12 @@ app.post("/api/admin/configuracoes/horarios-optometrista", requireAdminOuCentral
        RETURNING *`,
       [optometristaId, diaSemana, horaInicio, horaFim, req.session.email]
     );
-    res.json({ ok: true, message: "Horário do optometrista salvo.", horario: result.rows[0] });
+    res.json({
+      ok: true,
+      message: "Horário do optometrista salvo e sincronizado com painel, landing page e Kommo.",
+      horario: result.rows[0],
+      sincronizadoCom: ["painel", "landing_page", "kommo"]
+    });
   } catch (error) {
     res.status(400).json({ ok: false, message: error.message || "Erro ao salvar horário do optometrista." });
   }
@@ -3858,7 +4041,11 @@ app.delete("/api/admin/configuracoes/horarios-optometrista/:id", requireAdminOuC
   try {
     const result = await pool.query(`DELETE FROM horarios_optometrista WHERE id = $1 RETURNING id`, [req.params.id]);
     if (!result.rows.length) return res.status(404).json({ ok: false, message: "Registro não encontrado." });
-    res.json({ ok: true, message: "Horário removido (optometrista volta a ficar disponível em qualquer horário da loja)." });
+    res.json({
+      ok: true,
+      message: "Horário removido; o optometrista volta a seguir a loja no painel, landing page e Kommo.",
+      sincronizadoCom: ["painel", "landing_page", "kommo"]
+    });
   } catch (error) {
     res.status(500).json({ ok: false, message: "Erro ao remover horário.", error: error.message });
   }
