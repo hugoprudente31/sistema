@@ -5607,7 +5607,7 @@ app.post("/api/admin/crm/leads/:leadId/mensagens", requireCrmAccess, async (req,
     const SM = require("./kommo/bot/stateManager");
     const crmLog = require("./kommo/crmLog");
 
-    await kommoClient.sendMessageToLead(leadId, texto);
+    await kommoClient.sendProactiveMessage(leadId, texto);
     SM.markHumanActivity(leadId);
     await crmLog.registrarMensagem({
       leadId, direcao: "saida", autorTipo: "atendente",
