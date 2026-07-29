@@ -151,6 +151,30 @@ function validarCaptacaoKey(req, res, next) {
   next();
 }
 
+// ===============================
+// SEGURANÇA — ALINHAMENTO DE LOJA (adanalyzer-os)
+// ===============================
+// Não é um caminho de dados novo: o adanalyzer-os continua lendo
+// `agendamentos` direto pelo Postgres (SISTEMA_DATABASE_URL). Isto é só pra
+// ele alinhar o texto cru de `loja` contra o nome canônico da tabela `lojas`
+// daqui, reaproveitando normalizeLojaPublica() em vez de duplicar o mapa de
+// apelidos legados numa segunda base de código (foi exatamente essa
+// duplicação/drift que causou o bug da Bruna sumindo do select de
+// optometristas — ver histórico de 2026-07-29).
+
+const ADANALYZEROS_LOJAS_KEY = process.env.ADANALYZEROS_LOJAS_KEY || "";
+
+function validarAdAnalyzerOsKey(req, res, next) {
+  const recebida = req.headers["x-api-key"] || "";
+  if (!ADANALYZEROS_LOJAS_KEY) {
+    return res.status(500).json({ ok: false, message: "ADANALYZEROS_LOJAS_KEY não configurada no Railway." });
+  }
+  if (!safeEqual(recebida, ADANALYZEROS_LOJAS_KEY)) {
+    return res.status(401).json({ ok: false, message: "Chave de sincronismo inválida." });
+  }
+  next();
+}
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL
 });
@@ -2228,6 +2252,49 @@ app.post("/api/internal/vendedores-consultores/resolve", validarCaptacaoKey, asy
     res.json({ ok: true, id: result.rows[0].id });
   } catch (error) {
     res.status(500).json({ ok: false, message: "Erro ao resolver vendedor/consultor.", error: error.message });
+  }
+});
+
+// Lista canônica de lojas ativas, pra sistemas externos cachearem localmente
+// (ex.: log de "loja não reconhecida" no adanalyzer-os). Mesma regra de
+// posicionamento acima: server-to-server, antes do gate de sessão.
+app.get("/api/internal/lojas", validarAdAnalyzerOsKey, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, nome, cidade FROM lojas WHERE ativo = true ORDER BY nome`
+    );
+    res.setHeader("Cache-Control", "private, max-age=300");
+    res.json({ ok: true, lojas: result.rows });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: "Erro ao listar lojas.", error: error.message });
+  }
+});
+
+// Alinha um texto cru de loja (ex.: vindo de agendamentos.loja, com possível
+// grafia legada) contra o nome canônico usado hoje na tabela `lojas`.
+// Reaproveita normalizeLojaPublica() — mesma lógica que todo o resto deste
+// sistema já usa — em vez de o adanalyzer-os manter seu próprio mapa de
+// apelidos, que divergiria com o tempo.
+app.get("/api/internal/lojas/resolver", validarAdAnalyzerOsKey, async (req, res) => {
+  try {
+    const bruto = clean(req.query.nome || "");
+    if (!bruto) {
+      return res.status(400).json({ ok: false, message: "Parâmetro 'nome' é obrigatório." });
+    }
+    const canonico = normalizeLojaPublica(bruto);
+    if (!canonico) {
+      return res.json({ ok: true, nome_original: bruto, nome_canonico: null, loja_id: null, reconhecida: false });
+    }
+    const result = await pool.query(`SELECT id FROM lojas WHERE nome = $1 AND ativo = true LIMIT 1`, [canonico]);
+    res.json({
+      ok: true,
+      nome_original: bruto,
+      nome_canonico: canonico,
+      loja_id: result.rows[0]?.id ?? null,
+      reconhecida: true
+    });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: "Erro ao resolver loja.", error: error.message });
   }
 });
 

@@ -11,6 +11,7 @@ process.env.KOMMO_WEBHOOK_SECRET = "test-webhook-secret";
 process.env.KOMMO_USE_SALESBOT = "true";
 process.env.BOT_ENABLED = "true";
 process.env.ADANALYZER_SYNC_KEY = "test-adanalyzer-sync-key";
+process.env.ADANALYZEROS_LOJAS_KEY = "test-adanalyzeros-lojas-key";
 
 const { app, pool, signSession } = require("../server");
 const mailingboss = require("../mailingboss");
@@ -201,6 +202,63 @@ test("marketing performance requires a key and returns aggregates only", async (
   } finally {
     pool.query = originalQuery;
   }
+});
+
+test("lista de lojas exige chave e retorna só ativas", async () => {
+  const denied = await fetch(baseUrl + "/api/internal/lojas");
+  assert.equal(denied.status, 401);
+  const originalQuery = pool.query;
+  pool.query = async (sql) => {
+    assert.match(String(sql), /FROM lojas WHERE ativo = true/);
+    return { rows: [{ id: 4, nome: "óticas Target - Ademar de Barros", cidade: "Santos" }] };
+  };
+  try {
+    const response = await fetch(baseUrl + "/api/internal/lojas", {
+      headers: { "x-api-key": "test-adanalyzeros-lojas-key" }
+    });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.lojas[0].nome, "óticas Target - Ademar de Barros");
+  } finally {
+    pool.query = originalQuery;
+  }
+});
+
+test("resolver de loja alinha nome legado ao canônico da tabela lojas", async () => {
+  const denied = await fetch(baseUrl + "/api/internal/lojas/resolver?nome=Santo%20Antonio");
+  assert.equal(denied.status, 401);
+
+  const originalQuery = pool.query;
+  pool.query = async (sql, params) => {
+    assert.match(String(sql), /FROM lojas WHERE nome = \$1/);
+    assert.deepEqual(params, ["óticas Target - Ademar de Barros"]);
+    return { rows: [{ id: 4 }] };
+  };
+  try {
+    const response = await fetch(
+      baseUrl + "/api/internal/lojas/resolver?nome=" + encodeURIComponent("Óticas Target - Santo Antônio"),
+      { headers: { "x-api-key": "test-adanalyzeros-lojas-key" } }
+    );
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.nome_canonico, "óticas Target - Ademar de Barros");
+    assert.equal(body.loja_id, 4);
+    assert.equal(body.reconhecida, true);
+  } finally {
+    pool.query = originalQuery;
+  }
+});
+
+test("resolver de loja devolve reconhecida:false pra nome desconhecido, sem inventar loja", async () => {
+  const response = await fetch(
+    baseUrl + "/api/internal/lojas/resolver?nome=" + encodeURIComponent("Loja que não existe"),
+    { headers: { "x-api-key": "test-adanalyzeros-lojas-key" } }
+  );
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.reconhecida, false);
+  assert.equal(body.nome_canonico, null);
+  assert.equal(body.loja_id, null);
 });
 
 test("respostas incluem cabeçalhos básicos de segurança", async () => {
