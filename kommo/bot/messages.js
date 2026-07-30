@@ -190,23 +190,23 @@ module.exports = {
     `2️⃣ Orçamento\n` +
     `3️⃣ Falar com especialista`,
 
+  // Enviadas via sendProactiveMessage, que grava o texto num campo customizado
+  // do Kommo (tipo "text", limite de 256 caracteres imposto pela própria
+  // Kommo) antes de disparar o Salesbot. Mensagens mais longas que isso
+  // (a versão anterior passava de 280-300 chars com nome/loja reais) fazem
+  // a chamada devolver 400 "TooLong" e a mensagem nunca sai — por isso o
+  // texto aqui é enxuto por design, não por preferência de estilo.
   propostaSemCompra: (nome, loja) => {
     var primeiro = nome ? nome.trim().split(" ")[0] : "";
-    return `Olá${primeiro ? ", " + primeiro : ""}! 😊\n\n` +
-      `Foi muito bom te receber${loja ? " na " + loja : ""}!\n\n` +
-      `Queremos garantir que você encontre a combinação perfeita de lentes e armações. ` +
-      `Temos uma proposta especial preparada para você!\n\n` +
-      `Posso te enviar agora?\n\n` +
-      `1️⃣ Sim, quero ver a proposta\n` +
-      `2️⃣ Prefiro em outro momento`;
+    return `Olá${primeiro ? ", " + primeiro : ""}! 😊 Foi ótimo te receber${loja ? " na " + loja : ""}! ` +
+      `Preparamos uma proposta especial de lentes e armações pra você. ` +
+      `Responda aqui que te enviamos os detalhes. 👓`;
   },
 
   naoCompareceu45: (nome, loja) => {
     var primeiro = nome ? nome.trim().split(" ")[0] : "";
-    return `Olá${primeiro ? ", " + primeiro : ""}! Tudo bem? 😊\n\n` +
-      `Sentimos sua falta no horário da sua Avaliação Visual${loja ? " na " + loja : ""}.\n\n` +
-      `Sabemos que imprevistos acontecem. Se desejar, podemos ajudar você a escolher um novo horário.\n\n` +
-      `Responda esta mensagem e nossa equipe fará o reagendamento com você. 👓✨`;
+    return `Olá${primeiro ? ", " + primeiro : ""}! Sentimos sua falta na Avaliação Visual${loja ? " na " + loja : ""}. ` +
+      `Imprevistos acontecem — responda esta mensagem que já te ajudamos a reagendar. 👓✨`;
   },
 
   notaParaAtendente: (state) => [

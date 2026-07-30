@@ -1,5 +1,21 @@
 // Kommo CRM Client — Sistema Óticas Target
 
+// O campo customizado usado por sendProactiveMessage é do tipo "text" no
+// Kommo, que rejeita qualquer valor acima de 256 caracteres (400 "TooLong",
+// mensagem nunca sai). Os templates fixos (kommo/bot/messages.js,
+// kommo/reminder.js) já foram desenhados pra caber sozinhos, mas mensagens
+// de texto livre (ex.: o atendente digitando no CRM) não têm limite
+// nenhum — este corte é a rede de segurança pra essas, cortando em uma
+// palavra inteira sempre que possível em vez de no meio dela.
+function truncarParaCampoKommo(text, max = 256) {
+  const limpo = String(text).trim();
+  if (limpo.length <= max) return limpo;
+  const cortado = limpo.slice(0, max - 1);
+  const ultimoEspaco = cortado.lastIndexOf(" ");
+  const semPalavraPartida = ultimoEspaco > max * 0.7 ? cortado.slice(0, ultimoEspaco) : cortado;
+  return semPalavraPartida.trimEnd() + "…";
+}
+
 class KommoClient {
   constructor() {
     this.subdomain   = process.env.KOMMO_SUBDOMAIN;
@@ -205,7 +221,7 @@ class KommoClient {
     await this.updateLead(leadId, {
       custom_fields_values: [{
         field_id: fieldId,
-        values: [{ value: String(text).trim() }],
+        values: [{ value: truncarParaCampoKommo(text) }],
       }],
     });
     return this.launchSalesbot(botId, leadId);

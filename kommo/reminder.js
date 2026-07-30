@@ -18,21 +18,17 @@ function firstName(name) {
   return String(name || "cliente").trim().split(/\s+/)[0] || "cliente";
 }
 
+// Enviada via kommo.sendProactiveMessage, que grava o texto num campo
+// customizado do Kommo (tipo "text", limite de 256 caracteres imposto pela
+// própria Kommo) antes de disparar o Salesbot. A versão anterior, com
+// saudação e despedida em linhas separadas, passava de 300 chars com nome/
+// loja reais e a Kommo rejeitava com 400 "TooLong" — mensagem nunca saía.
 function buildTwoHourMessage(appointment) {
   const name = firstName(appointment.nome);
-  return [
-    `Olá, *${name}*! 😊`,
-    "",
-    "Passando para lembrar que faltam cerca de *2 horas* para a sua *Avaliação Visual*. 👓✨",
-    "",
-    `⏰ *Horário:* ${appointment.horario || "a confirmar"}`,
-    `📍 *Loja:* ${appointment.loja || "Óticas TGT"}`,
-    "",
-    "Estamos preparando tudo para receber você com carinho. Se precisar falar conosco, responda por aqui.",
-    "",
-    "Até já! 😊",
-    "_Equipe Óticas TGT_",
-  ].join("\n");
+  const loja = appointment.loja || "Óticas TGT";
+  const horario = appointment.horario || "hora marcada";
+  return `Olá, *${name}*! 😊 Faltam ~*2 horas* para sua *Avaliação Visual* às ${horario} na ${loja}. ` +
+    `Já preparamos tudo pra te receber. Até já! 👓`;
 }
 
 function tomorrowForDatabase() {

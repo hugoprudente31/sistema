@@ -2,6 +2,8 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const kommo = require("../kommo/client");
+const MSG = require("../kommo/bot/messages");
+const { buildTwoHourMessage } = require("../kommo/reminder");
 
 test("Kommo busca a conversa vinculada ao lead pelo filtro correto", async () => {
   const originalRequest = kommo.request;
@@ -113,4 +115,43 @@ test("Kommo envia mensagem proativa pelo campo e Salesbot genéricos", async () 
     if (originalFieldId === undefined) delete process.env.KOMMO_GENERIC_MESSAGE_FIELD_ID;
     else process.env.KOMMO_GENERIC_MESSAGE_FIELD_ID = originalFieldId;
   }
+});
+
+// Regressão: o campo customizado da Kommo usado por sendProactiveMessage é
+// tipo "text" e rejeita valores acima de 256 caracteres (400 "TooLong",
+// mensagem nunca sai). Isso já aconteceu de verdade em produção com os
+// templates de lembrete 2h, "não compareceu" e "proposta sem compra".
+test("Kommo trunca mensagem proativa longa em vez de deixar a Kommo rejeitar", async () => {
+  const originalUpdateLead = kommo.updateLead;
+  const originalLaunchSalesbot = kommo.launchSalesbot;
+  process.env.KOMMO_GENERIC_MESSAGE_SALESBOT_ID = "58737";
+  process.env.KOMMO_GENERIC_MESSAGE_FIELD_ID = "773487";
+  let valorEnviado = null;
+  kommo.updateLead = async (leadId, body) => { valorEnviado = body.custom_fields_values[0].values[0].value; };
+  kommo.launchSalesbot = async () => {};
+
+  try {
+    const textoLongo = "Palavra ".repeat(60).trim();
+    assert.ok(textoLongo.length > 256);
+    await kommo.sendProactiveMessage(26946145, textoLongo);
+    assert.ok(valorEnviado.length <= 256, `esperado <=256, recebido ${valorEnviado.length}`);
+    assert.ok(valorEnviado.endsWith("…"));
+    assert.match(valorEnviado, /^Palavra( Palavra)*…$/, "deve cortar em uma palavra inteira, não no meio dela");
+  } finally {
+    kommo.updateLead = originalUpdateLead;
+    kommo.launchSalesbot = originalLaunchSalesbot;
+  }
+});
+
+test("templates fixos (lembrete 2h, não compareceu, proposta sem compra) cabem no limite de 256 mesmo com o nome de loja mais longo", () => {
+  const nomeLongo = "Maria da Silva Santos";
+  const lojaLonga = "óticas Target - Ademar de Barros";
+
+  const doisHoras = buildTwoHourMessage({ nome: nomeLongo, horario: "15:30", loja: lojaLonga });
+  const naoCompareceu = MSG.naoCompareceu45(nomeLongo, lojaLonga);
+  const proposta = MSG.propostaSemCompra(nomeLongo, lojaLonga);
+
+  assert.ok(doisHoras.length <= 256, `lembrete 2h com ${doisHoras.length} chars`);
+  assert.ok(naoCompareceu.length <= 256, `não compareceu com ${naoCompareceu.length} chars`);
+  assert.ok(proposta.length <= 256, `proposta sem compra com ${proposta.length} chars`);
 });
