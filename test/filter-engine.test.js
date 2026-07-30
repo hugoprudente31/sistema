@@ -3,10 +3,10 @@ const assert = require('node:assert/strict');
 const { filterAppointments } = require('../public/filter-engine');
 
 const rows = [
-  { ID: 1, NomeCompleto: 'José Silva', Loja: 'Óticas TGT Enseada', DataAgendamento: '2026-06-19', StatusAgenda: 'Agendado', StatusOS: '', AgendadoPorEmail: 'vendedor@tgt.com' },
-  { ID: 2, NomeCompleto: 'Maria Souza', Loja: 'Óticas TGT Enseada', DataAgendamento: '2026-06-10', StatusAgenda: 'Concluído', NumeroOS: 'OS-2', StatusOS: 'Em produção', AgendadoPorEmail: 'vendedor@tgt.com' },
-  { ID: 3, NomeCompleto: 'Carlos Lima', Loja: 'Óticas TGT - Gonzaga', DataAgendamento: '2026-01-10', StatusAgenda: 'Cancelado', NumeroOS: 'OS-3', StatusOS: 'Cancelado', AgendadoPorEmail: 'outro@tgt.com' },
-  { ID: 4, NomeCompleto: 'Atendimento Futuro', Loja: 'Óticas TGT Enseada', DataAgendamento: '2026-07-01', StatusAgenda: 'Confirmado', AgendadoPorEmail: 'outro@tgt.com' }
+  { ID: 1, NomeCompleto: 'José Silva', Loja: 'Óticas TGT Enseada', DataAgendamento: '2026-06-19', StatusAgenda: 'Agendado', StatusOS: '', AgendadoPorEmail: 'vendedor@tgt.com', Estagio: 'Agendado' },
+  { ID: 2, NomeCompleto: 'Maria Souza', Loja: 'Óticas TGT Enseada', DataAgendamento: '2026-06-10', StatusAgenda: 'Concluído', NumeroOS: 'OS-2', StatusOS: 'Em produção', AgendadoPorEmail: 'vendedor@tgt.com', Estagio: 'Vendido' },
+  { ID: 3, NomeCompleto: 'Carlos Lima', Loja: 'Óticas TGT - Gonzaga', DataAgendamento: '2026-01-10', StatusAgenda: 'Cancelado', NumeroOS: 'OS-3', StatusOS: 'Cancelado', AgendadoPorEmail: 'outro@tgt.com', Estagio: 'Perdido' },
+  { ID: 4, NomeCompleto: 'Atendimento Futuro', Loja: 'Óticas TGT Enseada', DataAgendamento: '2026-07-01', StatusAgenda: 'Confirmado', AgendadoPorEmail: 'outro@tgt.com', Estagio: 'Bot Ativo' }
 ];
 const user = { nome: 'Vendedor', email: 'vendedor@tgt.com' };
 
@@ -28,4 +28,10 @@ test('combina loja, status, cliente e datas com normalização', () => {
 test('meus serviços e minhas OS ativas respeitam usuário e status', () => {
   assert.deepEqual(filterAppointments(rows, { meus: 'true' }, user, '2026-06-19').map((r) => r.ID), [1, 2]);
   assert.deepEqual(filterAppointments(rows, { minhasOSAtivas: 'true' }, user, '2026-06-19').map((r) => r.ID), [2]);
+});
+
+test('filtro de etapa do lead usa igualdade normalizada, não substring', () => {
+  assert.deepEqual(filterAppointments(rows, { estagio: 'Vendido' }, user, '2026-06-19').map((r) => r.ID), [2]);
+  assert.deepEqual(filterAppointments(rows, { estagio: 'bot ativo' }, user, '2026-06-19').map((r) => r.ID), [4]);
+  assert.equal(filterAppointments(rows, { estagio: 'Agendado' }, user, '2026-06-19').length, 1);
 });

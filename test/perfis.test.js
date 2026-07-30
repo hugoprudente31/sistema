@@ -1039,7 +1039,7 @@ test('optometrista: as três escolhas gravam um único resultado e campos compat
 
 test('gerente visualiza o resultado do optometrista, mas não pode registrá-lo', async function() {
   const restoreView = withQuery({
-    'SELECT * FROM agendamentos WHERE': { rows: [ag(E, { resultado_optometrista: 'Patologia' })] }
+    'FROM agendamentos a': { rows: [ag(E, { resultado_optometrista: 'Patologia' })] }
   });
   try {
     const view = await fetch(baseUrl + '/api/agendamentos', { headers: H(tok('gerente de loja', E)) });
@@ -1059,7 +1059,7 @@ test('gerente visualiza o resultado do optometrista, mas não pode registrá-lo'
 
 test('gerente da loja visualiza patologia, mas não pode registrá-la', async function() {
   const restoreView = withQuery({
-    'SELECT * FROM agendamentos WHERE': { rows: [ag(E, { patologia: 'Sim' })] }
+    'FROM agendamentos a': { rows: [ag(E, { patologia: 'Sim' })] }
   });
   try {
     const view = await fetch(baseUrl + '/api/agendamentos', { headers: H(tok('gerente de loja', E)) });

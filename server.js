@@ -2941,16 +2941,16 @@ app.get("/api/agendamentos", async (req, res) => {
   try {
     const q = req.query;
     const params = [];
-    const conditions = ["excluido_em IS NULL"];
+    const conditions = ["a.excluido_em IS NULL"];
 
     // Loja: session-enforced for store-scoped roles; query param only for admin/central
     if (!canViewAllStores(req.session)) {
       if (!req.session.loja) return res.json({ ok: true, total: 0, agendamentos: [] });
       params.push(req.session.loja);
-      conditions.push(storeSql("loja", `$${params.length}`));
+      conditions.push(storeSql("a.loja", `$${params.length}`));
     } else if (q.loja) {
       params.push(q.loja);
-      conditions.push(storeSql("loja", `$${params.length}`));
+      conditions.push(storeSql("a.loja", `$${params.length}`));
     }
 
     // Date range — push to SQL so records beyond LIMIT are reachable
@@ -2966,18 +2966,27 @@ app.get("/api/agendamentos", async (req, res) => {
       dataAte = hoje;
     }
 
-    if (dataDe) { params.push(dataDe); conditions.push(`data_agendamento >= $${params.length}`); }
-    if (dataAte) { params.push(dataAte); conditions.push(`data_agendamento <= $${params.length}`); }
+    if (dataDe) { params.push(dataDe); conditions.push(`a.data_agendamento >= $${params.length}`); }
+    if (dataAte) { params.push(dataAte); conditions.push(`a.data_agendamento <= $${params.length}`); }
 
-    if (q.status) { params.push(q.status); conditions.push(`LOWER(COALESCE(status,'')) = LOWER($${params.length})`); }
-    if (q.statusOS) { params.push(q.statusOS); conditions.push(`LOWER(COALESCE(status_os,'')) = LOWER($${params.length})`); }
+    if (q.status) { params.push(q.status); conditions.push(`LOWER(COALESCE(a.status,'')) = LOWER($${params.length})`); }
+    if (q.statusOS) { params.push(q.statusOS); conditions.push(`LOWER(COALESCE(a.status_os,'')) = LOWER($${params.length})`); }
+    // Etapa do lead (Novo Lead/Bot Ativo/Atendimento Humano/Agendado/Compareceu/
+    // Vendido/Perdido) — mesmo cálculo usado no CRM Kanban (CRM_ESTAGIO_CASE_SQL,
+    // definido mais abaixo no arquivo; seguro referenciar aqui porque o módulo
+    // inteiro já terminou de carregar antes de qualquer requisição chegar).
+    if (q.estagio) { params.push(q.estagio); conditions.push(`(${CRM_ESTAGIO_CASE_SQL}) = $${params.length}`); }
 
     // Sem filtro de data: LIMIT 1000 (carga inicial rápida). Com filtro: até 5000.
     const temFiltroData = !!(dataDe || dataAte);
     const limite = Math.min(Number(q.limit || 0) || (temFiltroData ? 5000 : 1000), 5000);
 
     const result = await pool.query(
-      `SELECT * FROM agendamentos WHERE ${conditions.join(" AND ")} ORDER BY id DESC LIMIT ${limite}`,
+      `SELECT a.*, (${CRM_ESTAGIO_CASE_SQL}) AS estagio
+         FROM agendamentos a
+         LEFT JOIN kommo_bot_states s ON s.lead_id = a.kommo_lead_id
+        WHERE ${conditions.join(" AND ")}
+        ORDER BY a.id DESC LIMIT ${limite}`,
       params
     );
     res.json({ ok: true, total: result.rows.length, agendamentos: result.rows });
@@ -5424,6 +5433,8 @@ app.get("/api/admin/dashboard-executivo", requireAdmin, async (req, res) => {
 // conversa real"), com o agendamento mais recente daquele lead via LATERAL.
 // ===============================
 
+// Também usado por GET /api/agendamentos (mais acima no arquivo) para expor
+// e filtrar a etapa do lead na tela de agendamentos, não só aqui no Kanban.
 const CRM_ESTAGIO_CASE_SQL = `CASE
   WHEN a.venda_gerada = 'sim' OR COALESCE(a.valor_venda,0) > 0 THEN 'Vendido'
   WHEN LOWER(COALESCE(a.compareceu,'')) IN ('não','nao','não compareceu','nao compareceu')

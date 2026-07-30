@@ -503,6 +503,7 @@
           <div><label>Data final</label><input id="filtroDataAte" type="date" onchange="recarregarComFiltros()"></div>
           <div><label>Status agendamento</label><select id="filtroStatus" onchange="recarregarComFiltros()"><option value="">Todos</option><option>Agendado</option><option>Confirmado</option><option>Compareceu</option><option>Não Compareceu</option><option>OS em Andamento</option><option>Concluído</option><option>Cancelado</option></select></div>
           <div><label>Status OS</label><select id="filtroStatusOS" onchange="recarregarComFiltros()"><option value="">Todos</option><option>Aberta</option><option>Em produção</option><option>Recebida</option><option>Pronta</option><option>Entregue</option><option>Concluído</option><option>Cancelada</option><option>Cancelado</option><option>Reembolso</option></select></div>
+          <div><label>Etapa do lead</label><select id="filtroEstagio" onchange="recarregarComFiltros()"><option value="">Todas</option><option>Novo Lead</option><option>Bot Ativo</option><option>Atendimento Humano</option><option>Agendado</option><option>Compareceu</option><option>Vendido</option><option>Perdido</option></select></div>
         </div>
         <div class="row-4">
           <div><label>Cliente</label><input id="filtroCliente" type="text" oninput="debouncedReload()" placeholder="Nome, WhatsApp ou e-mail"></div>
@@ -1174,6 +1175,7 @@ function mapAgendamentoDb(r) {
     VendedorNome: r.vendedor_nome || '',
     VendedorConsultorId: r.vendedor_consultor_id || '',
     KommoLeadId: r.kommo_lead_id || '',
+    Estagio: r.estagio || '',
     AgendadoPorNome: r.agendado_por_nome || r.proprietario_nome || r.responsavel || '',
     AgendadoPorEmail: r.agendado_por_email || r.criado_por_email || '',
     UltimaAlteracaoPorNome: r.ultima_alteracao_por_nome || '',
@@ -2082,6 +2084,7 @@ function coletarFiltros() {
     dataAte: byId('filtroDataAte').value.trim(),
     status: byId('filtroStatus').value.trim(),
     statusOS: byId('filtroStatusOS').value.trim(),
+    estagio: byId('filtroEstagio').value.trim(),
     cliente: byId('filtroCliente').value.trim(),
     loja: byId('filtroLoja').value.trim(),
     optometrista: byId('filtroOptometrista').value.trim(),
@@ -2121,7 +2124,7 @@ function coletarFiltros() {
 }
 
 function limparFiltros() {
-  ['filtroDataDe', 'filtroDataAte', 'filtroCliente', 'filtroOptometrista', 'filtroVendedor', 'filtroOwner', 'filtroOrigem', 'filtroStatus', 'filtroStatusOS', 'filtroAccessTag', 'filtroPeriodoDias'].forEach(function(id) {
+  ['filtroDataDe', 'filtroDataAte', 'filtroCliente', 'filtroOptometrista', 'filtroVendedor', 'filtroOwner', 'filtroOrigem', 'filtroStatus', 'filtroStatusOS', 'filtroEstagio', 'filtroAccessTag', 'filtroPeriodoDias'].forEach(function(id) {
     if (byId(id)) byId(id).value = '';
   });
   document.querySelectorAll('#filtroResultadoGroup .filtro-btn.ativo').forEach(function(b) { b.classList.remove('ativo'); });
@@ -2632,7 +2635,7 @@ function renderAgenda(rowsParam) {
       '<td>' + escapeHtml(agendadoPor) + '</td>' +
       '<td>' + escapeHtml(ultimaAlt) + ultimaAltData + '</td>' +
       '<td>' + escapeHtml(formatDateBR(r.DataAgendamentoBR || r.DataAgendamento || '')) + '<br>' + escapeHtml(r.Horario || '') + '</td>' +
-      '<td><span class="status ' + statusClassAgendamento(r) + '">' + escapeHtml(r.StatusAgenda) + '</span>' + (r.AtendimentoSemaforoLabel ? '<div style="margin-top:6px;"><span class="status ' + statusClassAtendimentoSemaforo(r) + '">' + escapeHtml(r.AtendimentoSemaforoLabel) + '</span></div>' : '') + '</td>' +
+      '<td><span class="status ' + statusClassAgendamento(r) + '">' + escapeHtml(r.StatusAgenda) + '</span>' + (r.AtendimentoSemaforoLabel ? '<div style="margin-top:6px;"><span class="status ' + statusClassAtendimentoSemaforo(r) + '">' + escapeHtml(r.AtendimentoSemaforoLabel) + '</span></div>' : '') + (r.Estagio ? '<div style="margin-top:6px;"><span class="pill" title="Etapa do lead">' + escapeHtml(r.Estagio) + '</span></div>' : '') + '</td>' +
       '<td>' + escapeHtml(r.Compareceu || 'Pendente') + '</td>' +
       '<td><strong>' + escapeHtml(r.ResultadoOptometrista || 'Pendente') + '</strong></td>' +
       '<td>' + escapeHtml(r.NumeroOS || '') + '</td>' +
