@@ -1008,7 +1008,7 @@ var state = {
 };
 
 document.addEventListener('DOMContentLoaded', function() {
-  applyDefaultDateWindow90Dias(false);
+  aplicarFiltroDataHoje(false);
   fetch('/api/public/aparencia').then(function(r){return r.json();}).then(function(res){aplicarAparencia(res.aparencia);}).catch(function(){});
 });
 
@@ -1028,15 +1028,32 @@ function nomeConsultorLogado() {
   return idx > -1 ? nome.slice(0, idx).trim() : nome;
 }
 
+// Contas de vendedor/consultor compartilhadas por loja (ex.: login "Consultor
+// de Vendas - Enseada", usado por quem estiver na loja no dia) têm o CARGO no
+// lugar do nome — nomeConsultorLogado() devolveria só "Consultor de Vendas"
+// pra essas, que não é nome de pessoa nenhuma. O texto deste campo alimenta
+// direto o ID em vendedores_consultores (trigger vincular_vendedor_consultor_tgt),
+// então um valor genérico aqui criaria uma identidade falsa vinculada a vários
+// vendedores diferentes ao mesmo tempo.
+var CARGOS_GENERICOS_TGT = [
+  'admin', 'administrador', 'super admin', 'atendimento central',
+  'gerente de loja', 'comprador', 'consultor de vendas', 'vendedor',
+  'optometrista', 'outros'
+];
+function pareceNomeDeCargoGenerico(nome) {
+  return CARGOS_GENERICOS_TGT.indexOf(normalizeKey(nome)) > -1;
+}
+
 // Identifica automaticamente o consultor/vendedor logado no campo da OS (permanece editável,
-// para cobrir o caso de outro colega estar atendendo). Sem match, o campo fica livre como antes.
+// para cobrir o caso de outro colega estar atendendo, ou de uma conta compartilhada onde o
+// nome da conta não é o nome de quem está atendendo agora). Sem match, o campo fica livre como antes.
 function preencherConsultorSessao() {
   var el = byId('consultorVendedor');
   if (!el) return;
   var role = roleName();
   if (role !== 'consultor de vendas' && role !== 'vendedor') return;
   var nome = nomeConsultorLogado();
-  if (nome) el.value = nome;
+  if (nome && !pareceNomeDeCargoGenerico(nome)) el.value = nome;
 }
 
 function gas(fnName) {
@@ -2156,9 +2173,10 @@ function coletarFiltros() {
 }
 
 function limparFiltros() {
-  ['filtroDataDe', 'filtroDataAte', 'filtroCliente', 'filtroOptometrista', 'filtroVendedor', 'filtroOwner', 'filtroOrigem', 'filtroStatus', 'filtroStatusOS', 'filtroEstagio', 'filtroAccessTag', 'filtroPeriodoDias'].forEach(function(id) {
+  ['filtroCliente', 'filtroOptometrista', 'filtroVendedor', 'filtroOwner', 'filtroOrigem', 'filtroStatus', 'filtroStatusOS', 'filtroEstagio', 'filtroAccessTag', 'filtroPeriodoDias'].forEach(function(id) {
     if (byId(id)) byId(id).value = '';
   });
+  aplicarFiltroDataHoje(true);
   document.querySelectorAll('#filtroResultadoGroup .filtro-btn.ativo').forEach(function(b) { b.classList.remove('ativo'); });
   byId('filtroMinhasOSAtivas').checked = false;
   byId('filtroMeus').checked = false;
@@ -2167,13 +2185,18 @@ function limparFiltros() {
   recarregarComFiltros();
 }
 
-function applyDefaultDateWindow90Dias(force) {
+// Painel sempre abre mostrando o agendamento do dia vigente — sem isso, a
+// lista carrega ordenada por criação (ID desc), não por data marcada, então
+// o agendamento de hoje podia ficar enterrado atrás de registros mais
+// recentemente criados/editados mas marcados para outro dia.
+function aplicarFiltroDataHoje(force) {
   var deEl = byId('filtroDataDe');
   var ateEl = byId('filtroDataAte');
   if (!deEl || !ateEl) return;
   if (force || (!deEl.value && !ateEl.value)) {
-    deEl.value = '';
-    ateEl.value = '';
+    var hoje = hojeBrasil();
+    deEl.value = hoje;
+    ateEl.value = hoje;
   }
 }
 
