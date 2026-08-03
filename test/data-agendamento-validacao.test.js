@@ -47,7 +47,7 @@ test('POST /api/agendamentos rejeita data com ano absurdo em vez de gravar crua'
   try {
     const r = await fetch(baseUrl + '/api/agendamentos', {
       method: 'POST', headers: H(tokAdmin()),
-      body: JSON.stringify({ nome: 'Cliente Real', loja: 'Todas', data_agendamento: '72026-07-09', horario: '10:00' })
+      body: JSON.stringify({ nome: 'Cliente Real', loja: 'Todas', data_agendamento: '72026-07-09', horario: '10:00', proprietario_nome: 'Vendedor Teste' })
     });
     assert.equal(r.status, 400);
     assert.match((await r.json()).message, /Data do agendamento inválida/);
@@ -71,7 +71,7 @@ test('POST /api/agendamentos com data normal continua funcionando (sem regressã
   try {
     const r = await fetch(baseUrl + '/api/agendamentos', {
       method: 'POST', headers: H(tokAdmin()),
-      body: JSON.stringify({ nome: 'Cliente Real', loja: 'Todas', data_agendamento: '2026-07-22', horario: '10:00' })
+      body: JSON.stringify({ nome: 'Cliente Real', loja: 'Todas', data_agendamento: '2026-07-22', horario: '10:00', proprietario_nome: 'Vendedor Teste' })
     });
     assert.equal(r.status, 200);
   } finally { pool.connect = originalConnect; pool.query = originalQuery; }

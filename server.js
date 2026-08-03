@@ -2849,6 +2849,21 @@ app.post("/api/agendamentos", async (req, res) => {
     if (!nomeCliente) return res.status(400).json({ ok: false, message: "Nome do cliente é obrigatório." });
     if (nomeCliente.toLowerCase().includes("teste")) return res.status(400).json({ ok: false, message: "Não é permitido cadastrar cliente com nome TESTE." });
 
+    // O painel já bloqueia isso no navegador (campo "Consultor / Vendedor *"),
+    // mas só no cliente — quem chamasse a API direto passava por cima. Sem o
+    // nome real, "Agendado por" no painel mostra só a conta de login (ex.:
+    // "Consultor de Vendas - Enseada", que várias pessoas compartilham na
+    // mesma loja), e ninguém consegue saber quem realmente atendeu. Vale só
+    // para esta rota (formulário do painel) — o agendamento público e o bot
+    // do Kommo criam agendamento sem um humano do time envolvido ainda.
+    const consultorNome = clean(
+      b.proprietario_nome || b.proprietarioNome || b.vendedor_atendeu_nome ||
+      b.vendedorAtendeuNome || b.vendedor_nome || b.vendedorNome || b.consultor_responsavel
+    );
+    if (!consultorNome) {
+      return res.status(400).json({ ok: false, message: "Informe o nome do Consultor / Vendedor responsável." });
+    }
+
     // Sem validar aqui, uma data mal formada vinda do cliente/bot vai direto
     // para a coluna DATE sem checagem nenhuma -- já causou agendamentos
     // gravados com ano 26, 2626, 62026, 72026 em produção (ver toPgDate).

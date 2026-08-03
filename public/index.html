@@ -1176,7 +1176,21 @@ function mapAgendamentoDb(r) {
     VendedorConsultorId: r.vendedor_consultor_id || '',
     KommoLeadId: r.kommo_lead_id || '',
     Estagio: r.estagio || '',
-    AgendadoPorNome: r.agendado_por_nome || r.proprietario_nome || r.responsavel || '',
+    // Contas de vendedor/consultor podem ser compartilhadas por loja (ex.:
+    // "Consultor de Vendas - Enseada" logado por quem estiver na loja no dia),
+    // então o nome da conta sozinho não identifica quem realmente atendeu.
+    // O campo obrigatório "Consultor / Vendedor" no formulário de novo
+    // agendamento grava o nome real em proprietario_nome/vendedor_nome — esse
+    // nome tem prioridade aqui; a conta de login some para "(entre parênteses)"
+    // só quando é diferente do nome real, mantendo o rastro de quem logou.
+    AgendadoPorNome: (function() {
+      var conta = r.agendado_por_nome || '';
+      var real = r.proprietario_nome || r.vendedor_nome || r.responsavel || '';
+      if (real && normalizeKey(real) !== normalizeKey(conta)) {
+        return conta ? real + ' (' + conta + ')' : real;
+      }
+      return conta || real || '';
+    })(),
     AgendadoPorEmail: r.agendado_por_email || r.criado_por_email || '',
     UltimaAlteracaoPorNome: r.ultima_alteracao_por_nome || '',
     UltimaAlteracaoEm: r.ultima_alteracao_em || r.atualizado_em || '',
@@ -2616,6 +2630,12 @@ function rowClassAtendimento(r) {
   return '';
 }
 
+// Etapa do lead (ver CRM_ESTAGIO_CASE_SQL no servidor) que a coluna "Status Ag."
+// NÃO mostra por outro caminho — Agendado/Compareceu/Vendido/Perdido são só o
+// mesmo status/presença/venda já exibidos ali do lado e viravam texto duplicado
+// (ex.: badge "Agendado" duas vezes). Só essas 3 etapas são informação nova.
+var ETAPAS_LEAD_INEDITAS_NO_STATUS = ['Bot Ativo', 'Atendimento Humano', 'Novo Lead'];
+
 function renderAgenda(rowsParam) {
   var rows = Array.isArray(rowsParam) ? rowsParam : (state.agendamentos || []);
   var body = byId('agendaBody');
@@ -2635,7 +2655,7 @@ function renderAgenda(rowsParam) {
       '<td>' + escapeHtml(agendadoPor) + '</td>' +
       '<td>' + escapeHtml(ultimaAlt) + ultimaAltData + '</td>' +
       '<td>' + escapeHtml(formatDateBR(r.DataAgendamentoBR || r.DataAgendamento || '')) + '<br>' + escapeHtml(r.Horario || '') + '</td>' +
-      '<td><span class="status ' + statusClassAgendamento(r) + '">' + escapeHtml(r.StatusAgenda) + '</span>' + (r.AtendimentoSemaforoLabel ? '<div style="margin-top:6px;"><span class="status ' + statusClassAtendimentoSemaforo(r) + '">' + escapeHtml(r.AtendimentoSemaforoLabel) + '</span></div>' : '') + (r.Estagio ? '<div style="margin-top:6px;"><span class="pill" title="Etapa do lead">' + escapeHtml(r.Estagio) + '</span></div>' : '') + '</td>' +
+      '<td><span class="status ' + statusClassAgendamento(r) + '">' + escapeHtml(r.StatusAgenda) + '</span>' + (r.AtendimentoSemaforoLabel ? '<div style="margin-top:6px;"><span class="status ' + statusClassAtendimentoSemaforo(r) + '">' + escapeHtml(r.AtendimentoSemaforoLabel) + '</span></div>' : '') + (ETAPAS_LEAD_INEDITAS_NO_STATUS.indexOf(r.Estagio) > -1 ? '<div style="margin-top:6px;"><span class="pill" title="Etapa do lead">' + escapeHtml(r.Estagio) + '</span></div>' : '') + '</td>' +
       '<td>' + escapeHtml(r.Compareceu || 'Pendente') + '</td>' +
       '<td><strong>' + escapeHtml(r.ResultadoOptometrista || 'Pendente') + '</strong></td>' +
       '<td>' + escapeHtml(r.NumeroOS || '') + '</td>' +

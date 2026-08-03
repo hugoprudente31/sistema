@@ -388,7 +388,7 @@ test("criação de agendamento grava backup com perfil na mesma transação", as
     const response = await fetch(baseUrl + "/api/agendamentos", {
       method: "POST",
       headers: { cookie: `tgt_session=${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ nome: "Cliente Real", loja: "Loja A", data_agendamento: "2026-06-20", horario: "10:00" })
+      body: JSON.stringify({ nome: "Cliente Real", loja: "Loja A", data_agendamento: "2026-06-20", horario: "10:00", proprietario_nome: "Vendedor Teste" })
     });
     assert.equal(response.status, 200);
     assert.equal(queries[0].sql, "BEGIN");
@@ -427,7 +427,7 @@ test("criação de agendamento pelo painel dispara sincronização com o Mailing
     const response = await fetch(baseUrl + "/api/agendamentos", {
       method: "POST",
       headers: { cookie: `tgt_session=${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ nome: "Cliente Mailingboss", email: "cliente@example.com", loja: "Loja A", data_agendamento: "2026-06-20", horario: "10:00" })
+      body: JSON.stringify({ nome: "Cliente Mailingboss", email: "cliente@example.com", loja: "Loja A", data_agendamento: "2026-06-20", horario: "10:00", proprietario_nome: "Vendedor Teste" })
     });
     assert.equal(response.status, 200);
     await new Promise((resolve) => setImmediate(resolve));
@@ -437,6 +437,46 @@ test("criação de agendamento pelo painel dispara sincronização com o Mailing
   } finally {
     pool.connect = originalConnect;
     mailingboss.sincronizarLead = originalSincronizar;
+  }
+});
+
+// Bug real: contas de vendedor/consultor podem ser compartilhadas por loja
+// (ex.: login "Consultor de Vendas - Enseada" usado por quem estiver na loja
+// no dia). Sem o nome real do consultor, o painel não tinha como mostrar quem
+// realmente atendeu — o campo já era obrigatório no navegador, mas a API
+// aceitava a chamada direta sem ele. Vale só para esta rota: o agendamento
+// público e o bot do Kommo criam o registro antes de qualquer humano do time
+// entrar na conversa, então não têm (nem devem ter) esse campo.
+test("POST /api/agendamentos exige o nome do Consultor/Vendedor responsável", async () => {
+  const originalConnect = pool.connect;
+  const client = {
+    query: async (sql) => {
+      if (String(sql).includes("INSERT INTO agendamentos")) {
+        return { rows: [{ id: 200, nome: "Cliente Real", loja: "Loja A", status: "Agendado" }] };
+      }
+      return { rows: [] };
+    },
+    release: () => {}
+  };
+  pool.connect = async () => client;
+  const token = signSession({ id: "1", nome: "Admin", email: "admin@example.com", perfil: "admin", loja: "Todas" });
+  try {
+    const semNome = await fetch(baseUrl + "/api/agendamentos", {
+      method: "POST",
+      headers: { cookie: `tgt_session=${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ nome: "Cliente Real", loja: "Loja A", data_agendamento: "2026-06-20", horario: "10:00" })
+    });
+    assert.equal(semNome.status, 400);
+    assert.match((await semNome.json()).message, /Consultor.*Vendedor/);
+
+    const comNome = await fetch(baseUrl + "/api/agendamentos", {
+      method: "POST",
+      headers: { cookie: `tgt_session=${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ nome: "Cliente Real", loja: "Loja A", data_agendamento: "2026-06-20", horario: "10:00", vendedor_nome: "Beatriz" })
+    });
+    assert.equal(comNome.status, 200);
+  } finally {
+    pool.connect = originalConnect;
   }
 });
 
