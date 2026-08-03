@@ -1028,20 +1028,24 @@ function nomeConsultorLogado() {
   return idx > -1 ? nome.slice(0, idx).trim() : nome;
 }
 
-// Contas de vendedor/consultor compartilhadas por loja (ex.: login "Consultor
-// de Vendas - Enseada", usado por quem estiver na loja no dia) têm o CARGO no
-// lugar do nome — nomeConsultorLogado() devolveria só "Consultor de Vendas"
-// pra essas, que não é nome de pessoa nenhuma. O texto deste campo alimenta
-// direto o ID em vendedores_consultores (trigger vincular_vendedor_consultor_tgt),
-// então um valor genérico aqui criaria uma identidade falsa vinculada a vários
-// vendedores diferentes ao mesmo tempo.
-var CARGOS_GENERICOS_TGT = [
-  'admin', 'administrador', 'super admin', 'atendimento central',
-  'gerente de loja', 'comprador', 'consultor de vendas', 'vendedor',
-  'optometrista', 'outros'
+// Contas de vendedor/consultor compartilhadas por loja têm o CARGO (ou uma
+// variação plural dele) no lugar do nome de uma pessoa — checado nas 4 lojas
+// e NENHUMA das contas de consultor/vendedor hoje tem nome de pessoa real:
+// "Consultor de Vendas - Enseada", "Vendedor - Pitangueiras", mas também
+// "Consultores Target" (Ademar de Barros) e "Consultores Gonzaga/Santos"
+// (Gonzaga) — daí o "contains" em vez de comparar a frase inteira, pra pegar
+// qualquer variação (plural, abreviada, com nome da loja junto) sem precisar
+// cadastrar cada uma à mão. O texto deste campo alimenta direto o ID em
+// vendedores_consultores (trigger vincular_vendedor_consultor_tgt), então um
+// valor genérico aqui criaria uma identidade falsa vinculada a várias pessoas
+// diferentes ao mesmo tempo.
+var PALAVRAS_CARGO_GENERICO_TGT = [
+  'admin', 'administrador', 'atendimento central', 'gerente de loja',
+  'comprador', 'consultor', 'vendedor', 'optometrista', 'outros'
 ];
 function pareceNomeDeCargoGenerico(nome) {
-  return CARGOS_GENERICOS_TGT.indexOf(normalizeKey(nome)) > -1;
+  var n = normalizeKey(nome);
+  return PALAVRAS_CARGO_GENERICO_TGT.some(function(palavra) { return n.indexOf(palavra) > -1; });
 }
 
 // Identifica automaticamente o consultor/vendedor logado no campo da OS (permanece editável,
