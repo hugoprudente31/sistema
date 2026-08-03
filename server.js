@@ -3124,14 +3124,14 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
       }
     }
     if (["consultor de vendas", "vendedor"].includes(roleOf(req.session))) {
-      const blocked = ["valor_venda", "valorVenda", "desconto", "vendedor_nome", "vendedorNome"];
-      if (!isGonzagaSantosStore(req.session.loja)) {
-        blocked.push(
-          "numero_os", "numeroOS", "status_os", "statusOS", "data_abertura_os", "dataAberturaOS",
-          "data_entrada_os", "dataEntradaOS", "data_finalizacao_os", "dataFinalizacaoOS",
-          "data_entrega_os", "dataEntregaOS"
-        );
-      }
+      // Gonzaga/Santos tem controle total da OS (inclusive valor/desconto/vendedor);
+      // as demais lojas seguem restritas a dados cadastrais, sem OS nem financeiro.
+      const blocked = isGonzagaSantosStore(req.session.loja) ? [] : [
+        "valor_venda", "valorVenda", "desconto", "vendedor_nome", "vendedorNome",
+        "numero_os", "numeroOS", "status_os", "statusOS", "data_abertura_os", "dataAberturaOS",
+        "data_entrada_os", "dataEntradaOS", "data_finalizacao_os", "dataFinalizacaoOS",
+        "data_entrega_os", "dataEntregaOS"
+      ];
       if (blocked.some((key) => Object.prototype.hasOwnProperty.call(b, key))) {
         return res.status(403).json({ ok: false, message: "Este perfil não pode alterar estes dados de OS ou valores financeiros." });
       }

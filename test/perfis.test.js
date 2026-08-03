@@ -836,11 +836,23 @@ test('consultor Gonzaga: PATCH numero_os — 200 (OS liberada)', async function(
   } finally { r1(); r2(); }
 });
 
-test('vendedor Gonzaga: valor_venda continua bloqueado — 403', async function() {
-  const restore = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(G)] } });
+test('vendedor Gonzaga: PATCH valor_venda — 200 (financeiro liberado)', async function() {
+  const r1 = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(G)] } });
+  const r2 = withConnect(ag(G, { valor_venda: 500 }));
   try {
     const r = await fetch(baseUrl + '/api/agendamentos/100', {
       method: 'PATCH', headers: H(tok('vendedor', G)),
+      body: JSON.stringify({ valor_venda: 500 })
+    });
+    assert.equal(r.status, 200);
+  } finally { r1(); r2(); }
+});
+
+test('vendedor fora da Gonzaga: valor_venda continua bloqueado — 403', async function() {
+  const restore = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag('Óticas TGT Enseada')] } });
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('vendedor', 'Óticas TGT Enseada')),
       body: JSON.stringify({ valor_venda: 500 })
     });
     assert.equal(r.status, 403);

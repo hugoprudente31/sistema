@@ -1020,6 +1020,25 @@ function roleName() {
 function canFinance() { return !!(state.user && state.user.permissions && state.user.permissions.canViewFinance); }
 function canManageOS() { return !!(state.user && state.user.permissions && state.user.permissions.canManageOS); }
 
+// usuarios.nome vem provisionado como "Nome Completo - Loja" (ver provision-profile-users.js);
+// aqui só nos interessa o nome, o " - Loja" é ruído para o campo Consultor/Vendedor da OS.
+function nomeConsultorLogado() {
+  var nome = String((state.user && state.user.nome) || '').trim();
+  var idx = nome.indexOf(' - ');
+  return idx > -1 ? nome.slice(0, idx).trim() : nome;
+}
+
+// Identifica automaticamente o consultor/vendedor logado no campo da OS (permanece editável,
+// para cobrir o caso de outro colega estar atendendo). Sem match, o campo fica livre como antes.
+function preencherConsultorSessao() {
+  var el = byId('consultorVendedor');
+  if (!el) return;
+  var role = roleName();
+  if (role !== 'consultor de vendas' && role !== 'vendedor') return;
+  var nome = nomeConsultorLogado();
+  if (nome) el.value = nome;
+}
+
 function gas(fnName) {
   var args = Array.prototype.slice.call(arguments, 1);
 
@@ -1460,9 +1479,8 @@ function fazerLogin() {
       byId('emailUsuario').textContent = 'E-mail: ' + (res.user.email || '');
       byId('lojaUsuario').textContent = 'Loja: ' + ((res.user.loja && res.user.loja !== '') ? res.user.loja : 'Todas');
       byId('versaoServidor').textContent = 'Versão do servidor: ' + (res.serverVersion || '');
-      // consultorVendedor: campo de texto livre preenchido pelo próprio consultor
-
       aplicarPermissoesTela();
+      preencherConsultorSessao();
       byId('passwordLogin').value = '';
       return carregarInfoBase().then(function() {
         if (state.user && state.user.permissions && state.user.permissions.isAdmin) {
@@ -2264,6 +2282,7 @@ function limparFormulario(clearMsg) {
     byId('optometrista').innerHTML = '<option value="">Selecione a loja primeiro</option>';
   }
   if (clearMsg) setMsg('msgForm', '', '');
+  preencherConsultorSessao();
 }
 
 function abrirModalEdicao(id) {
@@ -2315,7 +2334,8 @@ function aplicarPermissoesModal() {
   main.concat(os).forEach(function(id) { byId(id).disabled = false; });
 
   // Consultor/vendedor: só pode editar dados principais, NÃO pode editar OS e financeiro
-  if (['consultor de vendas', 'vendedor', 'outros'].indexOf(role) > -1) {
+  // — exceto Gonzaga/Santos (canManageOS), que tem controle total da OS.
+  if (['consultor de vendas', 'vendedor', 'outros'].indexOf(role) > -1 && !canManageOS()) {
     os.forEach(function(id) { byId(id).disabled = true; });
   }
 
@@ -2335,8 +2355,8 @@ function aplicarPermissoesModal() {
   // Atendimento central não registra presença; essa correção é feita pela loja.
   if (role === 'atendimento central') byId('editCompareceu').disabled = true;
 
-  // Financeiro só para admin, gerente, comprador
-  if (['admin', 'gerente de loja', 'comprador'].indexOf(role) === -1) {
+  // Financeiro só para admin, gerente, comprador — e consultor/vendedor da Gonzaga (canManageOS)
+  if (['admin', 'gerente de loja', 'comprador'].indexOf(role) === -1 && !canManageOS()) {
     byId('editValorVenda').disabled = true;
     byId('editDesconto').disabled = true;
   }
@@ -4411,14 +4431,15 @@ function executarDedupKommo() {
           var r = role();
           var clone = Object.assign({}, payload);
 
-          // Gonzaga pode preencher dados operacionais da OS; financeiro continua bloqueado.
+          // Gonzaga (canManageOS) tem controle total da OS, inclusive financeiro;
+          // as demais lojas seguem bloqueadas em ambos.
           if (r === 'consultor de vendas' || r === 'vendedor' || r === 'outros') {
-            var bloqueados = ['ValorVenda','valorVenda','valor_venda','Desconto','desconto','VendedorNome','vendedorNome','vendedor_nome'];
-            if (!canManageOS()) bloqueados = bloqueados.concat([
+            var bloqueados = canManageOS() ? [] : [
+              'ValorVenda','valorVenda','valor_venda','Desconto','desconto','VendedorNome','vendedorNome','vendedor_nome',
               'NumeroOS','numeroOS','numero_os','StatusOS','statusOS','status_os',
               'DataAberturaOS','dataAberturaOS','data_abertura_os','DataEntradaOS','dataEntradaOS','data_entrada_os',
               'DataFinalizacaoOS','dataFinalizacaoOS','data_finalizacao_os','DataEntregaOS','dataEntregaOS','data_entrega_os'
-            ]);
+            ];
             bloqueados.forEach(function(k) { if (Object.prototype.hasOwnProperty.call(clone, k)) delete clone[k]; });
           }
 
