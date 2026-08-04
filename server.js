@@ -2948,6 +2948,19 @@ app.post("/api/agendamentos", async (req, res) => {
       client.release();
     }
   } catch (error) {
+    // Mesma trava de negócio já tratada em /api/public/agendamentos (índice
+    // uniq_agendamento_ativo_slot: não deixa dois agendamentos ativos pro
+    // mesmo optometrista/loja/data/horário) — só que aqui no painel interno
+    // ela nunca tinha sido tratada, então virava um 500 genérico e assustador
+    // em vez de dizer claramente que o horário já está ocupado. Acontece em
+    // qualquer loja, com qualquer perfil, sempre que dois agendamentos
+    // tentam usar o mesmo optometrista no mesmo horário.
+    if (String(error.message || "").includes("uniq_agendamento_ativo_slot")) {
+      return res.status(409).json({
+        ok: false,
+        message: "Esse horário já está ocupado com esse optometrista nessa loja. Escolha outro horário ou optometrista."
+      });
+    }
     res.status(500).json({ ok: false, message: "Erro ao salvar agendamento.", error: error.message });
   }
 });
@@ -3418,6 +3431,15 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
 
     res.json({ ok: true, agendamento: result.rows[0] });
   } catch (error) {
+    // Mesma trava de uniq_agendamento_ativo_slot do POST de criação — reagendar
+    // pra um horário que já tem outro agendamento ativo com o mesmo optometrista
+    // nessa loja também caía num 500 genérico em vez de avisar claramente.
+    if (String(error.message || "").includes("uniq_agendamento_ativo_slot")) {
+      return res.status(409).json({
+        ok: false,
+        message: "Esse horário já está ocupado com esse optometrista nessa loja. Escolha outro horário ou optometrista."
+      });
+    }
     res.status(500).json({ ok: false, error: error.message });
   }
 });

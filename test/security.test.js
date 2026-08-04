@@ -480,6 +480,82 @@ test("POST /api/agendamentos exige o nome do Consultor/Vendedor responsável", a
   }
 });
 
+// Bug real reportado por Hugo (print do painel): tentar criar um agendamento
+// pro mesmo optometrista/loja/data/horário de outro já ativo virava um 500
+// genérico e assustador ("Erro HTTP 500 em /api/agendamentos"), sem explicar
+// o que realmente aconteceu. A trava (índice uniq_agendamento_ativo_slot) é
+// correta e intencional -- só faltava tratar o erro dela com uma mensagem
+// clara, igual já era feito no agendamento público (POST /api/public/agendamentos).
+test("POST /api/agendamentos avisa com clareza quando o horário já está ocupado (em vez de 500 genérico)", async () => {
+  const originalConnect = pool.connect;
+  const client = {
+    query: async (sql) => {
+      if (String(sql).includes("INSERT INTO agendamentos")) {
+        const erro = new Error(
+          'duplicate key value violates unique constraint "uniq_agendamento_ativo_slot"'
+        );
+        erro.code = "23505";
+        throw erro;
+      }
+      return { rows: [] };
+    },
+    release: () => {}
+  };
+  pool.connect = async () => client;
+  const token = signSession({ id: "1", nome: "Admin", email: "admin@example.com", perfil: "admin", loja: "Todas" });
+  try {
+    const r = await fetch(baseUrl + "/api/agendamentos", {
+      method: "POST",
+      headers: { cookie: `tgt_session=${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        nome: "Paulo Silva", loja: "óticas TGT - Gonzaga", optometrista: "Mariani",
+        data_agendamento: "2026-08-05", horario: "10:00", vendedor_nome: "Cris"
+      })
+    });
+    assert.equal(r.status, 409);
+    const body = await r.json();
+    assert.match(body.message, /já está ocupado/);
+  } finally {
+    pool.connect = originalConnect;
+  }
+});
+
+test("PATCH /api/agendamentos/:id avisa com clareza quando reagendar bate no horário de outro (em vez de 500 genérico)", async () => {
+  const originalConnect = pool.connect;
+  const originalQuery = pool.query;
+  pool.query = async () => ({
+    rows: [{ id: 100, nome: "Cliente Real", loja: "óticas TGT - Gonzaga", optometrista: "Mariani", status: "Agendado" }]
+  });
+  const client = {
+    query: async (sql) => {
+      if (String(sql).includes("UPDATE agendamentos SET")) {
+        const erro = new Error(
+          'duplicate key value violates unique constraint "uniq_agendamento_ativo_slot"'
+        );
+        erro.code = "23505";
+        throw erro;
+      }
+      return { rows: [] };
+    },
+    release: () => {}
+  };
+  pool.connect = async () => client;
+  const token = signSession({ id: "1", nome: "Admin", email: "admin@example.com", perfil: "admin", loja: "Todas" });
+  try {
+    const r = await fetch(baseUrl + "/api/agendamentos/100", {
+      method: "PATCH",
+      headers: { cookie: `tgt_session=${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ data_agendamento: "2026-08-05", horario: "10:00" })
+    });
+    assert.equal(r.status, 409);
+    const body = await r.json();
+    assert.match(body.message, /já está ocupado/);
+  } finally {
+    pool.connect = originalConnect;
+    pool.query = originalQuery;
+  }
+});
+
 test("alteração guarda versões anterior e nova com o perfil responsável", async () => {
   const originalConnect = pool.connect;
   const originalQuery = pool.query;

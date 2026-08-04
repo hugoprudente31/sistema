@@ -1094,8 +1094,14 @@ function apiGet(url) {
     credentials: 'same-origin',
     headers: { 'Accept': 'application/json', 'Cache-Control': 'no-cache' }
   }).then(function(r) {
-    if (!r.ok) throw new Error('Erro HTTP ' + r.status + ' em ' + url);
-    return r.json();
+    // Erro real (400/403/409/500...) tem corpo JSON com a mensagem certa
+    // (ex.: "Esse horário já está ocupado...") — jogar fora antes de ler
+    // fazia todo mundo ver só "Erro HTTP 500 em /url", sem explicação
+    // nenhuma. Cada chamador já sabe extrair res.message/res.ok sozinho;
+    // só cai no genérico se a resposta nem for JSON de verdade.
+    return r.json().catch(function() {
+      throw new Error('Erro HTTP ' + r.status + ' em ' + url);
+    });
   });
 }
 
@@ -1105,8 +1111,12 @@ function apiPost(url, body) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body || {})
   }).then(function(r) {
-    if (!r.ok) throw new Error('Erro HTTP ' + r.status + ' em ' + url);
-    return r.json();
+    // Mesmo motivo do apiGet: não descartar o corpo antes de ler, senão a
+    // mensagem real do servidor (ex.: "Informe o nome do Consultor...",
+    // "Esse horário já está ocupado...") nunca chega no chamador.
+    return r.json().catch(function() {
+      throw new Error('Erro HTTP ' + r.status + ' em ' + url);
+    });
   });
 }
 
