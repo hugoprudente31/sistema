@@ -2165,10 +2165,18 @@ function aplicarFiltroMesAtual(force) {
   }
 }
 
+// Regra de horário comercial existe pra evitar reserva nova em horário
+// impossível (ex.: domingo, meia-noite) — não faz sentido pra registrar
+// retroativamente um atendimento que já aconteceu (ex.: cliente atendido
+// num dia que o consultor não conseguiu lançar na hora e só registra
+// depois). Datas anteriores a hoje ficam livres dessa regra; hoje em
+// diante continua valendo normalmente, pra não deixar passar erro de
+// digitação numa reserva nova de verdade.
 function validarHorarioVisual() {
   var data = byId('dataAgendamento').value || '';
   var horario = byId('horario').value || '';
   if (!data || !horario) return null;
+  if (data < hojeBrasil()) return null;
   var d = new Date(data + 'T12:00:00');
   var day = d.getDay();
   var parts = horario.split(':').map(Number);
