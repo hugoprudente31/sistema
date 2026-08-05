@@ -5029,30 +5029,64 @@ app.get("/api/admin/kommo/bot-states", requireSuperAdmin, async (req, res) => {
   }
 });
 
-// ── GET /api/admin/kommo/pipelines ────────────────────────────────────────────
-// Retorna todos os pipelines do Kommo com seus estágios atuais
-// Diagnóstico: mostra os valores exatos de loja em usuarios e agendamentos
+// ── GET /api/admin/diag/loja-mismatch ─────────────────────────────────────────
+// Auditoria de integridade: nome de loja legado ("Santo Antônio" em vez do
+// oficial "Ademar de Barros") já apareceu em 5 tabelas diferentes nesta
+// mesma sessão de trabalho, sempre achado manualmente. Esta rota varre TODA
+// tabela com coluna de loja de uma vez, comparando cada valor distinto
+// contra o cadastro oficial ativo (tabela `lojas`) com a mesma normalização
+// usada em produção (acento/maiúscula não importam, mas o texto tem que
+// bater). Quando aparecer uma trava nova ou uma tabela nova com coluna de
+// loja, só adicionar em TABELAS_COM_LOJA abaixo.
+const TABELAS_COM_LOJA = [
+  { tabela: "usuarios", flagAtivo: "ativo" },
+  { tabela: "vendedores_consultores", flagAtivo: "ativo" },
+  { tabela: "optometristas", flagAtivo: "ativo" },
+  { tabela: "metas_desempenho", flagAtivo: "ativo" },
+  { tabela: "agendamentos", flagExcluido: "excluido_em" },
+  { tabela: "bloqueios_disponibilidade" },
+  { tabela: "faturamentos" },
+  { tabela: "historico_os" },
+  { tabela: "desempenho_anuncios" },
+  { tabela: "horarios_funcionamento_loja" }
+];
+
 app.get("/api/admin/diag/loja-mismatch", requireSuperAdmin, async (req, res) => {
   try {
-    // Valores distintos de loja em agendamentos
-    const ag = await pool.query(`
-      SELECT COALESCE(loja,'(null)') AS loja, COUNT(*)::int AS total
-      FROM agendamentos WHERE excluido_em IS NULL
-      GROUP BY loja ORDER BY total DESC LIMIT 30
-    `);
-    // Valores de loja dos usuários
-    const us = await pool.query(`
-      SELECT nome, cargo, COALESCE(loja,'(null)') AS loja, ativo
-      FROM usuarios ORDER BY loja, nome LIMIT 100
-    `);
-    // Lojas cadastradas
     const lj = await pool.query(`SELECT nome, ativo FROM lojas ORDER BY nome`);
 
-    // Para cada usuário de loja, verifica quantos agendamentos ele veria
+    const divergencias = [];
+    for (const cfg of TABELAS_COM_LOJA) {
+      const condicoes = [`loja IS NOT NULL`, `loja <> ''`];
+      if (cfg.flagAtivo) condicoes.push(`${cfg.flagAtivo} = true`);
+      if (cfg.flagExcluido) condicoes.push(`${cfg.flagExcluido} IS NULL`);
+      condicoes.push(`NOT EXISTS (
+        SELECT 1 FROM lojas l WHERE l.ativo = true AND
+          TRANSLATE(LOWER(TRIM(l.nome)), 'áàâãäéèêëíìîïóòôõöúùûüç','aaaaaeeeeiiiiooooouuuuc')
+          = TRANSLATE(LOWER(TRIM(${cfg.tabela}.loja)), 'áàâãäéèêëíìîïóòôõöúùûüç','aaaaaeeeeiiiiooooouuuuc')
+      )`);
+      const r = await pool.query(`
+        SELECT loja, COUNT(*)::int AS total
+        FROM ${cfg.tabela}
+        WHERE ${condicoes.join(" AND ")}
+        GROUP BY loja ORDER BY total DESC
+      `);
+      for (const row of r.rows) {
+        divergencias.push({ tabela: cfg.tabela, loja: row.loja, total: row.total });
+      }
+    }
+
+    // Valores de loja dos usuários + simulação de quantos agendamentos cada
+    // um veria com a própria sessão (pega tanto mismatch de nome quanto
+    // usuário legitimamente sem nenhum agendamento na loja ainda).
+    const us = await pool.query(`
+      SELECT nome, cargo, COALESCE(loja,'(null)') AS loja, ativo
+      FROM usuarios WHERE ativo = true ORDER BY loja, nome
+    `);
     const checks = [];
     for (const u of us.rows) {
-      if (['admin','atendimento central'].includes(u.cargo)) continue;
-      if (!u.loja || u.loja === '(null)') continue;
+      if (['admin', 'atendimento central'].includes(u.cargo)) continue;
+      if (!u.loja || u.loja === '(null)') { checks.push({ usuario: u.nome, cargo: u.cargo, loja_session: u.loja, agendamentos_visiveis: null, aviso: "sem loja definida" }); continue; }
       const r = await pool.query(`
         SELECT COUNT(*)::int AS total FROM agendamentos
         WHERE excluido_em IS NULL
@@ -5066,8 +5100,11 @@ app.get("/api/admin/diag/loja-mismatch", requireSuperAdmin, async (req, res) => 
 
     res.json({
       ok: true,
+      resumo: divergencias.length
+        ? `${divergencias.length} valor(es) de loja fora do cadastro oficial, em ${new Set(divergencias.map(d => d.tabela)).size} tabela(s).`
+        : "Nenhuma divergência de loja encontrada em nenhuma tabela.",
       lojas_cadastradas: lj.rows,
-      lojas_em_agendamentos: ag.rows,
+      divergencias,
       usuarios_e_visibilidade: checks
     });
   } catch (e) {
