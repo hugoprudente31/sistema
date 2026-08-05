@@ -885,11 +885,6 @@ function hojeBrasil() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
 }
 
-function boolFromPt(v) {
-  const s = clean(v).toLowerCase();
-  return ["sim", "s", "yes", "true", "1", "ativo", "active"].includes(s);
-}
-
 function numberFromBR(v) {
   if (v === null || v === undefined || v === "") return 0;
   if (typeof v === "number") return Number.isFinite(v) ? v : 0;
@@ -922,25 +917,6 @@ function toPgDate(v) {
     } else {
       const d = new Date(s);
       if (!Number.isNaN(d.getTime())) resultado = d.toISOString().slice(0, 10);
-    }
-  }
-  if (!resultado) return null;
-  return anoRazoavel(Number(resultado.slice(0, 4))) ? resultado : null;
-}
-
-function toPgTimestamp(v) {
-  const s = clean(v);
-  if (!s) return null;
-  let resultado = null;
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
-    resultado = s.replace("T", " ").slice(0, 19);
-  } else {
-    const br = s.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?/);
-    if (br) {
-      resultado = `${br[3]}-${br[2]}-${br[1]} ${br[4] || "00"}:${br[5] || "00"}:${br[6] || "00"}`;
-    } else {
-      const d = new Date(s);
-      if (!Number.isNaN(d.getTime())) resultado = d.toISOString().replace("T", " ").slice(0, 19);
     }
   }
   if (!resultado) return null;
@@ -4260,19 +4236,6 @@ function normalizarTelefoneKommo(phone) {
   // Normaliza 11→10 dígitos (remove o 9 após DDD para unificar duplicatas de WhatsApp Cloud/Lite)
   if (num.length === 11 && num[2] === '9') num = num.slice(0, 2) + num.slice(3);
   return num.length >= 8 ? num : '';
-}
-
-async function obterTodosContatosKommo(kommoClient) {
-  const todos = [];
-  let page = 1;
-  while (true) {
-    const data = await kommoClient.request('GET', `/contacts?limit=250&page=${page}&with=leads`).catch(() => null);
-    const lista = data?._embedded?.contacts || [];
-    todos.push(...lista);
-    if (lista.length < 250 || page >= 20) break;
-    page++;
-  }
-  return todos;
 }
 
 // ── GET /api/admin/kommo/diagnostico ─────────────────────────────────────────
