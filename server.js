@@ -6253,6 +6253,7 @@ module.exports = {
   app,
   pool,
   startServer,
+  initDatabase,
   signSession,
   verifySession,
   requireSession,
