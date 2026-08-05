@@ -478,6 +478,31 @@ function storeSql(column, parameter = "$1") {
   return `TRANSLATE(LOWER(TRIM(COALESCE(${column},''))), 'áàâãäéèêëíìîïóòôõöúùûüç', 'aaaaaeeeeiiiiooooouuuuc') = TRANSLATE(LOWER(TRIM(${parameter})), 'áàâãäéèêëíìîïóòôõöúùûüç', 'aaaaaeeeeiiiiooooouuuuc')`;
 }
 
+// Traduz erros conhecidos de constraint do Postgres em respostas HTTP amigáveis.
+// Antes disso, cada rota que podia bater numa trava do banco duplicava seu
+// próprio `if (error.message.includes("nome_da_constraint"))` -- funcionava,
+// mas era fácil uma rota nova (ou uma trava nova) ficar de fora e vazar um
+// 500 genérico pro usuário (foi exatamente o que aconteceu: a rota pública
+// de agendamento tratava uniq_agendamento_ativo_slot, o painel interno não).
+// Uso: `if (responderErroBanco(res, error)) return;` logo no início do catch,
+// antes do fallback genérico de 500. Casa pelo NOME da constraint
+// (error.constraint, populado pelo driver `pg` em qualquer violação), não
+// pelo texto da mensagem -- mais estável se o Postgres mudar a redação.
+const ERROS_BANCO_CONHECIDOS = {
+  uniq_agendamento_ativo_slot: {
+    status: 409,
+    message: "Esse horário já está ocupado com esse optometrista nessa loja. Escolha outro horário ou optometrista."
+  }
+};
+function responderErroBanco(res, error, mensagensPersonalizadas) {
+  const constraint = error && error.constraint;
+  const info = constraint && ERROS_BANCO_CONHECIDOS[constraint];
+  if (!info) return false;
+  const mensagem = (mensagensPersonalizadas && mensagensPersonalizadas[constraint]) || info.message;
+  res.status(info.status).json({ ok: false, message: mensagem });
+  return true;
+}
+
 function buildPermissions(user) {
   const storedRole = clean(user?.cargo || user?.perfil).toLowerCase();
   const superAdmin = isHugoAccount(user);
@@ -2817,12 +2842,9 @@ app.post("/api/public/agendamentos", validarLandingApiKey, async (req, res) => {
   } catch (error) {
     await client.query("ROLLBACK").catch(() => null);
 
-    if (String(error.message || "").includes("uniq_agendamento_ativo_slot")) {
-      return res.status(409).json({
-        ok: false,
-        message: "Esse horário acabou de ser reservado. Escolha outro horário."
-      });
-    }
+    if (responderErroBanco(res, error, {
+      uniq_agendamento_ativo_slot: "Esse horário acabou de ser reservado. Escolha outro horário."
+    })) return;
 
     console.error("Erro em /api/public/agendamentos:", error);
 
@@ -2948,19 +2970,7 @@ app.post("/api/agendamentos", async (req, res) => {
       client.release();
     }
   } catch (error) {
-    // Mesma trava de negócio já tratada em /api/public/agendamentos (índice
-    // uniq_agendamento_ativo_slot: não deixa dois agendamentos ativos pro
-    // mesmo optometrista/loja/data/horário) — só que aqui no painel interno
-    // ela nunca tinha sido tratada, então virava um 500 genérico e assustador
-    // em vez de dizer claramente que o horário já está ocupado. Acontece em
-    // qualquer loja, com qualquer perfil, sempre que dois agendamentos
-    // tentam usar o mesmo optometrista no mesmo horário.
-    if (String(error.message || "").includes("uniq_agendamento_ativo_slot")) {
-      return res.status(409).json({
-        ok: false,
-        message: "Esse horário já está ocupado com esse optometrista nessa loja. Escolha outro horário ou optometrista."
-      });
-    }
+    if (responderErroBanco(res, error)) return;
     res.status(500).json({ ok: false, message: "Erro ao salvar agendamento.", error: error.message });
   }
 });
@@ -3431,15 +3441,7 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
 
     res.json({ ok: true, agendamento: result.rows[0] });
   } catch (error) {
-    // Mesma trava de uniq_agendamento_ativo_slot do POST de criação — reagendar
-    // pra um horário que já tem outro agendamento ativo com o mesmo optometrista
-    // nessa loja também caía num 500 genérico em vez de avisar claramente.
-    if (String(error.message || "").includes("uniq_agendamento_ativo_slot")) {
-      return res.status(409).json({
-        ok: false,
-        message: "Esse horário já está ocupado com esse optometrista nessa loja. Escolha outro horário ou optometrista."
-      });
-    }
+    if (responderErroBanco(res, error)) return;
     res.status(500).json({ ok: false, error: error.message });
   }
 });

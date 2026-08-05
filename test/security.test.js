@@ -495,6 +495,7 @@ test("POST /api/agendamentos avisa com clareza quando o horário já está ocupa
           'duplicate key value violates unique constraint "uniq_agendamento_ativo_slot"'
         );
         erro.code = "23505";
+        erro.constraint = "uniq_agendamento_ativo_slot";
         throw erro;
       }
       return { rows: [] };
@@ -533,6 +534,7 @@ test("PATCH /api/agendamentos/:id avisa com clareza quando reagendar bate no hor
           'duplicate key value violates unique constraint "uniq_agendamento_ativo_slot"'
         );
         erro.code = "23505";
+        erro.constraint = "uniq_agendamento_ativo_slot";
         throw erro;
       }
       return { rows: [] };
