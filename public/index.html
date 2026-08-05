@@ -1008,7 +1008,7 @@ var state = {
 };
 
 document.addEventListener('DOMContentLoaded', function() {
-  aplicarFiltroDataHoje(false);
+  aplicarFiltroMesAtual(false);
   fetch('/api/public/aparencia').then(function(r){return r.json();}).then(function(res){aplicarAparencia(res.aparencia);}).catch(function(){});
 });
 
@@ -2190,7 +2190,7 @@ function limparFiltros() {
   ['filtroCliente', 'filtroOptometrista', 'filtroVendedor', 'filtroOwner', 'filtroOrigem', 'filtroStatus', 'filtroStatusOS', 'filtroEstagio', 'filtroAccessTag', 'filtroPeriodoDias'].forEach(function(id) {
     if (byId(id)) byId(id).value = '';
   });
-  aplicarFiltroDataHoje(true);
+  aplicarFiltroMesAtual(true);
   document.querySelectorAll('#filtroResultadoGroup .filtro-btn.ativo').forEach(function(b) { b.classList.remove('ativo'); });
   byId('filtroMinhasOSAtivas').checked = false;
   byId('filtroMeus').checked = false;
@@ -2199,18 +2199,23 @@ function limparFiltros() {
   recarregarComFiltros();
 }
 
-// Painel sempre abre mostrando o agendamento do dia vigente — sem isso, a
-// lista carrega ordenada por criação (ID desc), não por data marcada, então
-// o agendamento de hoje podia ficar enterrado atrás de registros mais
-// recentemente criados/editados mas marcados para outro dia.
-function aplicarFiltroDataHoje(force) {
+// Painel sempre abre mostrando o mês vigente inteiro — sem isso, a lista
+// carrega ordenada por criação (ID desc), não por data marcada, então um
+// agendamento deste mês podia ficar enterrado atrás de registros mais
+// recentemente criados/editados mas marcados para outro dia. Primeira
+// versão disso mostrava só o dia de hoje, mas escondia o resto do mês
+// (ex.: 24 agendamentos no mês, só 5 apareciam) — trocado pra mês inteiro.
+function aplicarFiltroMesAtual(force) {
   var deEl = byId('filtroDataDe');
   var ateEl = byId('filtroDataAte');
   if (!deEl || !ateEl) return;
   if (force || (!deEl.value && !ateEl.value)) {
     var hoje = hojeBrasil();
-    deEl.value = hoje;
-    ateEl.value = hoje;
+    var ano = Number(hoje.slice(0, 4));
+    var mes = Number(hoje.slice(5, 7));
+    var ultimoDia = new Date(ano, mes, 0).getDate();
+    deEl.value = hoje.slice(0, 7) + '-01';
+    ateEl.value = hoje.slice(0, 7) + '-' + String(ultimoDia).padStart(2, '0');
   }
 }
 
