@@ -39,15 +39,6 @@ test("rotas internas rejeitam acesso anônimo", async () => {
   }
 });
 
-test("proxy GAS rejeita acesso anônimo", async () => {
-  const response = await fetch(baseUrl + "/api/gas", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ fn: "getUsuarios", args: [] })
-  });
-  assert.equal(response.status, 401);
-});
-
 test("health do Salesbot e Kommo ficam disponiveis sem sessao", async () => {
   const salesbot = await fetch(baseUrl + "/api/salesbot/health");
   assert.equal(salesbot.status, 200);
@@ -160,24 +151,6 @@ test("usuário comum não acessa administração ou financeiro", async () => {
   // vendedor NÃO acessa financeiro
   const finance = await fetch(baseUrl + "/api/faturamentos", { headers });
   assert.equal(finance.status, 403);
-});
-
-test("proxy GAS aplica whitelist por perfil", async () => {
-  const token = signSession({
-    id: "2",
-    email: "vendedor@example.com",
-    perfil: "vendedor",
-    loja: "Loja A"
-  });
-  const response = await fetch(baseUrl + "/api/gas", {
-    method: "POST",
-    headers: {
-      cookie: `tgt_session=${token}`,
-      "content-type": "application/json"
-    },
-    body: JSON.stringify({ fn: "atualizarPlanilhaSistemaCompleto", args: [] })
-  });
-  assert.equal(response.status, 403);
 });
 
 test("marketing performance requires a key and returns aggregates only", async () => {

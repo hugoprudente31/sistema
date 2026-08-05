@@ -1,138 +1,144 @@
 # Sistema de Agendamento — Óticas Target
 
-Sistema multiloja de agendamentos e gestão de OS.  
-**Stack:** Node.js + Express → proxy para Google Apps Script (GAS)
+Sistema multiloja de agendamento de avaliação visual e gestão de OS
+(ordem de serviço), usado pelas 4 lojas do grupo (Gonzaga, Enseada,
+Pitangueiras, Ademar de Barros).
+
+**Stack:** Node.js + Express (monólito, `server.js`) servindo um
+front-end em HTML/JS puro (`public/index.html`, sem build step) e um
+Postgres como fonte de verdade de todo o dado do sistema. Integração
+com o Kommo CRM (bot de WhatsApp, lembretes automáticos, recuperação de
+leads frios) e com outros apps do ecossistema (AdAnalyzer, captação de
+leads) via chaves de API compartilhadas.
 
 ---
 
 ## Estrutura do Projeto
 
 ```
-agendamento-system/
-├── server.js              # Express: serve frontend + proxy para GAS
+github-sistema/
+├── server.js               # Express: rotas da API + serve o front-end
 ├── package.json
-├── railway.toml           # Deploy Railway
-├── .env.example           # Variáveis de ambiente (copie para .env)
-├── .gitignore
-├── GAS_API_PATCH.js       # Patch a aplicar no código.gs (GAS)
+├── railway.toml             # Deploy Railway
+├── env.example               # Variáveis de ambiente (copie para .env)
+├── kommo/                    # Bot de WhatsApp, webhooks, lembretes, recuperação
+├── database/                  # Referência do schema (fonte real é initDatabase() em server.js)
+├── test/                       # Testes automatizados (mockados, rápidos, sem rede)
+├── test/integration/            # Testes de integração — Postgres real, opt-in
 └── public/
-    └── index.html         # Frontend completo (mesmas cores e efeitos)
+    └── index.html                # Painel completo (SPA sem framework)
 ```
 
 ---
 
-## Setup Local (VS Code)
+## Setup Local
 
 ### 1. Clonar e instalar dependências
 
 ```bash
-git clone https://github.com/SEU_USUARIO/agendamento-system.git
-cd agendamento-system
+git clone https://github.com/hugoprudente31/sistema.git
+cd sistema
 npm install
 ```
 
 ### 2. Configurar variáveis de ambiente
 
 ```bash
-cp .env.example .env
+cp env.example .env
 ```
 
-Edite o `.env`:
-```
-GAS_DEPLOY_URL=https://script.google.com/macros/s/AKfycb.../exec
-GAS_API_KEY=uma-chave-secreta-forte-aqui
-SESSION_SECRET=um-segredo-aleatorio-diferente-com-32-ou-mais-caracteres
-SESSION_TTL_HOURS=12
-```
+Preencha pelo menos `SESSION_SECRET` e um `DATABASE_URL` apontando pra
+um Postgres (local ou o mesmo do Railway). Veja `env.example` pra lista
+completa — Kommo, criptografia de segredos do painel e chaves dos apps
+integrados (AdAnalyzer, captação de leads) são opcionais pra rodar
+localmente.
 
-### 3. Aplicar patch no Google Apps Script
-
-Abra `GAS_API_PATCH.js` e siga as instruções dentro do arquivo:
-- Adicione o bloco `formato === 'api'` dentro de `doGet`
-- Cole a função `handleHttpApiCall_` ao final do `código.gs`
-- Configure a chave no GAS:
-  ```js
-  PropertiesService.getScriptProperties()
-    .setProperty('API_KEY', 'mesma-chave-do-env');
-  ```
-- Re-publique o deploy do GAS (nova versão)
-
-### 4. Rodar localmente
+### 3. Rodar localmente
 
 ```bash
 npm run dev    # com hot-reload (nodemon)
 # ou
-npm start      # produção
+npm start      # como em produção
 ```
+
+No boot, `initDatabase()` cria/atualiza o schema inteiro no Postgres
+configurado (idempotente — seguro rodar toda vez).
 
 Acesse: **http://localhost:3000**
 
 ---
 
-## Deploy Railway
+## Testes
 
-1. Faça push para o GitHub
-2. Crie um novo projeto no [Railway](https://railway.app)
-3. Conecte ao repositório GitHub
-4. Adicione as variáveis de ambiente no Railway:
-   - `DATABASE_URL` (normalmente fornecida pelo serviço PostgreSQL)
-   - `GAS_DEPLOY_URL`
-   - `GAS_API_KEY`
-   - `SESSION_SECRET`
-   - `SESSION_TTL_HOURS`
-5. O Railway detecta automaticamente o `railway.toml` e faz deploy
+```bash
+npm test                 # suíte principal — mockada, rápida, sem rede (~15s)
+npm run test:integration # contra um Postgres real e isolado — ver detalhes abaixo
+```
+
+`npm test` cobre permissão por perfil/loja, validação de rotas e regras
+de negócio via `pool`/`pool.connect` mockados — não toca em banco real,
+roda em qualquer máquina sem configuração.
+
+`npm run test:integration` roda contra um banco Postgres de verdade
+(cria um banco isolado, `sistema_test`, no mesmo servidor apontado por
+`TEST_DATABASE_URL` — nunca o banco de produção), com o schema real
+criado pela mesma `initDatabase()` usada em produção. Existe pra pegar
+bugs que só aparecem em constraints/triggers reais do banco (ex.:
+tentar marcar dois agendamentos no mesmo horário/optometrista). Só
+roda se `TEST_DATABASE_URL` estiver definida:
+
+```bash
+TEST_DATABASE_URL="postgresql://usuario:senha@host:porta/postgres" npm run test:integration
+```
+
+---
+
+## Deploy (Railway)
+
+1. Push pra `main` no GitHub — o Railway builda e sobe automaticamente.
+2. Serviços do projeto: `sistema` (esta app) + `Postgres`.
+3. Variáveis de ambiente configuradas direto no Railway (mesmas chaves
+   de `env.example`, mais `DATABASE_URL` — injetada automaticamente
+   pelo serviço Postgres).
+4. Produção: https://sistema.oticastgt.com.br
 
 ---
 
 ## Variáveis de Ambiente
 
+Ver `env.example` pra lista completa e comentada. As essenciais pra
+rodar localmente:
+
 | Variável | Descrição | Obrigatório |
 |---|---|---|
-| `PORT` | Porta local (Railway define automaticamente) | Não |
-| `GAS_DEPLOY_URL` | URL de deploy do Apps Script | **Sim** |
-| `GAS_API_KEY` | Chave secreta para autenticar chamadas | **Sim** |
+| `DATABASE_URL` | Connection string do Postgres | **Sim** |
 | `SESSION_SECRET` | Assina cookies de sessão; use valor aleatório com 32+ caracteres | **Sim** |
 | `SESSION_TTL_HOURS` | Duração da sessão; padrão 12 horas | Não |
 | `ALLOWED_ORIGINS` | Origens CORS separadas por vírgula | Não |
+| `KOMMO_*` | Credenciais e configuração do bot/Kommo (ver `env.example`) | Só se for usar o Kommo |
 
-Cada usuário entra com e-mail e senha individual armazenada como hash bcrypt. As rotas internas em `/api/*` exigem cookie de sessão assinado. Somente `/api/auth/login`,
-`/api/auth/logout` e `/api/public/*` ficam fora dessa exigência. Perfis e lojas também são
-validados no servidor; esconder botões no navegador não é tratado como controle de segurança.
-
----
-
-## Como Funciona
-
-```
-Browser → Node.js (Express) → GAS (doGet?format=api)
-         └── /api/gas          └── handleHttpApiCall_
-              POST                  retorna { ok, result }
-         └── /public/index.html
-```
-
-O frontend usa `fetch('/api/gas', { fn, args })` em vez de  
-`google.script.run` — mesma lógica, sem depender do GAS Editor.
+Cada usuário entra com e-mail e senha individual (hash bcrypt). As
+rotas internas em `/api/*` exigem cookie de sessão assinado — só
+`/api/auth/login`, `/api/auth/logout` e `/api/public/*` ficam fora
+dessa exigência. Perfil e loja são sempre validados no servidor;
+esconder botão no navegador não é controle de segurança.
 
 ---
 
-## Patches Aplicados (v7.2.0)
+## Perfis e Permissões
 
-- ✅ Fix crítico: `configurarSegredosKommo` com chaves corretas
-- ✅ Gerente de Loja: `getInfoInicial(email)` filtra owners por loja
-- ✅ Botões **Comprou / Não Comprou** adicionados na tabela
-- ✅ Modal de OS profissional substitui `window.prompt()`
+7 perfis (`admin`, `atendimento central`, `gerente de loja`,
+`comprador`, `consultor de vendas`/`vendedor`, `optometrista`), mais um
+Super Admin exclusivo (identidade fixa, não atribuível pelo painel).
+Cálculo de permissão centralizado em `buildPermissions()` — quem vê
+todas as lojas, quem cria agendamento, quem mexe em OS/financeiro, etc.
+A exceção Gonzaga/Santos (controle total de OS e financeiro pra
+vendedores dessa loja) é intencional e vale só pra ela.
 
 ---
 
-## Desenvolvimento
+## Verificar saúde da API
 
 ```bash
-# Instalar dependências
-npm install
-
-# Rodar em modo dev (reinicia ao salvar)
-npm run dev
-
-# Verificar saúde da API
 curl http://localhost:3000/health
 ```

@@ -1060,30 +1060,6 @@ function preencherConsultorSessao() {
   if (nome && !pareceNomeDeCargoGenerico(nome)) el.value = nome;
 }
 
-function gas(fnName) {
-  var args = Array.prototype.slice.call(arguments, 1);
-
-  function tentativa() {
-    return fetch('/api/gas', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fn: fnName, args: args })
-    })
-    .then(function(r) {
-      if (!r.ok) throw new Error('Erro de rede: HTTP ' + r.status);
-      return r.json();
-    })
-    .then(function(data) {
-      if (data && data.ok === false) {
-        throw new Error(data.message || data.erro || data.error || 'Erro na API GAS');
-      }
-      return (data && data.result !== undefined) ? data.result : data;
-    });
-  }
-
-  return tentativa();
-}
-
 // ── API PostgreSQL / Railway ─────────────────────────────────
 function apiGet(url) {
   var separator = String(url).indexOf('?') > -1 ? '&' : '?';
@@ -1796,36 +1772,6 @@ function carregarInfoBase() {
 }
 
 
-function carregarSistemaTurbo() {
-  state.agendamentos = [];
-  byId('agendaBody').innerHTML = '<tr><td colspan="19"><div class="loading-box">Carregando sistema com PostgreSQL...</div></td></tr>';
-
-  return gas('getInfoInicial', (state.user && state.user.email) || '')
-    .then(function(res) {
-      if (!res || !res.ok) throw new Error((res && res.message) || 'Erro ao carregar dados base.');
-
-      state.owners = Array.isArray(res.owners) ? res.owners : [];
-      state.accessTags = Array.isArray(res.accessTags) ? res.accessTags : [];
-      state.lojas = Array.isArray(res.lojas) ? res.lojas : [];
-      state.origens = Array.isArray(res.origens) ? res.origens : [];
-
-      preencherOwners();
-      preencherAccessTags();
-      preencherLojas();
-      preencherFiltroLojas();
-      preencherOrigens();
-      preencherEditLojas();
-
-      return carregarAgendaEDashboard();
-    })
-    .then(function() {
-      iniciarAutoRefreshPostgres();
-      atualizarStatusSistema({
-        serverVersion: 'Railway + PostgreSQL',
-        dataAtualizacao: new Date().toLocaleString('pt-BR')
-      });
-    });
-}
 
 function atualizarStatusSistema(res) {
   var el = byId('versaoServidor');
