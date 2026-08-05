@@ -8,7 +8,7 @@ const { Pool } = require("pg");
 require("dotenv").config();
 
 const { startRecoveryCron } = require("./kommo/recovery");
-const { startReminderCron, runReminders, runTwoHourReminders } = require("./kommo/reminder");
+const { startReminderCron, runReminders, runTwoHourReminders, scheduleDaily } = require("./kommo/reminder");
 const { startFollowupCron } = require("./kommo/followups");
 const mailingboss = require("./mailingboss");
 const kommoClient = require("./kommo/client");
@@ -4541,30 +4541,95 @@ const TABELAS_COM_LOJA = [
   { tabela: "horarios_funcionamento_loja" }
 ];
 
+// Extraído da rota abaixo pra ser reaproveitado pelo cron mensal
+// (rodarAuditoriaIntegridadeMensal) sem duplicar a mesma varredura.
+async function buscarDivergenciasDeLoja() {
+  const divergencias = [];
+  for (const cfg of TABELAS_COM_LOJA) {
+    const condicoes = [`loja IS NOT NULL`, `loja <> ''`];
+    if (cfg.flagAtivo) condicoes.push(`${cfg.flagAtivo} = true`);
+    if (cfg.flagExcluido) condicoes.push(`${cfg.flagExcluido} IS NULL`);
+    condicoes.push(`NOT EXISTS (
+      SELECT 1 FROM lojas l WHERE l.ativo = true AND
+        TRANSLATE(LOWER(TRIM(l.nome)), 'áàâãäéèêëíìîïóòôõöúùûüç','aaaaaeeeeiiiiooooouuuuc')
+        = TRANSLATE(LOWER(TRIM(${cfg.tabela}.loja)), 'áàâãäéèêëíìîïóòôõöúùûüç','aaaaaeeeeiiiiooooouuuuc')
+    )`);
+    const r = await pool.query(`
+      SELECT loja, COUNT(*)::int AS total
+      FROM ${cfg.tabela}
+      WHERE ${condicoes.join(" AND ")}
+      GROUP BY loja ORDER BY total DESC
+    `);
+    for (const row of r.rows) {
+      divergencias.push({ tabela: cfg.tabela, loja: row.loja, total: row.total });
+    }
+  }
+  return divergencias;
+}
+
+// Roda 1x por mês sozinho (ver startAuditoriaIntegridadeCron) e avisa o
+// admin pelo sino de notificações do painel só quando encontra alguma
+// divergência de loja — sem aviso nenhum se estiver tudo certo, pra não
+// virar ruído mensal. Usa logs_sistema como trava de "já rodou esse mês"
+// (sobrevive a reinício/redeploy do container).
+async function rodarAuditoriaIntegridadeMensal() {
+  const jaRodouEsteMes = await pool.query(`
+    SELECT 1 FROM logs_sistema
+    WHERE tipo = 'auditoria_integridade'
+      AND date_trunc('month', criado_em) = date_trunc('month', NOW())
+    LIMIT 1
+  `);
+  if (jaRodouEsteMes.rows.length) return { executou: false, motivo: "ja rodou este mes" };
+
+  const divergencias = await buscarDivergenciasDeLoja();
+
+  await pool.query(
+    `INSERT INTO logs_sistema (tipo, origem, mensagem, detalhes) VALUES ($1,$2,$3,$4)`,
+    [
+      "auditoria_integridade",
+      "cron",
+      divergencias.length
+        ? `${divergencias.length} divergência(s) de loja encontrada(s)`
+        : "Nenhuma divergência de loja encontrada",
+      JSON.stringify({ divergencias })
+    ]
+  );
+
+  if (divergencias.length) {
+    const porTabela = {};
+    for (const d of divergencias) (porTabela[d.tabela] = porTabela[d.tabela] || []).push(`"${d.loja}" (${d.total})`);
+    const detalhe = Object.entries(porTabela).map(([t, vs]) => `${t}: ${vs.join(", ")}`).join(" · ");
+    await pool.query(
+      `INSERT INTO notificacoes (tipo, titulo, mensagem, agendamento_id, destinatarios) VALUES ($1,$2,$3,$4,$5)`,
+      [
+        "auditoria_integridade",
+        `🔍 Auditoria mensal: ${divergencias.length} loja(s) fora do cadastro oficial`,
+        `Confira em /api/admin/diag/loja-mismatch. ${detalhe}`,
+        null,
+        ["admin", "super_admin", "atendimento central", HUGO_SUPER_ADMIN_EMAIL]
+      ]
+    );
+  }
+
+  console.log(`[AuditoriaIntegridade] ${divergencias.length} divergência(s) de loja encontrada(s).`);
+  return { executou: true, divergencias };
+}
+
+function startAuditoriaIntegridadeCron() {
+  if (process.env.AUDITORIA_INTEGRIDADE_ENABLED === "false") {
+    console.log("    AuditoriaIntegridade: desativada");
+    return;
+  }
+  // Checa 1x por dia às 7h; o próprio job só age uma vez por mês (ver
+  // rodarAuditoriaIntegridadeMensal) — verificação diária garante que um
+  // redeploy perto do dia 1 não faça o mês inteiro passar em branco.
+  scheduleDaily("AuditoriaIntegridade", 7, rodarAuditoriaIntegridadeMensal);
+}
+
 app.get("/api/admin/diag/loja-mismatch", requireSuperAdmin, async (req, res) => {
   try {
     const lj = await pool.query(`SELECT nome, ativo FROM lojas ORDER BY nome`);
-
-    const divergencias = [];
-    for (const cfg of TABELAS_COM_LOJA) {
-      const condicoes = [`loja IS NOT NULL`, `loja <> ''`];
-      if (cfg.flagAtivo) condicoes.push(`${cfg.flagAtivo} = true`);
-      if (cfg.flagExcluido) condicoes.push(`${cfg.flagExcluido} IS NULL`);
-      condicoes.push(`NOT EXISTS (
-        SELECT 1 FROM lojas l WHERE l.ativo = true AND
-          TRANSLATE(LOWER(TRIM(l.nome)), 'áàâãäéèêëíìîïóòôõöúùûüç','aaaaaeeeeiiiiooooouuuuc')
-          = TRANSLATE(LOWER(TRIM(${cfg.tabela}.loja)), 'áàâãäéèêëíìîïóòôõöúùûüç','aaaaaeeeeiiiiooooouuuuc')
-      )`);
-      const r = await pool.query(`
-        SELECT loja, COUNT(*)::int AS total
-        FROM ${cfg.tabela}
-        WHERE ${condicoes.join(" AND ")}
-        GROUP BY loja ORDER BY total DESC
-      `);
-      for (const row of r.rows) {
-        divergencias.push({ tabela: cfg.tabela, loja: row.loja, total: row.total });
-      }
-    }
+    const divergencias = await buscarDivergenciasDeLoja();
 
     // Valores de loja dos usuários + simulação de quantos agendamentos cada
     // um veria com a própria sessão (pega tanto mismatch de nome quanto
@@ -5711,6 +5776,7 @@ async function startServer() {
   startReminderCron();
   startRecoveryCron();
   startFollowupCron();
+  startAuditoriaIntegridadeCron();
   return new Promise((resolve) => {
     const server = app.listen(PORT, "0.0.0.0", () => {
       console.log(`Sistema rodando na porta ${PORT}`);
@@ -5752,5 +5818,6 @@ module.exports = {
   toPgDate,
   encryptSecret,
   decryptSecret,
-  hasRole
+  hasRole,
+  rodarAuditoriaIntegridadeMensal
 };

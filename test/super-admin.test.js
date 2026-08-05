@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 process.env.SESSION_SECRET = 'test-session-secret-with-at-least-32-characters';
 process.env.SESSION_TTL_HOURS = '1';
 
-const { app, pool, signSession, buildPermissions, publicUser, isSuperAdmin } = require('../server');
+const { app, pool, signSession, buildPermissions, publicUser, isSuperAdmin, rodarAuditoriaIntegridadeMensal } = require('../server');
 
 const HUGO_EMAIL = 'hugoprudente.marketing@gmail.com';
 let server;
@@ -82,6 +82,76 @@ test('diagnóstico de loja varre todas as tabelas e aponta divergência', async 
       'deveria apontar a divergência simulada em vendedores_consultores'
     );
     assert.match(body.resumo, /1 valor/);
+  } finally {
+    pool.query = originalQuery;
+  }
+});
+
+// Recomendação pós-auditoria: a checagem de loja-mismatch só rodava quando
+// alguém lembrava de abrir a rota manualmente. Agora roda sozinha 1x por
+// mês (ver startAuditoriaIntegridadeCron em server.js) e avisa pelo sino de
+// notificações do painel só quando encontra algo — sem ruído mensal se
+// estiver tudo certo.
+test('auditoria mensal não roda de novo se já rodou este mês', async () => {
+  const originalQuery = pool.query;
+  let chamadas = 0;
+  pool.query = async (sql) => {
+    chamadas++;
+    return { rows: [{ existe: 1 }] }; // já tem registro deste mês em logs_sistema
+  };
+  try {
+    const resultado = await rodarAuditoriaIntegridadeMensal();
+    assert.equal(resultado.executou, false);
+    assert.equal(chamadas, 1, 'deveria parar assim que confirmar que já rodou este mês, sem consultar mais nada');
+  } finally {
+    pool.query = originalQuery;
+  }
+});
+
+test('auditoria mensal notifica o admin (e o Hugo por e-mail) só quando encontra divergência de loja', async () => {
+  const originalQuery = pool.query;
+  const inserts = [];
+  pool.query = async (sql, params) => {
+    const s = String(sql);
+    if (s.includes('SELECT 1 FROM logs_sistema')) return { rows: [] }; // ainda não rodou este mês
+    if (s.includes('SELECT nome, ativo FROM lojas')) return { rows: [{ nome: 'óticas TGT - Gonzaga', ativo: true }] };
+    if (s.includes('FROM vendedores_consultores')) return { rows: [{ loja: 'Gonzaga', total: 1 }] };
+    if (s.includes('INSERT INTO logs_sistema')) { inserts.push({ tabela: 'logs_sistema', params }); return { rows: [] }; }
+    if (s.includes('INSERT INTO notificacoes')) { inserts.push({ tabela: 'notificacoes', params }); return { rows: [] }; }
+    return { rows: [] };
+  };
+  try {
+    const resultado = await rodarAuditoriaIntegridadeMensal();
+    assert.equal(resultado.executou, true);
+    assert.equal(resultado.divergencias.length, 1);
+
+    const log = inserts.find((i) => i.tabela === 'logs_sistema');
+    assert.ok(log, 'deveria registrar a execução em logs_sistema mesmo com divergência');
+
+    const notif = inserts.find((i) => i.tabela === 'notificacoes');
+    assert.ok(notif, 'deveria criar uma notificação quando encontra divergência');
+    assert.ok(notif.params[4].includes(HUGO_EMAIL), 'a notificação deveria alcançar o Hugo diretamente pelo e-mail');
+    assert.ok(notif.params[4].includes('admin'), 'a notificação deveria alcançar qualquer admin, não só o Hugo');
+  } finally {
+    pool.query = originalQuery;
+  }
+});
+
+test('auditoria mensal não notifica ninguém quando não encontra divergência nenhuma', async () => {
+  const originalQuery = pool.query;
+  const inserts = [];
+  pool.query = async (sql, params) => {
+    const s = String(sql);
+    if (s.includes('SELECT 1 FROM logs_sistema')) return { rows: [] };
+    if (s.includes('INSERT INTO logs_sistema')) { inserts.push({ tabela: 'logs_sistema', params }); return { rows: [] }; }
+    if (s.includes('INSERT INTO notificacoes')) { inserts.push({ tabela: 'notificacoes', params }); return { rows: [] }; }
+    return { rows: [] }; // nenhuma tabela devolve divergência
+  };
+  try {
+    const resultado = await rodarAuditoriaIntegridadeMensal();
+    assert.equal(resultado.divergencias.length, 0);
+    assert.ok(inserts.some((i) => i.tabela === 'logs_sistema'), 'deveria registrar a execução mesmo sem achar nada');
+    assert.ok(!inserts.some((i) => i.tabela === 'notificacoes'), 'não deveria notificar ninguém quando não há problema');
   } finally {
     pool.query = originalQuery;
   }
