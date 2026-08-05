@@ -961,6 +961,13 @@ async function addColumnIfMissing(table, column, definition) {
   await pool.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${column} ${definition}`);
 }
 
+// ÚNICA fonte de verdade do schema do banco — roda no boot (idempotente,
+// CREATE TABLE/COLUMN sempre com IF NOT EXISTS). Existiu no passado um
+// database/schema.sql paralelo tentando descrever a mesma coisa e nunca
+// usado por nenhum deploy real; ficou incompleto e foi removido. Se
+// precisar inspecionar o schema de fora do Node, tire um dump do banco
+// (pg_dump --schema-only) em vez de manter um arquivo .sql à mão — não
+// tem como esse arquivo ficar desatualizado se ele simplesmente não existe.
 async function initDatabase() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS agendamentos (

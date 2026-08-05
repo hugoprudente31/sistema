@@ -1,7 +1,7 @@
 {
   "name": "sistema-de-agendamento",
   "version": "1.0.0",
-  "description": "Sistema de Agendamento Multiloja - Óticas TGT com Railway, PostgreSQL e sincronização GAS",
+  "description": "Sistema de Agendamento Multiloja - Óticas TGT com Railway, PostgreSQL e integração Kommo",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -9,7 +9,6 @@
     "test": "node --test --test-concurrency=1",
     "test:integration": "node --test test/integration/agendamento-constraints.integration.js",
     "check": "node --check server.js && node --test --test-concurrency=1",
-    "db:migrate": "node src/scripts/migrate.js",
     "users:provision": "node src/scripts/provision-profile-users.js",
     "import:sheets": "node src/scripts/import-sheets.js"
   },
