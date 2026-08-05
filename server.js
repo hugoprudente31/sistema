@@ -3284,20 +3284,6 @@ app.get("/api/faturamentos", async (req, res) => {
   }
 });
 
-app.post("/api/logs", async (req, res) => {
-  try {
-    const b = req.body || {};
-    const result = await pool.query(
-      `INSERT INTO logs_sistema (tipo, origem, mensagem, detalhes) VALUES ($1,$2,$3,$4) RETURNING *`,
-      [b.tipo || "info", b.origem || null, b.mensagem || null, b.detalhes ? JSON.stringify(b.detalhes) : null]
-    );
-    res.json({ ok: true, log: result.rows[0] });
-  } catch (error) {
-    res.status(500).json({ ok: false, error: error.message });
-  }
-});
-
-
 function normalizarMetaPayload(body = {}) {
   const competenciaRaw = clean(body.competencia);
   if (!/^\d{4}-\d{2}$/.test(competenciaRaw)) throw new Error("Competência inválida. Use mês e ano.");
