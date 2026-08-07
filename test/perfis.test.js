@@ -121,6 +121,29 @@ test('admin: agendamentos de todas as 4 lojas — 200', async function() {
   } finally { restore(); }
 });
 
+// capped: filtros como Cliente/Vendedor/Optometrista só rodam depois, no
+// navegador (filter-engine.js), em cima do que já veio limitado pelo LIMIT
+// da query -- sem este aviso, um registro além do teto "some" da busca como
+// se não existisse. `?limit=N` deixa o teto pequeno o bastante pra testar
+// sem precisar simular milhares de linhas.
+test('admin: GET /api/agendamentos?limit=3 sinaliza capped quando a página vem cheia', async function() {
+  const restore = withQuery({ 'FROM agendamentos': { rows: [ag(G), ag(G), ag(G)] } });
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos?limit=3', { headers: H(tok('admin')) });
+    assert.equal(r.status, 200);
+    assert.equal((await r.json()).capped, true, 'veio exatamente no teto do limit=3 -- pode haver mais além dele');
+  } finally { restore(); }
+});
+
+test('admin: GET /api/agendamentos?limit=10 não sinaliza capped quando vem menos que o teto', async function() {
+  const restore = withQuery({ 'FROM agendamentos': { rows: [ag(G), ag(G)] } });
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos?limit=10', { headers: H(tok('admin')) });
+    assert.equal(r.status, 200);
+    assert.equal((await r.json()).capped, false);
+  } finally { restore(); }
+});
+
 test('admin: lixeira (requireAdmin) — 200', async function() {
   const restore = withQuery({ 'FROM agendamentos': { rows: [] } });
   try {

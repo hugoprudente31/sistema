@@ -57,6 +57,40 @@ test('GET /api/dashboard responde 200 com sessão válida (admin)', async () => 
   } finally { pool.query = original; }
 });
 
+test('GET /api/dashboard inclui os7/os15/os30 (abertas/finalizadas nos últimos N dias, calculado direto no banco)', async () => {
+  const original = pool.query;
+  pool.query = async (sql) => {
+    if (String(sql).includes('FROM clientes')) return { rows: [{ total: 5 }] };
+    if (String(sql).includes('FROM agendamentos')) {
+      return { rows: [{
+        total_agendamentos: 20, os_com_valor: 4, faturamento_total: 800, desconto_total: 40,
+        os7_abertas: 3, os7_finalizadas: 2,
+        os15_abertas: 6, os15_finalizadas: 5,
+        os30_abertas: 10, os30_finalizadas: 9
+      }] };
+    }
+    return { rows: [] };
+  };
+  try {
+    const token = signSession({ id: '1', nome: 'Admin', email: 'admin@example.com', perfil: 'admin', loja: 'Todas' });
+    const r = await fetch(baseUrl + '/api/dashboard', { headers: H(token) });
+    assert.equal(r.status, 200);
+    const body = await r.json();
+    assert.deepEqual(body.dashboard.os7, { opened: 3, finalized: 2 });
+    assert.deepEqual(body.dashboard.os15, { opened: 6, finalized: 5 });
+    assert.deepEqual(body.dashboard.os30, { opened: 10, finalized: 9 });
+  } finally { pool.query = original; }
+});
+
+test('GET /api/dashboard calcula a janela de os7/os15/os30 a partir de CURRENT_DATE, não de filtro vindo da requisição', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  const rotaStart = source.indexOf('app.get("/api/dashboard"');
+  const rotaBody = source.slice(rotaStart, source.indexOf('\napp.', rotaStart + 20));
+  assert.match(rotaBody, /CURRENT_DATE - INTERVAL '6 days'/, 'janela de 7 dias deve ser calculada no banco, não depender de req.query (senão volta a ficar presa ao filtro de data do painel)');
+  assert.match(rotaBody, /CURRENT_DATE - INTERVAL '29 days'/);
+  assert.doesNotMatch(rotaBody, /req\.query\.(de|ate|dataDe|dataAte)/, 'esta rota não deve aceitar filtro de data da tela para os7/os15/os30');
+});
+
 test('GET /api/dashboard responde 200 com sessão válida (perfil de loja, escopo por loja)', async () => {
   const original = pool.query;
   const chamadas = [];
