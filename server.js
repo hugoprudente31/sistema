@@ -2500,7 +2500,12 @@ app.get("/api/agendamentos", async (req, res) => {
         ORDER BY a.id DESC LIMIT ${limite}`,
       params
     );
-    res.json({ ok: true, total: result.rows.length, agendamentos: result.rows });
+    // Filtros que não entram no WHERE acima (cliente, vendedor, optometrista,
+    // proprietário, origem, tag, "meus", resultado da visita) são aplicados só
+    // no painel, DEPOIS deste LIMIT — se a página bateu no teto, pode haver
+    // registro além dele que essa busca nunca vê. `capped` avisa o front-end
+    // disso pra ele poder alertar o usuário em vez de deixar parecer "não existe".
+    res.json({ ok: true, total: result.rows.length, agendamentos: result.rows, capped: result.rows.length >= limite });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });
   }

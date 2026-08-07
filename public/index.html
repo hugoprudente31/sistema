@@ -1004,7 +1004,8 @@ var state = {
   accessTags: [],
   editingRow: null,
   reloadTimer: null,
-  dashboardExecutivo: null
+  dashboardExecutivo: null,
+  agendamentosCapped: false
 };
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -1237,6 +1238,7 @@ function buildAgendamentosUrl(extra) {
   if (f.loja)        p.push('loja='        + encodeURIComponent(f.loja));
   if (f.status)      p.push('status='      + encodeURIComponent(f.status));
   if (f.statusOS)    p.push('statusOS='    + encodeURIComponent(f.statusOS));
+  if (f.estagio)     p.push('estagio='     + encodeURIComponent(f.estagio));
   if (extra) p.push(extra);
   return '/api/agendamentos' + (p.length ? '?' + p.join('&') : '');
 }
@@ -1244,6 +1246,7 @@ function buildAgendamentosUrl(extra) {
 function getAgendamentosPostgres() {
   return apiGet(buildAgendamentosUrl()).then(function(res) {
     var rows = Array.isArray(res.agendamentos) ? res.agendamentos : [];
+    state.agendamentosCapped = !!res.capped;
     return rows.map(mapAgendamentoDb);
   });
 }
@@ -1322,7 +1325,17 @@ function aplicarFiltrosInteligentes(rows) {
 function atualizarResumoFiltros(visiveis, total) {
   var el = byId('filtroResumo');
   if (!el) return;
-  el.textContent = 'Mostrando ' + visiveis + ' de ' + total + ' registro(s). Agenda e dashboard usam o mesmo filtro.';
+  var texto = 'Mostrando ' + visiveis + ' de ' + total + ' registro(s). Agenda e dashboard usam o mesmo filtro.';
+  // Cliente, Vendedor, Optometrista, Proprietário, Origem, Tag, "Meus Serviços"
+  // e "Resultado da visita" só filtram DEPOIS que o servidor já cortou pelo
+  // LIMIT (ver GET /api/agendamentos) — se bateu no teto, pode existir
+  // registro que essa busca nunca chega a ver. Sem isso, "não achei o
+  // cliente" parecia "o cliente não existe".
+  if (state.agendamentosCapped) {
+    el.innerHTML = escapeHtml(texto) + ' <strong style="color:#b45309;">⚠️ Este período tem mais registros do que o painel carrega de uma vez — a busca pode estar incompleta. Refine por loja, status ou um período de data menor.</strong>';
+    return;
+  }
+  el.textContent = texto;
 }
 
 function dashboardFiltrado(rows) {
@@ -1331,6 +1344,26 @@ function dashboardFiltrado(rows) {
     faturamento_total: rows.reduce(function(sum, row) { return sum + Number(row.ValorVenda || 0); }, 0),
     desconto_total: rows.reduce(function(sum, row) { return sum + Number(row.Desconto || 0); }, 0)
   };
+}
+
+// Conta OS abertas/finalizadas nos últimos N dias (janela terminando hoje,
+// inclusive). "opened" olha data_abertura_os, "finalized" olha
+// data_finalizacao_os — os KPIs "OS 7/15/30 dias" no Dashboard Operacional
+// eram só um placeholder zerado (nunca implementado desde a migração pro
+// Postgres); esta função é o cálculo real que faltava.
+function contarOsPorPeriodo(rows, dias, hoje) {
+  hoje = hoje || hojeBrasil();
+  var inicio = new Date(hoje + 'T12:00:00');
+  inicio.setDate(inicio.getDate() - (dias - 1));
+  var desde = inicio.toISOString().slice(0, 10);
+  var opened = 0, finalized = 0;
+  (rows || []).forEach(function(r) {
+    var abertura = String(r.DataAberturaOS || '').slice(0, 10);
+    var finalizacao = String(r.DataFinalizacaoOS || '').slice(0, 10);
+    if (abertura && abertura >= desde && abertura <= hoje) opened++;
+    if (finalizacao && finalizacao >= desde && finalizacao <= hoje) finalized++;
+  });
+  return { opened: opened, finalized: finalized };
 }
 
 function buildDashboardLocal(rows, db) {
@@ -1360,6 +1393,7 @@ function buildDashboardLocal(rows, db) {
     if (comp === 'nao' || comp === 'não' || st === 'nao compareceu' || st === 'não compareceu') naoCompareceram++;
     if (st === 'concluido' || st === 'concluído' || os === 'concluido' || os === 'concluído' || os === 'entregue') concluidos++;
     if (r.NumeroOS && ['concluido','concluído','entregue','cancelada','cancelado'].indexOf(os) === -1) osAtivas++;
+    if (r.IsOverdue) atrasadas++;
 
     var origem = r.Origem || '';
     if (origem) origemCount[origem] = (origemCount[origem] || 0) + 1;
@@ -1368,6 +1402,7 @@ function buildDashboardLocal(rows, db) {
   var origemTop = '—';
   Object.keys(origemCount).sort(function(a,b){ return origemCount[b] - origemCount[a]; }).slice(0,1).forEach(function(k){ origemTop = k; });
 
+  var hoje = hojeBrasil();
   return {
     agendados: agendados,
     compareceram: compareceram,
@@ -1377,9 +1412,9 @@ function buildDashboardLocal(rows, db) {
     atrasadas: atrasadas,
     origemTop: origemTop,
     faturamento: Number(db.faturamento_total || 0),
-    os7: { opened: 0, finalized: 0 },
-    os15: { opened: 0, finalized: 0 },
-    os30: { opened: 0, finalized: 0 }
+    os7: contarOsPorPeriodo(rows, 7, hoje),
+    os15: contarOsPorPeriodo(rows, 15, hoje),
+    os30: contarOsPorPeriodo(rows, 30, hoje)
   };
 }
 
@@ -4458,6 +4493,10 @@ function executarDedupKommo() {
       window.getAgendamentosPostgres = function() {
         return apiGet(buildAgendamentosUrl()).then(function(res) {
           var rows = Array.isArray(res.agendamentos) ? res.agendamentos : [];
+          // `capped`: o servidor bateu no LIMIT da query — pode haver registro
+          // além dele que os filtros só-client-side (cliente, vendedor, etc.)
+          // nunca chegam a ver. atualizarResumoFiltros() usa isso pra avisar.
+          state.agendamentosCapped = !!res.capped;
           return window.aplicarRestricaoLojaUsuario(rows.map(mapAgendamentoDb));
         });
       };
