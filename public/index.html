@@ -1005,7 +1005,8 @@ var state = {
   editingRow: null,
   reloadTimer: null,
   dashboardExecutivo: null,
-  agendamentosCapped: false
+  agendamentosCapped: false,
+  dashboardOsBackend: null
 };
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -1120,6 +1121,20 @@ function apiPatch(url, body) {
   });
 }
 
+// os7/os15/os30 vêm do backend (GET /api/dashboard), guardados aqui pra não
+// se perder toda vez que o dashboard local é recalculado (buildDashboardLocal
+// só enxerga o que o filtro de data da tela trouxe -- ver comentário em
+// recarregarComFiltros). Sem isso, cada PATCH pontual (aplicarRespostaAgendamentoAtualizado,
+// que não busca /api/dashboard de novo) fazia esses KPIs piscarem de volta
+// pro cálculo local mais fraco por ~1s, até o auto-reload seguinte.
+function aplicarOsBackendNoDashboard() {
+  var b = state.dashboardOsBackend;
+  if (!b || !state.dashboard) return;
+  if (b.os7) state.dashboard.os7 = b.os7;
+  if (b.os15) state.dashboard.os15 = b.os15;
+  if (b.os30) state.dashboard.os30 = b.os30;
+}
+
 function aplicarRespostaAgendamentoAtualizado(data) {
   if (!data || !data.agendamento || !data.agendamento.id) return;
   var atualizado = mapAgendamentoDb(data.agendamento);
@@ -1131,6 +1146,7 @@ function aplicarRespostaAgendamentoAtualizado(data) {
   state.agendamentosTodos = todos;
   state.agendamentos = aplicarFiltrosInteligentes(todos);
   state.dashboard = buildDashboardLocal(state.agendamentos, dashboardFiltrado(state.agendamentos));
+  aplicarOsBackendNoDashboard();
   renderAgenda(state.agendamentos);
   preencherDashboard();
   atualizarResumoFiltros(state.agendamentos.length, state.agendamentosTodos.length);
@@ -1246,8 +1262,15 @@ function buildAgendamentosUrl(extra) {
 function getAgendamentosPostgres() {
   return apiGet(buildAgendamentosUrl()).then(function(res) {
     var rows = Array.isArray(res.agendamentos) ? res.agendamentos : [];
-    state.agendamentosCapped = !!res.capped;
-    return rows.map(mapAgendamentoDb);
+    var mapped = rows.map(mapAgendamentoDb);
+    // `capped` viaja pendurado no array em vez de gravar direto em `state`
+    // aqui -- isto pode resolver fora de ordem em relação a outra chamada
+    // concorrente (recarregarComFiltros usa requestSeq pra descartar
+    // respostas antigas); quem commita em state.agendamentosCapped é só o
+    // callback que já passou por aquele gate, senão um reload mais lento
+    // podia sobrescrever o aviso com o resultado de uma busca já obsoleta.
+    mapped.__capped = !!res.capped;
+    return mapped;
   });
 }
 
@@ -1350,7 +1373,11 @@ function dashboardFiltrado(rows) {
 // inclusive). "opened" olha data_abertura_os, "finalized" olha
 // data_finalizacao_os — os KPIs "OS 7/15/30 dias" no Dashboard Operacional
 // eram só um placeholder zerado (nunca implementado desde a migração pro
-// Postgres); esta função é o cálculo real que faltava.
+// Postgres). Isto é o FALLBACK: só roda sobre `rows`, que já veio recortado
+// pelo filtro de Data inicial/final da tela (por data_agendamento, não pelas
+// datas de OS que esta função lê), então subconta se o filtro for mais
+// estreito que a janela. GET /api/dashboard calcula a versão real (sem esse
+// acoplamento) e recarregarComFiltros() a usa por cima quando disponível.
 function contarOsPorPeriodo(rows, dias, hoje) {
   hoje = hoje || hojeBrasil();
   var inicio = new Date(hoje + 'T12:00:00');
@@ -1854,8 +1881,20 @@ function recarregarComFiltros(force) {
   ]).then(function(results) {
     if (requestSeq !== window._agendaRequestSeq) return;
     state.agendamentosTodos = Array.isArray(results[0]) ? results[0] : [];
+    state.agendamentosCapped = !!(results[0] && results[0].__capped);
     state.agendamentos = aplicarFiltrosInteligentes(state.agendamentosTodos);
     state.dashboard = buildDashboardLocal(state.agendamentos, dashboardFiltrado(state.agendamentos));
+    // os7/os15/os30 do backend (results[1], GET /api/dashboard) substituem o
+    // cálculo local quando disponíveis: o local é limitado ao que o filtro de
+    // Data inicial/final da tela trouxe (que filtra por data_agendamento, não
+    // por data_abertura_os/data_finalizacao_os), então subconta sempre que
+    // esse filtro for mais estreito que a janela de 7/15/30 dias. O backend
+    // calcula direto no banco, sem depender de filtro nenhum da tela.
+    var dashboardBackend = results[1] || {};
+    if (dashboardBackend.os7 || dashboardBackend.os15 || dashboardBackend.os30) {
+      state.dashboardOsBackend = dashboardBackend;
+    }
+    aplicarOsBackendNoDashboard();
     renderAgenda(state.agendamentos);
     preencherDashboard();
     atualizarResumoFiltros(state.agendamentos.length, state.agendamentosTodos.length);
@@ -4493,11 +4532,16 @@ function executarDedupKommo() {
       window.getAgendamentosPostgres = function() {
         return apiGet(buildAgendamentosUrl()).then(function(res) {
           var rows = Array.isArray(res.agendamentos) ? res.agendamentos : [];
+          var capped = !!res.capped;
+          var restrito = window.aplicarRestricaoLojaUsuario(rows.map(mapAgendamentoDb));
           // `capped`: o servidor bateu no LIMIT da query — pode haver registro
           // além dele que os filtros só-client-side (cliente, vendedor, etc.)
-          // nunca chegam a ver. atualizarResumoFiltros() usa isso pra avisar.
-          state.agendamentosCapped = !!res.capped;
-          return window.aplicarRestricaoLojaUsuario(rows.map(mapAgendamentoDb));
+          // nunca chegam a ver. Pendurado no array (em vez de gravar direto em
+          // state) pra recarregarComFiltros só commitar depois do seu gate de
+          // requestSeq — senão uma resposta lenta de um reload antigo podia
+          // sobrescrever o aviso com um resultado já obsoleto.
+          restrito.__capped = capped;
+          return restrito;
         });
       };
 

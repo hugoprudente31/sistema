@@ -4816,9 +4816,13 @@ app.get("/api/dashboard", async (req, res) => {
   try {
     const scoped = !canViewAllStores(req.session);
     if (scoped && !req.session.loja) {
+      const zeroOs = { opened: 0, finalized: 0 };
       return res.json({
         ok: true,
-        dashboard: { total_clientes: 0, total_agendamentos: 0, total_vendas: 0, faturamento_total: 0, desconto_total: 0 }
+        dashboard: {
+          total_clientes: 0, total_agendamentos: 0, total_vendas: 0, faturamento_total: 0, desconto_total: 0,
+          os7: zeroOs, os15: zeroOs, os30: zeroOs
+        }
       });
     }
     const params = scoped ? [req.session.loja] : [];
@@ -4828,25 +4832,44 @@ app.get("/api/dashboard", async (req, res) => {
        ${scoped ? `AND ${storeSql("loja_origem")}` : ""}`,
       params
     );
+    // os7/os15/os30: OS abertas/finalizadas nos últimos N dias (janela fixa
+    // terminando hoje, CURRENT_DATE já no fuso de Brasília -- ver o SET TIME
+    // ZONE no pool.on("connect") acima). Deliberadamente calculado aqui, e
+    // não a partir dos agendamentos que o painel já carregou: aquela lista é
+    // recortada pelo filtro de Data inicial/final da tela (que filtra por
+    // data_agendamento, não por data_abertura_os/data_finalizacao_os) -- uma
+    // janela "últimos 30 dias" calculada em cima dela subconta sempre que o
+    // filtro ativo for mais estreito que a janela (ex.: painel abrindo no
+    // mês corrente, dia 3: "OS 30 dias" só veria 3 dias de dado).
     const resumo = await pool.query(`
       SELECT
         COUNT(*)::int AS total_agendamentos,
         COUNT(*) FILTER (WHERE COALESCE(valor_venda,0) > 0)::int AS os_com_valor,
         COALESCE(SUM(valor_venda),0)::numeric AS faturamento_total,
-        COALESCE(SUM(desconto),0)::numeric AS desconto_total
+        COALESCE(SUM(desconto),0)::numeric AS desconto_total,
+        COUNT(*) FILTER (WHERE data_abertura_os BETWEEN CURRENT_DATE - INTERVAL '6 days' AND CURRENT_DATE)::int AS os7_abertas,
+        COUNT(*) FILTER (WHERE data_finalizacao_os BETWEEN CURRENT_DATE - INTERVAL '6 days' AND CURRENT_DATE)::int AS os7_finalizadas,
+        COUNT(*) FILTER (WHERE data_abertura_os BETWEEN CURRENT_DATE - INTERVAL '14 days' AND CURRENT_DATE)::int AS os15_abertas,
+        COUNT(*) FILTER (WHERE data_finalizacao_os BETWEEN CURRENT_DATE - INTERVAL '14 days' AND CURRENT_DATE)::int AS os15_finalizadas,
+        COUNT(*) FILTER (WHERE data_abertura_os BETWEEN CURRENT_DATE - INTERVAL '29 days' AND CURRENT_DATE)::int AS os30_abertas,
+        COUNT(*) FILTER (WHERE data_finalizacao_os BETWEEN CURRENT_DATE - INTERVAL '29 days' AND CURRENT_DATE)::int AS os30_finalizadas
       FROM agendamentos
       WHERE nome NOT ILIKE '%teste%' AND COALESCE(loja,'') NOT ILIKE '%teste%' AND excluido_em IS NULL
       ${scoped ? `AND ${storeSql("loja")}` : ""}
     `, params);
     const showFinance = canViewFinanceSession(req.session);
+    const r = resumo.rows[0];
     res.json({
       ok: true,
       dashboard: {
         total_clientes: clientes.rows[0].total,
-        total_agendamentos: resumo.rows[0].total_agendamentos,
-        total_vendas: showFinance ? resumo.rows[0].os_com_valor : 0,
-        faturamento_total: showFinance ? resumo.rows[0].faturamento_total : 0,
-        desconto_total: showFinance ? resumo.rows[0].desconto_total : 0
+        total_agendamentos: r.total_agendamentos,
+        total_vendas: showFinance ? r.os_com_valor : 0,
+        faturamento_total: showFinance ? r.faturamento_total : 0,
+        desconto_total: showFinance ? r.desconto_total : 0,
+        os7: { opened: r.os7_abertas, finalized: r.os7_finalizadas },
+        os15: { opened: r.os15_abertas, finalized: r.os15_finalizadas },
+        os30: { opened: r.os30_abertas, finalized: r.os30_finalizadas }
       }
     });
   } catch (error) {
