@@ -6,6 +6,19 @@ const MSG = require("./messages");
 const SM = require("./stateManager");
 const scheduling = require("../scheduling");
 
+// ALERTA DE CONFIGURAÇÃO — sem KOMMO_USE_SALESBOT=true, send() (abaixo) usa os
+// endpoints diretos do Kommo (kommo.sendMessage/sendMessageToLead), que historicamente
+// sempre retornam 404 (ver auditoria 2026-07-28/2026-08-06). O resto do pipeline (etapa,
+// labels, estágio, Postgres) continua funcionando normal — só a mensagem de texto some,
+// sem erro visível pro time. Loga alto, uma vez no boot, pra aparecer nos logs do Railway.
+if (process.env.KOMMO_USE_SALESBOT !== "true") {
+  console.error(
+    "[BOT][ALERTA CONFIG] KOMMO_USE_SALESBOT != \"true\" — respostas do bot vão passar pelo " +
+    "endpoint direto do Kommo (kommo.sendMessage/sendMessageToLead), historicamente sempre " +
+    "retorna 404 e falha silenciosa. Se não for intencional, defina KOMMO_USE_SALESBOT=true."
+  );
+}
+
 const pendingResponses = new Map();
 
 // Fila por lead: garante que mensagens do mesmo lead são processadas em sequência,
@@ -179,13 +192,13 @@ async function send(talkId, leadId, text) {
       await kommo.sendMessageToLead(leadId, text);
     }
   } catch (e) {
-    console.error(`[BOT][${leadId}] Erro ao enviar mensagem (talkId=${talkId}):`, e.message);
+    console.error(`[BOT][ALERTA CONFIG][${leadId}] Erro ao enviar mensagem via endpoint direto (talkId=${talkId}) — provável causa: KOMMO_USE_SALESBOT != "true". Detalhe:`, e.message);
     // Tenta fallback se o envio direto falhou e temos talkId
     if (talkId) {
       try {
         await kommo.sendMessageToLead(leadId, text);
       } catch (e2) {
-        console.error(`[BOT][${leadId}] Fallback também falhou:`, e2.message);
+        console.error(`[BOT][ALERTA CONFIG][${leadId}] Fallback também falhou (mensagem NÃO chegou ao cliente):`, e2.message);
       }
     }
   }
