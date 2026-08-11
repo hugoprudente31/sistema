@@ -144,6 +144,9 @@
     table { width: 100%; border-collapse: collapse; margin-top: 10px; }
     th, td { text-align: left; padding: 10px; border-bottom: 1px solid #f1dfd3; font-size: 13px; vertical-align: top; }
     th { background: var(--p); color: #fff; position: sticky; top: 0; z-index: 2; }
+    th.th-sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+    th.th-sortable:hover { background: #d94502; }
+    th.th-sortable .sort-icon { opacity: .75; margin-left: 4px; font-size: 11px; }
 
     .scroll-x { overflow: auto; max-height: 72vh; }
 
@@ -541,7 +544,7 @@
         <table>
           <thead>
             <tr>
-              <th>ID</th><th>Data Registro</th><th>Cliente</th><th>Agendado por</th><th>Última alt.</th><th>Dia Agendado</th><th>Status Ag.</th><th>Presença</th><th>Resultado Optometrista</th><th>Nº OS</th><th>Status OS</th><th>Datas da OS</th><th>Loja</th><th>Optometrista</th><th>Lead Time</th><th>Valor</th><th>Desconto</th><th>Tag</th><th>Ações</th>
+              <th>ID</th><th>Data Registro</th><th>Cliente</th><th>Agendado por</th><th>Última alt.</th><th class="th-sortable" id="thDiaAgendado" onclick="alternarOrdenacaoAgenda('DataAgendamento')" title="Ordenar por Dia Agendado (A→Z / Z→A, do mais antigo ao mais recente e vice-versa)">Dia Agendado <span class="sort-icon" id="sortIconeDataAgendamento">⇅</span></th><th>Status Ag.</th><th>Presença</th><th>Resultado Optometrista</th><th>Nº OS</th><th>Status OS</th><th>Datas da OS</th><th>Loja</th><th>Optometrista</th><th>Lead Time</th><th>Valor</th><th>Desconto</th><th>Tag</th><th>Ações</th>
             </tr>
           </thead>
           <tbody id="agendaBody"></tbody>
@@ -1006,7 +1009,11 @@ var state = {
   reloadTimer: null,
   dashboardExecutivo: null,
   agendamentosCapped: false,
-  dashboardOsBackend: null
+  dashboardOsBackend: null,
+  // Ordenação manual da tabela do Painel de Acompanhamento de OS, acionada
+  // clicando no cabeçalho da coluna (ver alternarOrdenacaoAgenda). null = sem
+  // ordenação manual, mantém a ordem que veio do backend (mais recentes primeiro).
+  ordenacaoAgenda: null
 };
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -2726,8 +2733,49 @@ function rowClassAtendimento(r) {
 // (ex.: badge "Agendado" duas vezes). Só essas 3 etapas são informação nova.
 var ETAPAS_LEAD_INEDITAS_NO_STATUS = ['Bot Ativo', 'Atendimento Humano', 'Novo Lead'];
 
+// Coluna "Dia Agendado": clique no cabeçalho alterna entre ordem ascendente
+// (mais antigo → mais recente, equivale a A→Z porque DataAgendamento vem em
+// formato ISO AAAA-MM-DD) e descendente (mais recente → mais antigo, Z→A).
+// Reaplicada a cada render, então sobrevive a filtros/recargas de dados.
+function alternarOrdenacaoAgenda(campo) {
+  var atual = state.ordenacaoAgenda;
+  var direcao = (atual && atual.campo === campo && atual.direcao === 'asc') ? 'desc' : 'asc';
+  state.ordenacaoAgenda = { campo: campo, direcao: direcao };
+  renderAgenda(state.agendamentos);
+}
+
+function ordenarAgendamentos(rows, ordenacao) {
+  if (!ordenacao || !ordenacao.campo || !rows.length) return rows;
+  var mult = ordenacao.direcao === 'desc' ? -1 : 1;
+  return rows.slice().sort(function(a, b) {
+    var da = String(a[ordenacao.campo] || '');
+    var db = String(b[ordenacao.campo] || '');
+    if (da < db) return -1 * mult;
+    if (da > db) return 1 * mult;
+    // Desempate pelo horário, quando duas linhas caem no mesmo dia.
+    var ha = String(a.Horario || '');
+    var hb = String(b.Horario || '');
+    if (ha < hb) return -1 * mult;
+    if (ha > hb) return 1 * mult;
+    return 0;
+  });
+}
+
+function atualizarIconeOrdenacaoAgenda() {
+  var icone = byId('sortIconeDataAgendamento');
+  if (!icone) return;
+  var ord = state.ordenacaoAgenda;
+  if (!ord || ord.campo !== 'DataAgendamento') {
+    icone.textContent = '⇅';
+  } else {
+    icone.textContent = ord.direcao === 'asc' ? '▲ A→Z' : '▼ Z→A';
+  }
+}
+
 function renderAgenda(rowsParam) {
   var rows = Array.isArray(rowsParam) ? rowsParam : (state.agendamentos || []);
+  rows = ordenarAgendamentos(rows, state.ordenacaoAgenda);
+  atualizarIconeOrdenacaoAgenda();
   var body = byId('agendaBody');
   if (!rows.length) {
     body.innerHTML = '<tr><td colspan="19">Nenhum serviço encontrado.</td></tr>';
