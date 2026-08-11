@@ -174,8 +174,11 @@ router.post("/api/kommo/message", async (req, res) => {
 
   const incomingSubdomain = payload?.account?.subdomain || "";
   const expectedSubdomain = process.env.KOMMO_SUBDOMAIN || "";
-  if (expectedSubdomain && incomingSubdomain && incomingSubdomain !== expectedSubdomain) {
-    console.log(`[Kommo/Message] Subdomínio inesperado: ${incomingSubdomain} — ignorando`);
+  // Nega por padrão: se KOMMO_SUBDOMAIN estiver configurado, o payload TEM que trazer
+  // account.subdomain batendo com ele. Antes, omitir o campo (trivial de forjar) zerava
+  // incomingSubdomain e pulava a checagem inteira — bypass de autenticação.
+  if (expectedSubdomain && incomingSubdomain !== expectedSubdomain) {
+    console.log(`[Kommo/Message] Subdomínio ausente ou inesperado: "${incomingSubdomain}" — ignorando`);
     return;
   }
 
