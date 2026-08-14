@@ -32,9 +32,8 @@ module.exports = {
         ON agendamentos (data_agendamento, loja, id DESC)
         WHERE excluido_em IS NULL;
       CREATE INDEX IF NOT EXISTS idx_agendamentos_followup_nao_compareceu
-        ON agendamentos (nao_compareceu_proxima_tentativa_em, nao_compareceu_em, id)
+        ON agendamentos (nao_compareceu_em, id)
         WHERE nao_compareceu_lembrete_em IS NULL
-          AND nao_compareceu_falha_em IS NULL
           AND nao_compareceu_em IS NOT NULL;
       CREATE INDEX IF NOT EXISTS idx_agendamentos_lembrete_2h_pendente
         ON agendamentos (data_agendamento, horario, id)
@@ -42,9 +41,8 @@ module.exports = {
           AND excluido_em IS NULL
           AND kommo_lead_id IS NOT NULL;
       CREATE INDEX IF NOT EXISTS idx_negociacao_proposta_due
-        ON agendamento_negociacao (proposta_proxima_tentativa_em, proposta_agendada_em, id)
+        ON agendamento_negociacao (proposta_agendada_em, id)
         WHERE proposta_enviada_em IS NULL
-          AND proposta_falha_em IS NULL
           AND proposta_agendada_em IS NOT NULL;
       CREATE INDEX IF NOT EXISTS idx_notificacoes_tipo_agendamento
         ON notificacoes (tipo, agendamento_id, criado_em DESC);
