@@ -134,7 +134,7 @@ router.post("/api/salesbot", requireSalesbotSecret, async (req, res) => {
   const rawContactName = String(payload.contact_name || payload.nome || "").trim();
   const contactName = /^\{\{.*\}\}$/.test(rawContactName) ? "" : rawContactName;
 
-  console.log(`[Salesbot] lead=${leadId} talk=${talkId} chat=${chatId} msg="${message.slice(0, 60)}"`);
+  console.log(`[Salesbot] mensagem recebida lead=${leadId} talk=${talkId} chat=${chatId} chars=${message.length}`);
 
   if (!leadId) {
     return res.json({ text: "" });
@@ -142,7 +142,7 @@ router.post("/api/salesbot", requireSalesbotSecret, async (req, res) => {
 
   // Bloqueia retries do Kommo: mesma mensagem para o mesmo lead dentro de 8s
   if (isDuplicateMessage(leadId, message)) {
-    console.log(`[Salesbot] lead=${leadId} — mensagem duplicada bloqueada: "${message.slice(0, 40)}"`);
+    console.log(`[Salesbot] lead=${leadId} — mensagem duplicada bloqueada`);
     return res.json({ text: "" });
   }
   markMessageSeen(leadId, message);
@@ -180,7 +180,7 @@ router.post("/api/salesbot", requireSalesbotSecret, async (req, res) => {
     });
   }
 
-  console.log(`[Salesbot] lead=${leadId} → ${parts.length} msg(s) — "${text.slice(0, 100)}"`);
+  console.log(`[Salesbot] lead=${leadId} → ${parts.length} resposta(s), chars=${text.length}`);
   if (returnUrl) {
     try {
       await continueKommoSalesbot(returnUrl, text);

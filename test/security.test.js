@@ -74,6 +74,22 @@ test("webhook Kommo bloqueia chamada sem segredo proprio", async () => {
   assert.equal(response.status, 401);
 });
 
+test("endpoint alternativo Kommo também exige segredo e valida a conta", async () => {
+  const semSegredo = await fetch(baseUrl + "/api/kommo/message", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ account: { subdomain: "qualquer" }, message: { add: [] } })
+  });
+  assert.equal(semSegredo.status, 401);
+
+  const autenticado = await fetch(baseUrl + "/api/kommo/message?secret=test-webhook-secret", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ account: { subdomain: "" } })
+  });
+  assert.equal(autenticado.status, 200);
+});
+
 test("login exige e-mail e senha", async () => {
   const response = await fetch(baseUrl + "/api/auth/login", {
     method: "POST",

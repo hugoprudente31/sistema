@@ -232,6 +232,26 @@ test('admin: POST /api/usuarios confirma que a conta ficou pronta para login', a
   } finally { restore(); }
 });
 
+test('admin: POST /api/usuarios não sobrescreve uma conta com e-mail já cadastrado', async function() {
+  const originalQuery = pool.query;
+  pool.query = async function(sql) {
+    if (String(sql).includes('INSERT INTO usuarios')) {
+      const error = new Error('duplicate key value violates unique constraint');
+      error.code = '23505';
+      throw error;
+    }
+    return { rows: [] };
+  };
+  try {
+    const r = await fetch(baseUrl + '/api/usuarios', {
+      method: 'POST', headers: H(tok('admin')),
+      body: JSON.stringify({ nome: 'Duplicado', email: 'existente@novo.com', senha: 'Senha#2026Forte', cargo: 'atendimento central' })
+    });
+    assert.equal(r.status, 409);
+    assert.match((await r.json()).message, /já cadastrado/i);
+  } finally { pool.query = originalQuery; }
+});
+
 test('admin: POST /api/usuarios rejeita loja fora do cadastro oficial (evita repetir o bug da conta Ademar de Barros)', async function() {
   // Bug real encontrado em produção: 4 contas da loja Ademar de Barros foram
   // gravadas com usuarios.loja = "Óticas Target - Santo Antônio" — um valor
