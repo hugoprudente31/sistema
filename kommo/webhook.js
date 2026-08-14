@@ -2,8 +2,8 @@
 
 const crypto      = require("crypto");
 const express     = require("express");
-const { Pool }    = require("pg");
 const router      = express.Router();
+const { pool }    = require("../lib/db");
 const kommo       = require("./client");
 const scheduling  = require("./scheduling");
 const { syncLeadAppointment } = require("./appointmentSync");
@@ -11,11 +11,6 @@ const SM          = require("./bot/stateManager");
 const { processMessage, processNewLead } = require("./bot/flowEngine");
 const { adicionarBloqueio, removerBloqueio, listarBloqueios } = require("./scheduling");
 const crmLog      = require("./crmLog");
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_SSL === "false" ? false : { rejectUnauthorized: false },
-});
 
 function safeEqual(value, expected) {
   const a = Buffer.from(String(value || ""));

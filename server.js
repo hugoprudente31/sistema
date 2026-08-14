@@ -4,8 +4,14 @@ const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
-const { Pool } = require("pg");
 require("dotenv").config();
+
+const { pool, databaseConfigSummary } = require("./lib/db");
+const { runMigrations } = require("./lib/migrations");
+const {
+  startDatabaseMaintenanceCron,
+  retentionPreview,
+} = require("./lib/databaseMaintenance");
 
 const { startRecoveryCron } = require("./kommo/recovery");
 const { startReminderCron, runReminders, runTwoHourReminders, scheduleDaily } = require("./kommo/reminder");
@@ -174,22 +180,6 @@ function validarAdAnalyzerOsKey(req, res, next) {
   }
   next();
 }
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL
-});
-
-// O Postgres gerenciado usa UTC por padrão para CURRENT_TIMESTAMP/NOW().
-// Como as colunas de data/hora são TIMESTAMP sem fuso, isso fazia qualquer
-// registro após ~21h (horário de Brasília) gravar e exibir a data do dia
-// seguinte. Fixamos o fuso da sessão do Postgres para bater com o fuso do
-// processo Node (TZ=America/Sao_Paulo), corrigindo isso em todo o sistema
-// de uma vez, sem precisar tocar em cada query que usa CURRENT_TIMESTAMP.
-pool.on("connect", (client) => {
-  client.query("SET TIME ZONE 'America/Sao_Paulo'").catch((err) => {
-    console.error("[pool] Falha ao definir fuso horário da sessão:", err.message);
-  });
-});
 
 function safeEqual(value, expected) {
   const left = crypto.createHash("sha256").update(String(value || "")).digest();
@@ -1652,6 +1642,7 @@ async function initDatabase() {
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_crm_mensagens_lead ON crm_mensagens(kommo_lead_id, criado_em);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_agendamentos_kommo_lead_id ON agendamentos(kommo_lead_id);`);
+  await runMigrations(pool);
 }
 
 const loginAttempts = new Map();
@@ -4646,6 +4637,61 @@ app.get("/api/admin/diag/loja-mismatch", requireSuperAdmin, async (req, res) => 
   }
 });
 
+app.get("/api/admin/database/health", requireSuperAdmin, async (req, res) => {
+  try {
+    const [database, tables, jobs, migrations, retention] = await Promise.all([
+      pool.query(`
+        SELECT current_database() AS database,
+               current_setting('server_version') AS postgres_version,
+               pg_database_size(current_database())::bigint AS size_bytes,
+               NOW() AS checked_at
+      `),
+      pool.query(`
+        SELECT relname AS tabela, n_live_tup::bigint AS linhas_estimadas,
+               n_dead_tup::bigint AS linhas_mortas,
+               last_autovacuum, last_autoanalyze
+          FROM pg_stat_user_tables
+         ORDER BY n_live_tup DESC
+         LIMIT 30
+      `),
+      pool.query(`
+        SELECT id, automacao, iniciado_em, finalizado_em, status,
+               processados, enviados, erros, erro
+          FROM automacao_execucoes
+         ORDER BY iniciado_em DESC
+         LIMIT 30
+      `),
+      pool.query(`
+        SELECT id, description, aplicado_em
+          FROM schema_migrations
+         ORDER BY aplicado_em, id
+      `),
+      retentionPreview(),
+    ]);
+
+    res.json({
+      ok: true,
+      database: database.rows[0],
+      pool: {
+        ...databaseConfigSummary(),
+        total: pool.totalCount,
+        idle: pool.idleCount,
+        waiting: pool.waitingCount,
+      },
+      tabelas: tables.rows,
+      automacoes_recentes: jobs.rows,
+      migrations: migrations.rows,
+      retencao: {
+        enabled: process.env.DATABASE_RETENTION_ENABLED === "true",
+        crmEnabled: process.env.DATABASE_CRM_RETENTION_ENABLED === "true",
+        ...retention,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: "Falha ao consultar a saúde do banco." });
+  }
+});
+
 app.get("/api/admin/kommo/pipelines", requireSuperAdmin, async (req, res) => {
   try {
     const kommoClient = require('./kommo/client');
@@ -5779,10 +5825,12 @@ async function startServer() {
   startRecoveryCron();
   startFollowupCron();
   startAuditoriaIntegridadeCron();
+  startDatabaseMaintenanceCron();
   return new Promise((resolve) => {
     const server = app.listen(PORT, "0.0.0.0", () => {
       console.log(`Sistema rodando na porta ${PORT}`);
       console.log("PostgreSQL conectado e tabelas verificadas.");
+      console.log("PostgreSQL protegido:", databaseConfigSummary());
       resolve(server);
     });
   });

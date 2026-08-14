@@ -10,8 +10,8 @@ test("Kommo scheduling usa PostgreSQL em vez de GAS", () => {
   const webhook = fs.readFileSync(path.join(root, "kommo", "webhook.js"), "utf8");
   const appointmentSync = fs.readFileSync(path.join(root, "kommo", "appointmentSync.js"), "utf8");
 
-  assert.match(scheduling, /require\("pg"\)/);
-  assert.match(scheduling, /DATABASE_URL/);
+  assert.match(scheduling, /require\("\.\.\/lib\/db"\)/);
+  assert.doesNotMatch(scheduling, /new Pool/);
   assert.match(scheduling, /INSERT INTO agendamentos/);
   assert.match(scheduling, /INSERT INTO clientes/);
   assert.doesNotMatch(scheduling, /GAS_DEPLOY_URL|GAS_API_KEY|callGAS|salvarAgendamento|getAgendamentos/);

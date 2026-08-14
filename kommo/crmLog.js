@@ -2,12 +2,7 @@
 // Espelha (não substitui) a conversa do Kommo em Postgres para o painel CRM.
 // Nunca deve lançar/bloquear o fluxo do bot: toda falha é só logada.
 
-const { Pool } = require("pg");
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_SSL === "false" ? false : { rejectUnauthorized: false },
-});
+const { pool } = require("../lib/db");
 
 async function registrarMensagem({ leadId, talkId, chatId, direcao, autorTipo, autorNome = null, texto }) {
   if (!leadId || !texto) return;
