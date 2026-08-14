@@ -2,14 +2,9 @@
 // Consulta disponibilidade e cria agendamentos diretamente no PostgreSQL.
 
 const crypto = require("crypto");
-const { Pool } = require("pg");
+const { pool } = require("../lib/db");
 const mailingboss = require("../mailingboss");
 const { resolverJornadaLoja, estaOptometristaDisponivel, gerarSlotsJornada } = require("../lib/horarios");
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_SSL === "false" ? false : { rejectUnauthorized: false },
-});
 
 // ── Bloqueios de disponibilidade ─────────────────────────────────
 // Garante que a tabela existe na primeira chamada (idempotente).

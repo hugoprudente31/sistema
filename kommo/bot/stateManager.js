@@ -1,13 +1,8 @@
 // Bot State Manager — Sistema Óticas Target
 // Persiste estado de conversa no PostgreSQL (primário) e Kommo notas (fallback).
 
-const { Pool } = require("pg");
+const { pool } = require("../../lib/db");
 const kommo = require("../client");
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_SSL === "false" ? false : { rejectUnauthorized: false },
-});
 
 const STATE_NOTE_PREFIX = "[BOT_STATE_V1]";
 

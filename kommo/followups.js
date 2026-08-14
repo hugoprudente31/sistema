@@ -1,13 +1,9 @@
 "use strict";
 
-const { Pool } = require("pg");
+const { pool } = require("../lib/db");
+const { runMonitoredJob } = require("../lib/jobMonitor");
 const kommo = require("./client");
 const MSG = require("./bot/messages");
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_SSL === "false" ? false : { rejectUnauthorized: false },
-});
 
 let followupRunning = false;
 
@@ -152,7 +148,7 @@ function startFollowupCron() {
     Number.parseInt(process.env.FOLLOWUP_INTERVAL_MINUTES || "1", 10) || 1
   );
   const execute = async () => {
-    try { await runFollowups(); }
+    try { await runMonitoredJob("followups", runFollowups); }
     catch (error) { console.error("[Followups] Erro no job:", error.message); }
   };
   execute();

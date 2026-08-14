@@ -3,6 +3,7 @@
 const kommo = require("./client");
 const SM = require("./bot/stateManager");
 const labels = require("./labels");
+const { runMonitoredJob } = require("../lib/jobMonitor");
 
 const HOURS_72 = 72 * 60 * 60 * 1000;
 let recoveryRunning = false;
@@ -125,7 +126,7 @@ function startRecoveryCron() {
     Number.parseInt(process.env.RECOVERY_INTERVAL_MINUTES || "15", 10) || 15
   );
   const execute = async () => {
-    try { await runRecovery(); }
+    try { await runMonitoredJob("recovery", runRecovery); }
     catch (error) { console.error("[Recovery] Erro no job:", error.message); }
   };
   execute();

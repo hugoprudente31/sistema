@@ -10,6 +10,27 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      # Testes unitários usam mocks e devem falhar rápido se algum módulo
+      # tentar tocar o banco. A integração substitui DATABASE_URL pelo banco
+      # temporário antes de carregar o servidor.
+      DATABASE_URL: postgresql://invalid:invalid@127.0.0.1:1/invalid
+      DATABASE_SSL: "false"
+      DATABASE_CONNECT_TIMEOUT_MS: "1000"
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v4
@@ -18,4 +39,7 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm run check
+      - run: npm run test:integration
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
       - run: npm audit --omit=dev

@@ -1,13 +1,9 @@
 // Kommo appointment reminders - native Salesbot launcher
 
-const { Pool } = require("pg");
+const { pool } = require("../lib/db");
 const kommo = require("./client");
 const SM = require("./bot/stateManager");
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_SSL === "false" ? false : { rejectUnauthorized: false },
-});
+const { runMonitoredJob } = require("../lib/jobMonitor");
 
 let reminder24hRunning = false;
 let reminder2hRunning = false;
@@ -228,20 +224,23 @@ function startReminderCron() {
     console.log("    Reminder: desativado para validacao");
   } else {
     const targetHour = Number.parseInt(process.env.REMINDER_HOUR || "8", 10);
-    scheduleDaily("Reminder", targetHour, runReminders);
+    scheduleDaily("Reminder", targetHour, () => runMonitoredJob("reminder_24h", runReminders));
     // Se o container reiniciar depois das 8h, o timer diário apontaria apenas
     // para amanhã e os lembretes do dia seriam perdidos. Esta verificação
     // periódica recupera reinícios e falhas transitórias; a coluna
     // lembrete_24h_em mantém o envio idempotente.
     const retryMinutes = Number.parseInt(process.env.REMINDER_RETRY_INTERVAL_MINUTES || "30", 10);
     scheduleEveryMinutes("ReminderCatchup", retryMinutes, async () => {
-      if (new Date().getHours() >= targetHour) await runReminders();
+      if (new Date().getHours() >= targetHour) {
+        await runMonitoredJob("reminder_24h_catchup", runReminders);
+      }
     });
     console.log(`    Reminder: cron ativo (${targetHour}h)`);
   }
   if (process.env.REMINDER_2H_AUTOMATION_ENABLED !== "false") {
     const intervalMinutes = Number.parseInt(process.env.REMINDER_2H_INTERVAL_MINUTES || "5", 10);
-    scheduleEveryMinutes("Reminder2h", intervalMinutes, runTwoHourReminders);
+    scheduleEveryMinutes("Reminder2h", intervalMinutes,
+      () => runMonitoredJob("reminder_2h", runTwoHourReminders));
   }
 }
 
