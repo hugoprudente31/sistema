@@ -48,3 +48,17 @@ test('perfil Admin usa navegação focada por área sem remover módulos existen
     assert.match(html, new RegExp(`id="${id}"`));
   }
 });
+
+test('horário de funcionamento por loja aparece somente na página de Configurações', () => {
+  const adminAreasInicio = html.indexOf('var ADMIN_AREAS');
+  const configuracoesInicio = html.indexOf('configuracoes: {', adminAreasInicio);
+  const configuracoesFim = html.indexOf('tecnica: {', configuracoesInicio);
+  const configuracoes = html.slice(configuracoesInicio, configuracoesFim);
+  assert.match(configuracoes, /cardConfigHorarioLoja/);
+
+  for (const area of ['executivo', 'crm', 'operacao', 'financeiro', 'gestao']) {
+    const inicio = html.indexOf(`${area}: {`, adminAreasInicio);
+    const fim = html.indexOf('\n  },', inicio);
+    assert.doesNotMatch(html.slice(inicio, fim), /cardConfigHorarioLoja/);
+  }
+});
