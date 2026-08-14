@@ -4148,8 +4148,9 @@ function salvarUsuario(id) {
   .then(function(r){ return r.json(); })
   .then(function(res) {
     if (!res || !res.ok) throw new Error(res.message || res.error || 'Falha ao salvar usuário.');
+    if (!id && res.loginReady !== true) throw new Error('O servidor não confirmou que a conta está pronta para login. Revise o cadastro.');
     document.getElementById('usuarioModalBackdrop').remove();
-    toast((id ? 'Usuário atualizado' : 'Usuário criado') + ' com sucesso.', 'ok');
+    toast(id ? 'Usuário atualizado com sucesso.' : 'Conta criada e pronta para login.', 'ok');
     carregarUsuarios();
   })
   .catch(function(err) {

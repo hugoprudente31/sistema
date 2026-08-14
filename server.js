@@ -3934,8 +3934,12 @@ app.post("/api/usuarios", requireAdmin, async (req, res) => {
     const b = req.body || {};
     const nome = clean(b.nome);
     const email = clean(b.email).toLowerCase();
-    const cargo = clean(b.cargo);
+    const cargo = clean(b.cargo).toLowerCase();
     const password = String(b.password || b.senha || "");
+    const allowedRoles = new Set([
+      "admin", "atendimento central", "gerente de loja", "consultor de vendas",
+      "vendedor", "comprador", "optometrista"
+    ]);
     if (cargo.toLowerCase() === "super_admin") {
       return res.status(403).json({ ok: false, message: "O perfil Super Admin é exclusivo e não pode ser atribuído pelo painel." });
     }
@@ -3945,8 +3949,17 @@ app.post("/api/usuarios", requireAdmin, async (req, res) => {
     if (!nome || !email || !cargo) {
       return res.status(400).json({ ok: false, message: "Nome, e-mail e perfil são obrigatórios." });
     }
-    if (password && password.length < 12) {
-      return res.status(400).json({ ok: false, message: "A senha deve ter pelo menos 12 caracteres." });
+    if (!allowedRoles.has(cargo)) {
+      return res.status(400).json({ ok: false, message: "Perfil de acesso inválido." });
+    }
+    // Uma conta sem senha aparece como ativa no painel, mas nunca consegue
+    // autenticar. O navegador já exigia a senha; esta validação no servidor
+    // protege também integrações, scripts e clientes desatualizados.
+    if (password.length < 12) {
+      return res.status(400).json({ ok: false, message: "Informe uma senha temporária com pelo menos 12 caracteres. A conta não pode ser criada sem acesso válido." });
+    }
+    if (b.ativo === false) {
+      return res.status(400).json({ ok: false, message: "Uma conta nova precisa ser criada ativa para que o acesso possa ser validado." });
     }
     // Mesma validação da landing page: um valor de loja fora do cadastro
     // oficial (ex: nome antigo/legado da loja) faz esse usuário nunca ver os
@@ -3958,7 +3971,7 @@ app.post("/api/usuarios", requireAdmin, async (req, res) => {
       loja = normalizeLojaPublica(b.loja);
       if (!loja) return res.status(400).json({ ok: false, message: "Loja não reconhecida. Selecione uma das lojas cadastradas no sistema." });
     }
-    const passwordHash = password ? await bcrypt.hash(password, 12) : null;
+    const passwordHash = await bcrypt.hash(password, 12);
     const gasId = makeGasId("usuario", email);
     const result = await pool.query(
       `INSERT INTO usuarios (gas_id, nome, email, senha, cargo, loja, can_view_finance, ativo, origem_sync, password_changed_at, atualizado_em)
@@ -3973,10 +3986,15 @@ app.post("/api/usuarios", requireAdmin, async (req, res) => {
          origem_sync = 'postgres',
          password_changed_at = CASE WHEN EXCLUDED.senha IS NULL THEN usuarios.password_changed_at ELSE CURRENT_TIMESTAMP END,
          atualizado_em = CURRENT_TIMESTAMP
-       RETURNING id, gas_id, nome, email, cargo, loja, access_tags, can_view_finance, ativo, criado_em, atualizado_em`,
-      [gasId, nome, email, passwordHash, cargo, loja, !!b.can_view_finance, b.ativo !== false]
+       RETURNING id, gas_id, nome, email, cargo, loja, access_tags, can_view_finance, ativo,
+                 (senha LIKE '$2%') AS login_ready, criado_em, atualizado_em`,
+      [gasId, nome, email, passwordHash, cargo, loja, !!b.can_view_finance, true]
     );
-    res.json({ ok: true, message: "Usuário salvo com sucesso.", usuario: result.rows[0] });
+    const usuario = result.rows[0];
+    if (!usuario || !usuario.login_ready || !usuario.ativo) {
+      return res.status(500).json({ ok: false, message: "O cadastro não ficou pronto para login. Revise os dados antes de entregar o acesso." });
+    }
+    res.json({ ok: true, loginReady: true, message: "Conta criada e pronta para login.", usuario });
   } catch (error) {
     if (error.code === '23505') {
       return res.status(409).json({ ok: false, message: "E-mail já cadastrado no sistema." });
