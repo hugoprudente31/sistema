@@ -33,7 +33,10 @@ async function initNegociacaoTables(pool) {
       ADD COLUMN IF NOT EXISTS proposta_agendada_em TIMESTAMPTZ,
       ADD COLUMN IF NOT EXISTS proposta_enviada_em TIMESTAMPTZ,
       ADD COLUMN IF NOT EXISTS proposta_ultima_tentativa_em TIMESTAMPTZ,
-      ADD COLUMN IF NOT EXISTS proposta_erro TEXT;
+      ADD COLUMN IF NOT EXISTS proposta_erro TEXT,
+      ADD COLUMN IF NOT EXISTS proposta_tentativas INTEGER DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS proposta_proxima_tentativa_em TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS proposta_falha_em TIMESTAMPTZ;
   `);
 
   await pool.query(`
@@ -175,7 +178,10 @@ function registerRoutes(app, pool, deps) {
       var propostaProgramada = await pool.query(
         `UPDATE agendamento_negociacao n
          SET proposta_agendada_em = NOW() + INTERVAL '25 minutes',
-             proposta_erro = NULL
+             proposta_erro = NULL,
+             proposta_tentativas = 0,
+             proposta_proxima_tentativa_em = NULL,
+             proposta_falha_em = NULL
          WHERE n.id = $1
            AND n.proposta_enviada_em IS NULL
            AND EXISTS (

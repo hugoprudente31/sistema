@@ -23,6 +23,10 @@ test('não compareceu agenda e envia o acompanhamento após 45 minutos', () => {
   assert.match(followups, /INTERVAL '45 minutes'/);
   assert.match(followups, /nao_compareceu_lembrete_em = NOW\(\)/);
   assert.match(followups, /sendProactiveMessage/);
+  assert.match(followups, /nao_compareceu_tentativas/);
+  assert.match(followups, /nao_compareceu_falha_em/);
+  assert.match(followups, /INTERVAL '5 minutes' \* POWER/);
+  assert.match(followups, /followup_falhou/);
 });
 
 test('negociação salva programa acompanhamento persistente para 25 minutos', () => {
@@ -35,4 +39,7 @@ test('negociação salva programa acompanhamento persistente para 25 minutos', (
   assert.match(followups, /proposta_agendada_em <= NOW\(\)/);
   assert.match(followups, /proposta_enviada_em = NOW\(\)/);
   assert.match(followups, /sendProactiveMessage/);
+  assert.match(followups, /proposta_tentativas/);
+  assert.match(followups, /proposta_falha_em/);
+  assert.match(followups, /proposta_falhou/);
 });

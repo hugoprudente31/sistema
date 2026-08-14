@@ -1219,6 +1219,10 @@ async function initDatabase() {
   await addColumnIfMissing("agendamentos", "atendimento_semaforo_label", "TEXT DEFAULT ''");
   await addColumnIfMissing("agendamentos", "nao_compareceu_em", "TIMESTAMPTZ");
   await addColumnIfMissing("agendamentos", "nao_compareceu_lembrete_em", "TIMESTAMPTZ");
+  await addColumnIfMissing("agendamentos", "nao_compareceu_tentativas", "INTEGER DEFAULT 0");
+  await addColumnIfMissing("agendamentos", "nao_compareceu_proxima_tentativa_em", "TIMESTAMPTZ");
+  await addColumnIfMissing("agendamentos", "nao_compareceu_erro", "TEXT");
+  await addColumnIfMissing("agendamentos", "nao_compareceu_falha_em", "TIMESTAMPTZ");
 
   await pool.query(`
     CREATE OR REPLACE FUNCTION normalizar_identidade_comercial_tgt(valor TEXT)
@@ -1309,12 +1313,20 @@ async function initDatabase() {
         IF TG_OP = 'INSERT' OR NOT antigo_nao_compareceu THEN
           NEW.nao_compareceu_em := NOW();
           NEW.nao_compareceu_lembrete_em := NULL;
+          NEW.nao_compareceu_tentativas := 0;
+          NEW.nao_compareceu_proxima_tentativa_em := NULL;
+          NEW.nao_compareceu_erro := NULL;
+          NEW.nao_compareceu_falha_em := NULL;
         ELSE
           NEW.nao_compareceu_em := COALESCE(NEW.nao_compareceu_em, NOW());
         END IF;
       ELSE
         NEW.nao_compareceu_em := NULL;
         NEW.nao_compareceu_lembrete_em := NULL;
+        NEW.nao_compareceu_tentativas := 0;
+        NEW.nao_compareceu_proxima_tentativa_em := NULL;
+        NEW.nao_compareceu_erro := NULL;
+        NEW.nao_compareceu_falha_em := NULL;
       END IF;
       RETURN NEW;
     END;
@@ -3967,16 +3979,6 @@ app.post("/api/usuarios", requireAdmin, async (req, res) => {
     const result = await pool.query(
       `INSERT INTO usuarios (gas_id, nome, email, senha, cargo, loja, can_view_finance, ativo, origem_sync, password_changed_at, atualizado_em)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'postgres',CASE WHEN $4::text IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END,CURRENT_TIMESTAMP)
-       ON CONFLICT (email) DO UPDATE SET
-         nome = EXCLUDED.nome,
-         senha = COALESCE(EXCLUDED.senha, usuarios.senha),
-         cargo = EXCLUDED.cargo,
-         loja = EXCLUDED.loja,
-         can_view_finance = EXCLUDED.can_view_finance,
-         ativo = EXCLUDED.ativo,
-         origem_sync = 'postgres',
-         password_changed_at = CASE WHEN EXCLUDED.senha IS NULL THEN usuarios.password_changed_at ELSE CURRENT_TIMESTAMP END,
-         atualizado_em = CURRENT_TIMESTAMP
        RETURNING id, gas_id, nome, email, cargo, loja, access_tags, can_view_finance, ativo,
                  (senha LIKE '$2%') AS login_ready, criado_em, atualizado_em`,
       [gasId, nome, email, passwordHash, cargo, loja, !!b.can_view_finance, true]

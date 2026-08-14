@@ -86,7 +86,9 @@ router.post("/webhook/kommo", requireWebhookSecret, async (req, res) => {
   res.status(200).json({ received: true });
 
   const payload = req.body;
-  console.log("[Webhook/Kommo] Evento:", JSON.stringify(payload).slice(0, 400));
+  console.log("[Webhook/Kommo] Evento autenticado", {
+    type: payload?.message?.add ? "message.add" : payload?.leads?.add ? "lead.add" : payload?.leads?.update ? "lead.update" : "unknown"
+  });
 
   try {
 
@@ -161,10 +163,9 @@ function trackEvent(tipo, resumo) {
 
 // ── POST /api/kommo/message ──────────────────────────────────────
 // Webhook para eventos: add_message, add_talk, add_lead.
-// Kommo não envia secret — verifica pelo subdomain no payload.
-router.post("/api/kommo/message", async (req, res) => {
-  res.status(200).json({ received: true });
-
+// Exige o mesmo segredo do webhook principal (Bearer, cabeçalho, query ou
+// campo secret) e também confirma o subdomínio da conta no payload.
+router.post("/api/kommo/message", requireWebhookSecret, async (req, res) => {
   const payload = req.body;
 
   const incomingSubdomain = payload?.account?.subdomain || "";
@@ -173,19 +174,19 @@ router.post("/api/kommo/message", async (req, res) => {
   // account.subdomain batendo com ele. Antes, omitir o campo (trivial de forjar) zerava
   // incomingSubdomain e pulava a checagem inteira — bypass de autenticação.
   if (expectedSubdomain && incomingSubdomain !== expectedSubdomain) {
-    console.log(`[Kommo/Message] Subdomínio ausente ou inesperado: "${incomingSubdomain}" — ignorando`);
-    return;
+    return res.status(401).json({ ok: false, message: "Conta Kommo não autorizada." });
   }
 
-  console.log("[Kommo/Message] Payload:", JSON.stringify(payload).slice(0, 400));
+  res.status(200).json({ received: true });
+  console.log("[Kommo/Message] Evento recebido", {
+    account: incomingSubdomain,
+    type: payload?.message?.add ? "message.add" : payload?.talk?.add ? "talk.add" : payload?.leads?.add ? "lead.add" : "unknown"
+  });
 
   try {
     // ── Evento: nova conversa WhatsApp (add_talk) ────────────────
     if (payload?.talk?.add) {
       const talk = payload.talk.add[0];
-      // Log completo do primeiro add_talk para mapear estrutura real do Kommo
-      console.log("[Kommo/Message] add_talk payload completo:", JSON.stringify(talk).slice(0, 500));
-
       // Kommo usa entity_id (entity_type=lead) OU lead_id
       const leadId =
         talk?.lead_id ||
@@ -216,7 +217,7 @@ router.post("/api/kommo/message", async (req, res) => {
           pipeline_id: talk.pipeline_id ? String(talk.pipeline_id) : null,
         });
       } else {
-        console.log("[Kommo/Message] add_talk sem lead_id/entity_id:", JSON.stringify(talk).slice(0, 300));
+        console.log("[Kommo/Message] add_talk sem lead_id/entity_id");
       }
       return;
     }
@@ -594,7 +595,7 @@ router.get("/api/admin/diagnostico", requireWebhookSecret, async (req, res) => {
       KOMMO_STAGES_MAP:          process.env.KOMMO_STAGES_MAP ? "✅ configurado" : "(não definido — usando DEFAULT_STAGES_MAP hardcoded)",
       LINK_TESTE_VISAO:          process.env.LINK_TESTE_VISAO ?? "(não definido — usando padrão)",
     },
-    webhook_url_ativo:     "POST https://sistema.oticastgt.com.br/api/kommo/message",
+    webhook_url_ativo:     "POST https://sistema.oticastgt.com.br/api/kommo/message?secret=<KOMMO_WEBHOOK_SECRET>",
     webhook_url_legado:    "POST https://sistema.oticastgt.com.br/webhook/kommo (requer KOMMO_WEBHOOK_SECRET no header)",
     modo_bot:              process.env.KOMMO_USE_SALESBOT === "true" ? "SALESBOT (/api/salesbot)" : "WEBHOOK DIRETO (/api/kommo/message)",
     ultimos_eventos_recebidos: _recentEvents,
