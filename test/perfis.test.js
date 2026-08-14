@@ -193,7 +193,7 @@ test('admin: negociação de qualquer loja — 200', async function() {
 test('admin: POST /api/usuarios — não retorna 403', async function() {
   const restore = withQuery({
     'SELECT * FROM usuarios WHERE': { rows: [] },
-    'INSERT INTO usuarios': { rows: [{ id: 99, nome: 'Novo', email: 'n@n.com', cargo: 'vendedor', loja: G, ativo: true }] }
+    'INSERT INTO usuarios': { rows: [{ id: 99, nome: 'Novo', email: 'n@n.com', cargo: 'vendedor', loja: G, ativo: true, login_ready: true }] }
   });
   try {
     const r = await fetch(baseUrl + '/api/usuarios', {
@@ -201,6 +201,34 @@ test('admin: POST /api/usuarios — não retorna 403', async function() {
       body: JSON.stringify({ nome: 'Novo', email: 'n@novo.com', senha: 'Senha#2026Forte', cargo: 'vendedor', loja: G })
     });
     assert.ok(r.status !== 403, 'admin não deve ser bloqueado em POST /api/usuarios');
+  } finally { restore(); }
+});
+
+test('admin: POST /api/usuarios não cria conta sem senha de login', async function() {
+  const restore = withQuery({});
+  try {
+    const r = await fetch(baseUrl + '/api/usuarios', {
+      method: 'POST', headers: H(tok('admin')),
+      body: JSON.stringify({ nome: 'Sem Senha', email: 'sem-senha@novo.com', cargo: 'atendimento central' })
+    });
+    assert.equal(r.status, 400);
+    assert.match((await r.json()).message, /senha temporária/i);
+  } finally { restore(); }
+});
+
+test('admin: POST /api/usuarios confirma que a conta ficou pronta para login', async function() {
+  const restore = withQuery({
+    'INSERT INTO usuarios': { rows: [{ id: 100, nome: 'Central', email: 'central@novo.com', cargo: 'atendimento central', loja: null, ativo: true, login_ready: true }] }
+  });
+  try {
+    const r = await fetch(baseUrl + '/api/usuarios', {
+      method: 'POST', headers: H(tok('admin')),
+      body: JSON.stringify({ nome: 'Central', email: 'central@novo.com', senha: 'Senha#2026Forte', cargo: 'atendimento central' })
+    });
+    assert.equal(r.status, 200);
+    const body = await r.json();
+    assert.equal(body.loginReady, true);
+    assert.equal(body.usuario.login_ready, true);
   } finally { restore(); }
 });
 
@@ -235,7 +263,7 @@ test('admin: POST /api/usuarios normaliza variações reconhecidas da loja antes
     if (sql.includes('SELECT * FROM usuarios WHERE')) return { rows: [] };
     if (sql.includes('INSERT INTO usuarios')) {
       payloadInserido = params;
-      return { rows: [{ id: 99, nome: 'Novo', email: 'n3@n.com', cargo: 'vendedor', loja: 'óticas Target - Ademar de Barros', ativo: true }] };
+      return { rows: [{ id: 99, nome: 'Novo', email: 'n3@n.com', cargo: 'vendedor', loja: 'óticas Target - Ademar de Barros', ativo: true, login_ready: true }] };
     }
     return { rows: [] };
   };
