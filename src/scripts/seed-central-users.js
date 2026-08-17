@@ -14,7 +14,11 @@
  */
 
 require('dotenv').config();
-const bcrypt = require('bcrypt');
+// bcryptjs (não o pacote nativo bcrypt) — mesma lib usada em todo o resto do
+// projeto (server.js, src/scripts/provision-profile-users.js). O script não
+// depende de nenhuma binding nativa, e "bcrypt" nem consta no package.json:
+// rodar este arquivo com o import antigo falhava direto com MODULE_NOT_FOUND.
+const bcrypt = require('bcryptjs');
 const { Pool } = require('pg');
 
 const DRY_RUN = process.argv.includes('--dry-run');
