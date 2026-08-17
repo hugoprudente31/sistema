@@ -933,12 +933,15 @@
       <div class="row-4">
         <div><label>Atende das</label><input id="horOptoInicio" type="time"></div>
         <div><label>Até</label><input id="horOptoFim" type="time"></div>
+        <div><label>Pausa início</label><input id="horOptoPausaInicio" type="time"></div>
+        <div><label>Pausa fim</label><input id="horOptoPausaFim" type="time"></div>
       </div>
+      <p class="legend-mini" style="margin-top:6px;">Pausa é opcional — deixe os dois campos em branco se o optometrista atende o dia todo sem intervalo.</p>
       <div style="display:flex;gap:10px;margin-top:12px;">
         <button onclick="salvarHorarioOptometrista()">Salvar dia</button>
       </div>
       <div id="msgHorOpto" class="msg"></div>
-      <div class="scroll-x" style="margin-top:18px;"><table><thead><tr><th>Optometrista</th><th>Loja</th><th>Dia</th><th>Início</th><th>Fim</th><th>Origem</th><th>Ações</th></tr></thead><tbody id="horariosOptometristaBody"></tbody></table></div>
+      <div class="scroll-x" style="margin-top:18px;"><table><thead><tr><th>Optometrista</th><th>Loja</th><th>Dia</th><th>Início</th><th>Fim</th><th>Pausa</th><th>Origem</th><th>Ações</th></tr></thead><tbody id="horariosOptometristaBody"></tbody></table></div>
     </div>
 
     <div class="card hidden" id="cardConfigBloqueiosAgenda">
@@ -3900,16 +3903,18 @@ function carregarHorariosOptometrista() {
 
 function renderizarHorariosOptometrista() {
   if (!horariosOptometristaCache.length) {
-    byId('horariosOptometristaBody').innerHTML = '<tr><td colspan="7">Nenhum optometrista ativo encontrado.</td></tr>';
+    byId('horariosOptometristaBody').innerHTML = '<tr><td colspan="8">Nenhum optometrista ativo encontrado.</td></tr>';
     return;
   }
   byId('horariosOptometristaBody').innerHTML = horariosOptometristaCache.map(function(h) {
+    var pausa = (h.intervalo_inicio && h.intervalo_fim) ? (h.intervalo_inicio.slice(0,5) + '–' + h.intervalo_fim.slice(0,5)) : '—';
     return '<tr>' +
       '<td>' + escapeHtml(h.optometrista_nome||'') + '</td>' +
       '<td>' + escapeHtml(h.optometrista_loja||'') + '</td>' +
       '<td>' + DIAS_SEMANA_NOMES[h.dia_semana] + '</td>' +
       '<td>' + (h.hora_inicio ? h.hora_inicio.slice(0,5) : '—') + '</td>' +
       '<td>' + (h.hora_fim ? h.hora_fim.slice(0,5) : '—') + '</td>' +
+      '<td>' + pausa + '</td>' +
       '<td>' + escapeHtml(h.origem||'configurado') + '</td>' +
       '<td>' + (h.id ? '<button class="danger icon-btn" onclick="removerHorarioOptometrista(' + h.id + ')">Restaurar padrão</button>' : '—') + '</td></tr>';
   }).join('');
@@ -3922,9 +3927,14 @@ function salvarHorarioOptometrista() {
     optometrista_id: Number(optometristaId),
     dia_semana: Number(byId('horOptoDia').value),
     hora_inicio: byId('horOptoInicio').value,
-    hora_fim: byId('horOptoFim').value
+    hora_fim: byId('horOptoFim').value,
+    intervalo_inicio: byId('horOptoPausaInicio').value || null,
+    intervalo_fim: byId('horOptoPausaFim').value || null
   };
   if (!payload.hora_inicio || !payload.hora_fim) { setMsg('msgHorOpto', 'Informe hora início e hora fim.', 'err'); return; }
+  if ((payload.intervalo_inicio && !payload.intervalo_fim) || (!payload.intervalo_inicio && payload.intervalo_fim)) {
+    setMsg('msgHorOpto', 'Informe início e fim da pausa juntos (ou deixe os dois em branco).', 'err'); return;
+  }
   showLoading(true);
   apiPost('/api/admin/configuracoes/horarios-optometrista', payload)
     .then(function(res) {

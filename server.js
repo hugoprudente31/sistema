@@ -1093,11 +1093,15 @@ async function initDatabase() {
       dia_semana SMALLINT NOT NULL CHECK (dia_semana BETWEEN 0 AND 6),
       hora_inicio TIME NOT NULL,
       hora_fim TIME NOT NULL,
+      intervalo_inicio TIME,
+      intervalo_fim TIME,
       atualizado_por_email TEXT,
       atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       UNIQUE (optometrista_id, dia_semana)
     );
   `);
+  await addColumnIfMissing("horarios_optometrista", "intervalo_inicio", "TIME");
+  await addColumnIfMissing("horarios_optometrista", "intervalo_fim", "TIME");
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS origens (
@@ -3713,6 +3717,8 @@ app.get("/api/admin/configuracoes/horarios-optometrista", requireAdminOuCentral,
             dia_semana: diaSemana,
             hora_inicio: null,
             hora_fim: null,
+            intervalo_inicio: null,
+            intervalo_fim: null,
             disponivel: false,
             origem: "não atende"
           });
@@ -3727,6 +3733,8 @@ app.get("/api/admin/configuracoes/horarios-optometrista", requireAdminOuCentral,
           dia_semana: diaSemana,
           hora_inicio: jornadaLoja.horaInicio,
           hora_fim: jornadaLoja.horaFim,
+          intervalo_inicio: jornadaLoja.intervaloInicio,
+          intervalo_fim: jornadaLoja.intervaloFim,
           disponivel: jornadaLoja.aberto,
           origem: "segue a loja"
         });
@@ -3745,6 +3753,8 @@ app.post("/api/admin/configuracoes/horarios-optometrista", requireAdminOuCentral
     const diaSemana = Math.trunc(Number(b.dia_semana));
     const horaInicio = clean(b.hora_inicio);
     const horaFim = clean(b.hora_fim);
+    const intervaloInicio = clean(b.intervalo_inicio);
+    const intervaloFim = clean(b.intervalo_fim);
     if (!optometristaId) return res.status(400).json({ ok: false, message: "Informe o optometrista." });
     if (!DIA_SEMANA_VALIDOS.includes(diaSemana)) {
       return res.status(400).json({ ok: false, message: "Dia da semana inválido (use 0 a 6)." });
@@ -3752,17 +3762,30 @@ app.post("/api/admin/configuracoes/horarios-optometrista", requireAdminOuCentral
     if (!/^\d{2}:\d{2}$/.test(horaInicio) || !/^\d{2}:\d{2}$/.test(horaFim)) {
       return res.status(400).json({ ok: false, message: "Informe hora início e hora fim válidas (HH:MM)." });
     }
+    // Pausa é opcional: os dois campos vêm juntos (ambos vazios = sem pausa
+    // nesse dia) para não deixar a disponibilidade com um limite aberto.
+    if ((intervaloInicio && !intervaloFim) || (!intervaloInicio && intervaloFim)) {
+      return res.status(400).json({ ok: false, message: "Informe início e fim da pausa juntos (ou deixe os dois em branco)." });
+    }
+    if (intervaloInicio && (!/^\d{2}:\d{2}$/.test(intervaloInicio) || !/^\d{2}:\d{2}$/.test(intervaloFim))) {
+      return res.status(400).json({ ok: false, message: "Horário de pausa inválido (HH:MM)." });
+    }
+    if (intervaloInicio && !(intervaloInicio >= horaInicio && intervaloFim <= horaFim && intervaloInicio < intervaloFim)) {
+      return res.status(400).json({ ok: false, message: "A pausa precisa estar dentro do horário de atendimento." });
+    }
 
     const result = await pool.query(
-      `INSERT INTO horarios_optometrista (optometrista_id, dia_semana, hora_inicio, hora_fim, atualizado_por_email, atualizado_em)
-       VALUES ($1,$2,$3,$4,$5,CURRENT_TIMESTAMP)
+      `INSERT INTO horarios_optometrista (optometrista_id, dia_semana, hora_inicio, hora_fim, intervalo_inicio, intervalo_fim, atualizado_por_email, atualizado_em)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,CURRENT_TIMESTAMP)
        ON CONFLICT (optometrista_id, dia_semana) DO UPDATE SET
          hora_inicio = EXCLUDED.hora_inicio,
          hora_fim = EXCLUDED.hora_fim,
+         intervalo_inicio = EXCLUDED.intervalo_inicio,
+         intervalo_fim = EXCLUDED.intervalo_fim,
          atualizado_por_email = EXCLUDED.atualizado_por_email,
          atualizado_em = CURRENT_TIMESTAMP
        RETURNING *`,
-      [optometristaId, diaSemana, horaInicio, horaFim, req.session.email]
+      [optometristaId, diaSemana, horaInicio, horaFim, intervaloInicio || null, intervaloFim || null, req.session.email]
     );
     res.json({
       ok: true,

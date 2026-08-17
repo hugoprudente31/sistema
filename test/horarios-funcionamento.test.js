@@ -81,3 +81,20 @@ test("estaOptometristaDisponivel: sem nome informado (ex: 'A definir') não trav
   const client = fakeClient([{ dia_semana: 2, hora_inicio: "09:00", hora_fim: "13:00" }]);
   assert.equal(await estaOptometristaDisponivel(client, { nome: "", loja: "x", diaSemana: 2, horario: "23:59" }), true);
 });
+
+test("estaOptometristaDisponivel: respeita a pausa cadastrada (não fica disponível no intervalo de almoço)", async () => {
+  const client = fakeClient([{
+    dia_semana: 1, hora_inicio: "10:00", hora_fim: "18:00", intervalo_inicio: "14:00", intervalo_fim: "15:00"
+  }]);
+  assert.equal(await estaOptometristaDisponivel(client, { nome: "Bruna", loja: "x", diaSemana: 1, horario: "13:45" }), true);
+  assert.equal(await estaOptometristaDisponivel(client, { nome: "Bruna", loja: "x", diaSemana: 1, horario: "14:00" }), false);
+  assert.equal(await estaOptometristaDisponivel(client, { nome: "Bruna", loja: "x", diaSemana: 1, horario: "14:30" }), false);
+  assert.equal(await estaOptometristaDisponivel(client, { nome: "Bruna", loja: "x", diaSemana: 1, horario: "15:00" }), true);
+});
+
+test("estaOptometristaDisponivel: sem pausa cadastrada, continua disponível o bloco inteiro (sem regressão)", async () => {
+  const client = fakeClient([{
+    dia_semana: 1, hora_inicio: "10:00", hora_fim: "18:00", intervalo_inicio: null, intervalo_fim: null
+  }]);
+  assert.equal(await estaOptometristaDisponivel(client, { nome: "Bruna", loja: "x", diaSemana: 1, horario: "14:30" }), true);
+});
