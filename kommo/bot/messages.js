@@ -86,9 +86,14 @@ module.exports = {
     `Um de nossos especialistas vai adorar te ajudar a encontrar a combinação perfeita para você! 🤩\n\n` +
     `Posso te conectar com um especialista agora? Responda SIM ou NÃO.`,
 
-  infoEndereco: (loja) =>
+  // optometristaInfo vem de scheduling.getOptometristaEHorarioLoja(prefixo) —
+  // sem optometrista cadastrado pra loja (ou erro de consulta), cai no
+  // horário fixo da loja como antes, pra nunca deixar o cliente sem resposta.
+  infoEndereco: (loja, optometristaInfo) =>
     `📍 ${loja.titulo}\n\n` +
-    `⏰ Horário de Funcionamento:\n${loja.horario}\n\n` +
+    (optometristaInfo
+      ? `👁️ Optometrista: ${optometristaInfo.nome}\n⏰ Horário de atendimento:\n${optometristaInfo.horarioTexto}\n\n`
+      : `⏰ Horário de Funcionamento:\n${loja.horario}\n\n`) +
     `📱 WhatsApp: ${loja.whatsapp}\n\n` +
     `Precisa de mais alguma informação? Responda SIM para falar com um especialista ou NÃO para voltar ao menu.`,
 
@@ -115,13 +120,24 @@ module.exports = {
     `✅ Perfeito! Seu agendamento do Teste de Visão foi confirmado e registrado no sistema.\n\n` +
     `📅 ${agendamento.data_agendamento} às ${agendamento.horario}\n` +
     `🏪 ${agendamento.loja}\n` +
-    `👁 ${agendamento.optometrista || "A definir"}\n\n` +
-    `Esse horário agora está reservado para você.`,
+    `👁 ${agendamento.optometrista || "A definir"}` +
+    (agendamento.email ? `\n📧 ${agendamento.email}` : "") +
+    `\n\nEsse horário agora está reservado para você.`,
 
   testeNaoEncontrado: (loja) =>
     `Ainda não localizei um agendamento confirmado no sistema para ${loja.titulo}. ⚠️\n\n` +
     `Conclua a escolha da data e do horário pelo link e depois responda CONFIRMADO novamente. ` +
     `Se você já concluiu, escreva ESPECIALISTA para nossa equipe verificar.`,
+
+  pedirEmail: () =>
+    `Ótimo, já encontrei seu agendamento! 📋\n\n` +
+    `Só mais uma coisinha antes de confirmar: qual o seu *e-mail*? ` +
+    `A gente usa pra te enviar a confirmação e novidades da loja.\n\n` +
+    `Se preferir não informar agora, responda *PULAR*.`,
+
+  emailInvalido: () =>
+    `Não reconheci esse e-mail 🤔 Pode digitar de novo? (ex: nome@exemplo.com)\n\n` +
+    `Ou responda *PULAR* para confirmar sem informar o e-mail.`,
 
   orcamentoMenu: () =>
     `Ótimo! Como posso te ajudar com o orçamento? 😊\n\n` +

@@ -470,9 +470,15 @@ async function handleInfoMenu(leadId, state, text, talkId) {
     return;
   }
 
+  // Só busca o horário do optometrista quando a opção pedida é "Endereço e
+  // Horário" — evita consulta ao banco nas outras duas opções do menu.
+  const optometristaInfo = op === "2"
+    ? await scheduling.getOptometristaEHorarioLoja(loja.prefix).catch(() => null)
+    : null;
+
   const map = {
     "1": { etapa: "info_aguarda_sim_nao", label: "info-lentes", topic: "Lentes e Armações", message: MSG.infoLentes() },
-    "2": { etapa: "info_aguarda_sim_nao", label: "info-endereco", topic: "Endereço e Horário", message: MSG.infoEndereco(loja) },
+    "2": { etapa: "info_aguarda_sim_nao", label: "info-endereco", topic: "Endereço e Horário", message: MSG.infoEndereco(loja, optometristaInfo) },
     "3": { etapa: "info_aguarda_sim_nao", label: "info-promocoes", topic: "Promoções", message: MSG.infoPromocoes() },
   };
 
@@ -533,12 +539,14 @@ async function handleTesteVisao(leadId, state, text, talkId) {
       await send(talkId, leadId, MSG.testeNaoEncontrado(loja));
       return;
     }
-    SM.setState(leadId, { etapa: "tv_agendado" }, { persist: true });
-    await applyFlowLabel(leadId, loja.prefix, "tv", "tv-agendado");
-    await labels.applyTrafficLight(leadId, "Agendado");
-    await moveStage(leadId, "agendado", loja.prefix);
-    await kommo.addNote(leadId, `Teste de Visão confirmado via SalesBot - ${appointment.data_agendamento} às ${appointment.horario} - ${appointment.loja}`);
-    await send(talkId, leadId, MSG.testeConfirmado(appointment));
+    // A landing page não pede e-mail — captura aqui, antes de fechar a
+    // confirmação, em vez de finalizar direto como antes.
+    if (appointment.email) {
+      await finalizarTesteVisao(leadId, state, talkId, loja, appointment, appointment.email);
+      return;
+    }
+    SM.setState(leadId, { etapa: "tv_aguardando_email" }, { persist: true });
+    await send(talkId, leadId, MSG.pedirEmail());
     return;
   }
 
@@ -549,6 +557,59 @@ async function handleTesteVisao(leadId, state, text, talkId) {
   }
 
   await send(talkId, leadId, `Quando concluir o agendamento pelo link, responda CONFIRMADO. Se precisar de ajuda, escreva ESPECIALISTA.`);
+}
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+async function handleTesteVisaoEmail(leadId, state, text, talkId) {
+  const loja = lojaByPrefix(state.loja_prefix);
+  const valor = clean(text);
+  const normalized = normalize(valor);
+
+  const appointment = await scheduling.buscarAgendamentoAtivoPorLead(leadId).catch(() => null);
+  if (!appointment) {
+    await kommo.addNote(leadId, "⚠️ Cliente estava informando e-mail, mas o agendamento não foi mais encontrado no sistema.").catch(() => {});
+    SM.setState(leadId, { etapa: "tv_aguardando_confirm" }, { persist: true });
+    await send(talkId, leadId, MSG.testeNaoEncontrado(loja));
+    return;
+  }
+
+  if (normalized === "pular" || normalized === "nao" || normalized === "não") {
+    SM.resetInvalidCount(leadId);
+    await finalizarTesteVisao(leadId, state, talkId, loja, appointment, null);
+    return;
+  }
+
+  if (!EMAIL_REGEX.test(valor)) {
+    const count = SM.incrementInvalidCount(leadId);
+    if (count >= 2) {
+      await kommo.addNote(leadId, `⚠️ Cliente não conseguiu informar e-mail válido (última tentativa: "${valor}") — seguiu sem e-mail.`).catch(() => {});
+      SM.resetInvalidCount(leadId);
+      await finalizarTesteVisao(leadId, state, talkId, loja, appointment, null);
+      return;
+    }
+    await send(talkId, leadId, MSG.emailInvalido());
+    return;
+  }
+
+  SM.resetInvalidCount(leadId);
+  await scheduling.atualizarEmailAgendamentoPorLead({ leadId, email: valor }).catch((error) => {
+    console.error(`[BOT][${leadId}] Erro ao salvar e-mail do agendamento:`, error.message);
+  });
+  await finalizarTesteVisao(leadId, state, talkId, loja, appointment, valor);
+}
+
+async function finalizarTesteVisao(leadId, state, talkId, loja, appointment, email) {
+  SM.setState(leadId, { etapa: "tv_agendado" }, { persist: true });
+  await applyFlowLabel(leadId, loja.prefix, "tv", "tv-agendado");
+  await labels.applyTrafficLight(leadId, "Agendado");
+  await moveStage(leadId, "agendado", loja.prefix);
+  await kommo.addNote(
+    leadId,
+    `Teste de Visão confirmado via SalesBot - ${appointment.data_agendamento} às ${appointment.horario} - ${appointment.loja}` +
+      (email ? ` | E-mail: ${email}` : "")
+  );
+  await send(talkId, leadId, MSG.testeConfirmado({ ...appointment, email: email || appointment.email }));
 }
 
 async function handleOrcamentoReceita(leadId, state, text, talkId) {
@@ -839,6 +900,7 @@ async function route(leadId, state, text, talkId, context) {
   if (state.etapa === "info_menu") return handleInfoMenu(leadId, state, text, talkId);
   if (state.etapa === "info_aguarda_sim_nao") return handleInfoSimNao(leadId, state, text, talkId);
   if (state.etapa === "tv_aguardando_confirm") return handleTesteVisao(leadId, state, text, talkId);
+  if (state.etapa === "tv_aguardando_email") return handleTesteVisaoEmail(leadId, state, text, talkId);
   if (state.etapa === "orcamento_menu") return handleOrcamentoMenu(leadId, state, text, talkId);
   if (state.etapa === "orcamento_aguardando_receita") return handleOrcamentoReceita(leadId, state, text, talkId);
   if (state.etapa === "orcamento_lente") return handleOrcamentoLente(leadId, state, text, talkId);

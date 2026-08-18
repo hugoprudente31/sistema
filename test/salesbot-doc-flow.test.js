@@ -155,8 +155,12 @@ for (const loja of lojas) {
     assert.match(teste.text, /https:\/\/testedevisao\.oticastgt\.com\.br\/home/);
     assert.match(teste.text, new RegExp(loja.loja.split(" - ").pop().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 
-    const confirmado = await salesbot({ lead_id: leadId, loja: loja.loja, message: "CONFIRMADO" });
+    const pedeEmail = await salesbot({ lead_id: leadId, loja: loja.loja, message: "CONFIRMADO" });
+    assert.match(pedeEmail.text, /e-mail/i);
+
+    const confirmado = await salesbot({ lead_id: leadId, loja: loja.loja, message: "cliente@exemplo.com" });
     assert.match(confirmado.text, /registrado/);
+    assert.match(confirmado.text, /cliente@exemplo\.com/);
   });
 
   test(`SalesBot informa endereço e WhatsApp correto para ${loja.id}`, async () => {

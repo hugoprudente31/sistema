@@ -6,6 +6,96 @@ const { pool } = require("../lib/db");
 const mailingboss = require("../mailingboss");
 const { resolverJornadaLoja, estaOptometristaDisponivel, gerarSlotsJornada } = require("../lib/horarios");
 
+// ── Horário do optometrista (menu "Informações" do bot) ───────────
+// O bot conhece a loja só pelo prefixo interno (gon/ens/pit/tgt); o nome
+// exibido ao cliente (ex.: "Gonzaga & Santos") não bate exatamente com o
+// texto salvo em optometristas.loja, então casamos por trecho reconhecível
+// em vez de string exata — mesmo espírito do normalizeLoja em kommo/webhook.js.
+const PREFIXO_PARA_LOJA_LIKE = {
+  gon: "%gonzaga%",
+  ens: "%enseada%",
+  pit: "%pitangueiras%",
+  tgt: "%ademar%",
+};
+
+const DIAS_ABREV = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+const ORDEM_EXIBICAO_DIAS = [1, 2, 3, 4, 5, 6, 0]; // Seg..Sáb, Domingo por último
+
+function formatarHora(hhmm) {
+  if (!hhmm) return "";
+  const [h, m] = String(hhmm).split(":");
+  return m && m !== "00" ? `${Number(h)}h${m}` : `${Number(h)}h`;
+}
+
+function comprimirDiasParaTexto(dias) {
+  const partes = [];
+  let i = 0;
+  while (i < dias.length) {
+    let j = i;
+    while (j + 1 < dias.length && dias[j + 1].label === dias[i].label) j++;
+    const rotulo = i === j
+      ? DIAS_ABREV[dias[i].dia]
+      : `${DIAS_ABREV[dias[i].dia]}–${DIAS_ABREV[dias[j].dia]}`;
+    partes.push(`${rotulo} ${dias[i].label}`);
+    i = j + 1;
+  }
+  return partes.join(" | ");
+}
+
+// Monta o texto de horário do optometrista responsável pela loja (1 por loja
+// hoje). Sem linha cadastrada em horarios_optometrista, cai no horário da
+// própria loja — mesma regra de "segue a loja" já usada no painel admin.
+async function getOptometristaEHorarioLoja(prefixoLoja) {
+  try {
+    const lojaLike = PREFIXO_PARA_LOJA_LIKE[prefixoLoja];
+    if (!lojaLike) return null;
+
+    const { rows: optometristas } = await pool.query(
+      `SELECT id, nome, loja FROM optometristas WHERE loja ILIKE $1 AND ativo = true ORDER BY id LIMIT 1`,
+      [lojaLike]
+    );
+    const optometrista = optometristas[0];
+    if (!optometrista) return null;
+
+    const { rows: configuradas } = await pool.query(
+      `SELECT dia_semana, hora_inicio, hora_fim, intervalo_inicio, intervalo_fim
+         FROM horarios_optometrista WHERE optometrista_id = $1`,
+      [optometrista.id]
+    );
+    const porDia = new Map(configuradas.map((r) => [Number(r.dia_semana), r]));
+
+    const dias = [];
+    for (const dia of ORDEM_EXIBICAO_DIAS) {
+      const cfg = porDia.get(dia);
+      let aberto, horaInicio, horaFim, intervaloInicio, intervaloFim;
+      if (cfg) {
+        aberto = true;
+        ({ hora_inicio: horaInicio, hora_fim: horaFim, intervalo_inicio: intervaloInicio, intervalo_fim: intervaloFim } = cfg);
+      } else if (configuradas.length > 0) {
+        // Tem jornada customizada em outros dias, mas não neste — não atende.
+        aberto = false;
+      } else {
+        const jornadaLoja = await resolverJornadaLoja(pool, optometrista.loja, dia);
+        aberto = jornadaLoja.aberto;
+        horaInicio = jornadaLoja.horaInicio;
+        horaFim = jornadaLoja.horaFim;
+        intervaloInicio = jornadaLoja.intervaloInicio;
+        intervaloFim = jornadaLoja.intervaloFim;
+      }
+      const label = !aberto
+        ? "Fechado"
+        : `${formatarHora(horaInicio)} às ${formatarHora(horaFim)}` +
+          (intervaloInicio && intervaloFim ? ` (pausa ${formatarHora(intervaloInicio)}–${formatarHora(intervaloFim)})` : "");
+      dias.push({ dia, label });
+    }
+
+    return { nome: optometrista.nome, horarioTexto: comprimirDiasParaTexto(dias) };
+  } catch (error) {
+    console.error("[Scheduling] Erro ao montar horário do optometrista:", error.message);
+    return null;
+  }
+}
+
 // ── Bloqueios de disponibilidade ─────────────────────────────────
 // Garante que a tabela existe na primeira chamada (idempotente).
 let _bloqueiosTableReady = false;
@@ -740,7 +830,7 @@ async function criarAgendamento({ nome, whatsapp, email, loja, data, horario, le
 async function buscarAgendamentoAtivoPorLead(leadId) {
   if (!leadId) return null;
   const { rows } = await pool.query(
-    `SELECT id, nome, loja, optometrista, horario,
+    `SELECT id, nome, loja, optometrista, horario, email,
             TO_CHAR(data_agendamento, 'DD/MM/YYYY') AS data_agendamento
        FROM agendamentos
       WHERE kommo_lead_id = $1
@@ -751,6 +841,24 @@ async function buscarAgendamentoAtivoPorLead(leadId) {
     [String(leadId), PUBLIC_BLOCKING_STATUSES]
   );
   return rows[0] || null;
+}
+
+// Preenchida pelo bot (etapa tv_aguardando_email) antes de confirmar o Teste
+// de Visão — o formulário da landing page não pede e-mail, então esse é hoje
+// o único ponto de captura. Atualiza só o agendamento; o cadastro em
+// "clientes" usa um gas_id derivado separadamente e não dá pra recalcular
+// aqui com segurança sem risco de apontar pro cliente errado.
+async function atualizarEmailAgendamentoPorLead({ leadId, email }) {
+  const emailLimpo = clean(email);
+  if (!leadId || !emailLimpo) return { ok: false, error: "leadId ou email ausente" };
+  const { rows } = await pool.query(
+    `UPDATE agendamentos SET email = $1, atualizado_em = CURRENT_TIMESTAMP
+       WHERE kommo_lead_id = $2 AND status = ANY($3::text[]) AND excluido_em IS NULL
+       RETURNING id`,
+    [emailLimpo, String(leadId), PUBLIC_BLOCKING_STATUSES]
+  );
+  if (!rows.length) return { ok: false, error: "Agendamento ativo não encontrado" };
+  return { ok: true, id: rows[0].id };
 }
 
 async function getContatoDoLead(kommoClient, leadId) {
@@ -779,9 +887,13 @@ module.exports = {
   getHorariosDisponiveis,
   criarAgendamento,
   buscarAgendamentoAtivoPorLead,
+  atualizarEmailAgendamentoPorLead,
   reagendarAgendamentoPorLead,
   cancelarAgendamentoPorLead,
   getContatoDoLead,
+  getOptometristaEHorarioLoja,
+  formatarHora,
+  comprimirDiasParaTexto,
   adicionarBloqueio,
   removerBloqueio,
   listarBloqueios,
