@@ -2805,12 +2805,64 @@ function renderAgenda(rowsParam) {
       '<td>' + escapeHtml(r.Loja) + '</td>' +
       '<td>' + escapeHtml(r.Optometrista) + '</td>' +
       '<td>' + escapeHtml(r.LeadTimeDias || '') + '</td>' +
-      '<td>' + money(r.ValorVenda || 0) + '</td>' +
+      '<td>' + renderValorVenda(r) + '</td>' +
       '<td>' + money(r.Desconto || 0) + '</td>' +
       '<td>' + escapeHtml(r.AccessTags || '') + '</td>' +
       '<td>' + getActionHtml(r) + '</td>' +
       '</tr>';
   }).join('');
+}
+
+function gerentePodeCorrigirValor(r) {
+  return roleName() === 'gerente de loja' &&
+    normalizeKey(r && r.Loja || '') === normalizeKey(state.user && state.user.loja || '');
+}
+
+function renderValorVenda(r) {
+  var html = '<strong>' + money(r.ValorVenda || 0) + '</strong>';
+  if (!gerentePodeCorrigirValor(r)) return html;
+  return html + '<br><button class="secondary icon-btn" style="margin-top:6px" ' +
+    'onclick="corrigirValorVenda(\'' + escapeJs(r.ID) + '\')" title="Corrigir o valor desta venda">Corrigir valor</button>';
+}
+
+function corrigirValorVenda(id) {
+  var row = (state.agendamentos || []).find(function(r) { return String(r.ID) === String(id); });
+  if (!row || !gerentePodeCorrigirValor(row)) {
+    toast('Somente o gerente da própria loja pode corrigir este valor.', 'err');
+    return;
+  }
+
+  var atual = Number(String(row.ValorVenda || 0).replace(',', '.')) || 0;
+  var informado = prompt(
+    'Corrigir valor da venda de ' + (row.NomeCompleto || 'cliente') + ':\n\n' +
+    'Valor atual: ' + money(atual) + '\nDigite o valor correto (ex.: 280,00):',
+    atual ? atual.toFixed(2).replace('.', ',') : ''
+  );
+  if (informado === null) return;
+
+  var texto = String(informado).trim().replace(/\s/g, '').replace(/^R\$/i, '');
+  if (texto.indexOf(',') > -1) texto = texto.replace(/\./g, '').replace(',', '.');
+  var novoValor = Number(texto);
+  if (!Number.isFinite(novoValor) || novoValor < 0) {
+    toast('Informe um valor válido, igual ou maior que zero.', 'err');
+    return;
+  }
+  novoValor = Math.round(novoValor * 100) / 100;
+  if (novoValor === atual) {
+    toast('O valor informado é igual ao valor atual.', 'err');
+    return;
+  }
+  if (!confirm('Confirmar correção de ' + money(atual) + ' para ' + money(novoValor) + '?')) return;
+
+  showLoading(true);
+  apiPatch('/api/agendamentos/' + encodeURIComponent(id), { valorVenda: novoValor })
+    .then(function(res) {
+      if (!res || !res.ok) throw new Error((res && res.message) || 'Falha ao corrigir o valor da venda.');
+      toast('Valor da venda corrigido para ' + money(novoValor) + '.', 'ok');
+      return agendarAtualizacaoAposAcao(0);
+    })
+    .catch(function(err) { toast(err.message || String(err), 'err'); })
+    .finally(function() { showLoading(false); });
 }
 
 function getActionHtml(r) {
