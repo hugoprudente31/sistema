@@ -10,18 +10,45 @@ let recoveryRunning = false;
 
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
-async function moveStage(leadId, stageKey) {
+async function moveStage(leadId, stageKey, knownPipelineId = null) {
   let stagesMap = {};
   try { stagesMap = JSON.parse(process.env.KOMMO_STAGES_MAP || "{}"); } catch {}
 
-  let stageId = null;
-  try {
-    const lead = await kommo.getLead(leadId);
-    stageId = stagesMap[String(lead?.pipeline_id || "")]?.[stageKey];
-  } catch {}
+  let stageId = stagesMap[String(knownPipelineId || "")]?.[stageKey];
+  if (!stageId) {
+    try {
+      const lead = await kommo.getLead(leadId);
+      stageId = stagesMap[String(lead?.pipeline_id || "")]?.[stageKey];
+    } catch {}
+  }
 
   if (!stageId) stageId = process.env[`KOMMO_STAGE_${stageKey.toUpperCase()}`];
   if (stageId) await kommo.moveToStage(leadId, stageId);
+}
+
+async function getActiveAppointment(leadId, db = pool) {
+  const { rows } = await db.query(
+    `SELECT id, status
+       FROM agendamentos
+      WHERE kommo_lead_id = $1
+        AND status IN ('Agendado', 'Confirmado')
+        AND excluido_em IS NULL
+      ORDER BY data_agendamento DESC, horario DESC, id DESC
+      LIMIT 1`,
+    [String(leadId)]
+  );
+  return rows[0] || null;
+}
+
+async function protectActiveAppointment(lead, appointment) {
+  const leadId = String(lead.id);
+  await labels.markScheduled(leadId, appointment.status);
+  await moveStage(leadId, "agendado", lead.pipeline_id);
+  const state = await SM.getState(leadId);
+  if (state.etapa === "recuperacao_menu") {
+    SM.setState(leadId, { etapa: "tv_agendado", bot_active: false }, { persist: true });
+  }
+  console.log(`[Recovery] Lead ${leadId} ignorado e restaurado: possui agendamento ativo ${appointment.id}`);
 }
 
 async function sendRecovery(leadId) {
@@ -65,12 +92,19 @@ async function runRecovery() {
   console.log("[Recovery] Iniciando job de recuperacao...");
   let enviados = 0;
   let erros = 0;
+  let protegidos = 0;
 
   const processCandidate = async lead => {
     const alreadyRecovering = (lead._embedded?.tags || [])
       .some(tag => tag.name === labels.LABELS.EM_RECUPERACAO);
     if (alreadyRecovering) return;
     try {
+      const appointment = await getActiveAppointment(lead.id);
+      if (appointment) {
+        await protectActiveAppointment(lead, appointment);
+        protegidos++;
+        return;
+      }
       await sendRecovery(String(lead.id));
       enviados++;
     } catch (error) {
@@ -94,23 +128,31 @@ async function runRecovery() {
     const recovering = await kommo.searchLeadsByTag(labels.LABELS.EM_RECUPERACAO);
     console.log(`[Recovery] Em recuperacao: ${recovering.length}`);
     for (const lead of recovering) {
-      const state = await SM.getState(lead.id);
-      const lastActivity = Number(state.last_client_at || state.updated_at || 0);
-      // Legacy tags have no reliable recovery timestamp. Never close those
-      // automatically; only close leads started by this job and persisted in state.
-      const startedByThisJob = state.etapa === "recuperacao_menu" && lastActivity > 0;
-      if (startedByThisJob && Date.now() - lastActivity > HOURS_72) {
-        try { await closeAsLost(String(lead.id)); }
-        catch (error) {
-          erros++;
-          console.error(`[Recovery] Erro ao fechar lead ${lead.id}:`, error.message);
+      try {
+        const appointment = await getActiveAppointment(lead.id);
+        if (appointment) {
+          await protectActiveAppointment(lead, appointment);
+          protegidos++;
+          continue;
         }
-        await sleep(2000);
+        const state = await SM.getState(lead.id);
+        const lastActivity = Number(state.last_client_at || state.updated_at || 0);
+        // Legacy tags have no reliable recovery timestamp. Never close those
+        // automatically; only close leads started by this job and persisted in state.
+        const startedByThisJob = state.etapa === "recuperacao_menu" && lastActivity > 0;
+        if (startedByThisJob && Date.now() - lastActivity > HOURS_72) {
+          await closeAsLost(String(lead.id));
+        }
+      } catch (error) {
+        // Falha fechada: sem confirmar no banco, nunca movemos/fechamos o lead.
+        erros++;
+        console.error(`[Recovery] Erro ao validar lead ${lead.id}:`, error.message);
       }
+      await sleep(2000);
     }
 
-    console.log(`[Recovery] Concluido: ${enviados} enviados, ${erros} erros.`);
-    return { enviados, erros };
+    console.log(`[Recovery] Concluido: ${enviados} enviados, ${protegidos} agendados protegidos, ${erros} erros.`);
+    return { enviados, protegidos, erros };
   } finally {
     recoveryRunning = false;
   }
@@ -135,4 +177,4 @@ function startRecoveryCron() {
   console.log(`    Recovery: verificacao ativa a cada ${intervalMinutes} minuto(s)`);
 }
 
-module.exports = { startRecoveryCron, runRecovery, sendRecovery, HOURS_72 };
+module.exports = { startRecoveryCron, runRecovery, sendRecovery, getActiveAppointment, HOURS_72 };

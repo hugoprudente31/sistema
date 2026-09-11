@@ -126,6 +126,25 @@ async function applyTemperature(leadId, temperature) {
   await swapLabel(leadId, TEMPERATURE_LABELS, label);
 }
 
+// Um agendamento ativo sempre prevalece sobre classificações antigas de
+// recuperação. Faz a troca em uma única leitura/escrita para não deixar o lead
+// momentaneamente com etiquetas contraditórias (ex.: lead-frio + agendado).
+async function markScheduled(leadId, status = "Agendado") {
+  const semaphore = status === "Confirmado"
+    ? LABELS.AGENDADO_CONFIRMADO
+    : LABELS.AGENDADO_PENDENTE;
+  const remove = new Set([
+    ...SEMAPHORE_LABELS,
+    ...TEMPERATURE_LABELS,
+    LABELS.EM_RECUPERACAO,
+    LABELS.FECHADO_PERDIDO,
+  ]);
+  const current = await kommo.getLeadTags(leadId);
+  const names = current.map(tag => tag.name).filter(name => !remove.has(name));
+  await kommo.setLeadTags(leadId, [...new Set([...names, LABELS.LEAD_QUENTE, semaphore])]);
+  console.log(`[Labels] ✅ Lead ${leadId} protegido como ${status} (fora da recuperação)`);
+}
+
 async function applyStoreLabel(leadId, storePrefix) {
   const map = {
     gon: LABELS.LOJA_GONZAGA,
@@ -157,6 +176,7 @@ module.exports = {
   swapLabel,
   applyTrafficLight,
   applyTemperature,
+  markScheduled,
   applyStoreLabel,
   setHumanControl,
   setBotControl,
