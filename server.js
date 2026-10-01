@@ -2545,7 +2545,11 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
       const statusAtualPresenca = clean(current.rows[0].status).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
       const statusNovoPresenca = clean(b.status || b.statusAgenda).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
       const statusMudouPresenca = statusEnviadoPresenca && statusNovoPresenca !== statusAtualPresenca;
-      const alteraPresenca = Object.prototype.hasOwnProperty.call(b, "compareceu") ||
+      const compareceuFoiEnviado = Object.prototype.hasOwnProperty.call(b, "compareceu");
+      const compareceuAtual = clean(current.rows[0].compareceu).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+      const compareceuNovo = clean(b.compareceu).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+      const compareceuMudou = compareceuFoiEnviado && compareceuNovo !== compareceuAtual;
+      const alteraPresenca = compareceuMudou ||
         Object.prototype.hasOwnProperty.call(b, "atendimento_realizado") ||
         Object.prototype.hasOwnProperty.call(b, "atendimentoRealizado") ||
         (statusMudouPresenca && ["compareceu", "nao compareceu"].includes(statusNovoPresenca));
@@ -2557,7 +2561,11 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
       const statusAtualPresenca = clean(current.rows[0].status).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
       const statusNovoPresenca = clean(b.status || b.statusAgenda).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
       const statusMudouPresenca = statusEnviadoPresenca && statusNovoPresenca !== statusAtualPresenca;
-      const alteraPresenca = Object.prototype.hasOwnProperty.call(b, "compareceu") ||
+      const compareceuFoiEnviado = Object.prototype.hasOwnProperty.call(b, "compareceu");
+      const compareceuAtual = clean(current.rows[0].compareceu).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+      const compareceuNovo = clean(b.compareceu).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+      const compareceuMudou = compareceuFoiEnviado && compareceuNovo !== compareceuAtual;
+      const alteraPresenca = compareceuMudou ||
         Object.prototype.hasOwnProperty.call(b, "atendimento_realizado") ||
         Object.prototype.hasOwnProperty.call(b, "atendimentoRealizado") ||
         (statusMudouPresenca && ["compareceu", "nao compareceu"].includes(statusNovoPresenca));
@@ -2667,10 +2675,24 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
     const dataAgendamentoAtual = current.rows[0].data_agendamento
       ? String(current.rows[0].data_agendamento).slice(0, 10) : null;
     const isReagendamentoDeData = Boolean(novaDataAgendamento) && novaDataAgendamento !== dataAgendamentoAtual;
-    const alterouPresencaOuStatusManualmente = Object.prototype.hasOwnProperty.call(b, "status") ||
-      Object.prototype.hasOwnProperty.call(b, "statusAgenda") ||
-      Object.prototype.hasOwnProperty.call(b, "compareceu") ||
-      hasResultadoOptometrista;
+    // O modal de edição reenvia status e presença mesmo quando o usuário só
+    // mudou a data. Considere como alteração manual apenas valores realmente
+    // diferentes dos atuais; caso contrário o reagendamento ficaria preso no
+    // vermelho de "Não Compareceu".
+    const normalizarCampoReagendamento = (valor) => clean(valor)
+      .toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const statusFoiAlterado = statusEnviadoPresenca &&
+      normalizarCampoReagendamento(b.status || b.statusAgenda) !==
+        normalizarCampoReagendamento(current.rows[0].status);
+    const compareceuFoiEnviado = Object.prototype.hasOwnProperty.call(b, "compareceu");
+    const compareceuFoiAlterado = compareceuFoiEnviado &&
+      normalizarCampoReagendamento(b.compareceu) !==
+        normalizarCampoReagendamento(current.rows[0].compareceu);
+    const resultadoFoiAlterado = hasResultadoOptometrista &&
+      normalizarCampoReagendamento(resultadoOptometristaAtualizado) !==
+        normalizarCampoReagendamento(current.rows[0].resultado_optometrista);
+    const alterouPresencaOuStatusManualmente = statusFoiAlterado ||
+      compareceuFoiAlterado || resultadoFoiAlterado;
     const reagendamentoLimpo = isReagendamentoDeData && !alterouPresencaOuStatusManualmente;
 
     // Uma venda válida é evidência definitiva de que o cliente compareceu.
@@ -2767,8 +2789,8 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         novaDataAgendamento,
         b.horario || null,
         b.observacao || null,
-        statusVenda || statusResultadoOptometrista || b.status || b.statusAgenda || statusReagendamento || null,
-        compareceuVenda || compareceuResultadoOptometrista || b.compareceu || compareceuReagendamento || null,
+        statusVenda || statusResultadoOptometrista || statusReagendamento || b.status || b.statusAgenda || null,
+        compareceuVenda || compareceuResultadoOptometrista || compareceuReagendamento || b.compareceu || null,
         b.numero_os || b.numeroOS || null,
         b.status_os || b.statusOS || null,
         b.vendedor_nome || b.vendedorNome || null,
