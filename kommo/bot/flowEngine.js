@@ -811,6 +811,7 @@ async function handleReagendamentoData(leadId, state, text) {
 }
 
 async function handleReagendamentoHorario(leadId, state, text) {
+  const loja = lojaByPrefix(state.loja_prefix);
   const raw = clean(text);
   const match = raw.match(/^(\d{1,2})(?::|h)(\d{2})?$|^(\d{1,2})$/i);
   if (!match) {
@@ -835,8 +836,11 @@ async function handleReagendamentoHorario(leadId, state, text) {
     await kommo.addNote(leadId,
       `✅ Reagendamento confirmado no sistema\n📅 ${result.data_agendamento} às ${result.horario}\n🏪 ${result.loja}\n👁 ${result.optometrista || "A definir"}`
     );
+    await applyFlowLabel(leadId, loja.prefix, "tv", "tv-agendado");
+    await labels.markScheduled(leadId, "Agendado");
+    await moveStage(leadId, "agendado", loja.prefix);
     SM.setState(leadId, {
-      etapa: "menu_principal",
+      etapa: "tv_agendado",
       reagendamento: { data, horario, confirmado: true },
     }, { persist: true });
     return;

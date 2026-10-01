@@ -3,6 +3,8 @@
 const { pool } = require("../lib/db");
 const kommo = require("./client");
 const SM = require("./bot/stateManager");
+const labels = require("./labels");
+const { appointmentStageForPipeline } = require("./appointmentSync");
 const { runMonitoredJob } = require("../lib/jobMonitor");
 
 let reminder24hRunning = false;
@@ -33,6 +35,15 @@ function tomorrowForDatabase() {
   const day = String(date.getDate()).padStart(2, "0");
   const month = String(date.getMonth() + 1).padStart(2, "0");
   return `${date.getFullYear()}-${month}-${day}`;
+}
+
+async function keepLeadScheduled(appointment) {
+  const leadId = String(appointment.kommo_lead_id);
+  const lead = await kommo.getLead(leadId);
+  const stageId = appointmentStageForPipeline(lead?.pipeline_id);
+  if (!stageId) throw new Error(`Etapa de agendamento não configurada para o pipeline ${lead?.pipeline_id || "desconhecido"}`);
+  await labels.markScheduled(leadId, appointment.status || "Agendado");
+  await kommo.moveToStage(leadId, stageId);
 }
 
 async function getAppointments(date) {
@@ -66,6 +77,7 @@ async function sendReminder(appointment) {
   ].join(" | ");
 
   console.log(`[Reminder] Iniciando Salesbot ${botId} no lead ${leadId}`);
+  await keepLeadScheduled(appointment);
   await kommo.updateLead(leadId, {
     custom_fields_values: [{ field_id: fieldId, values: [{ value: details }] }],
   });
@@ -142,6 +154,7 @@ async function getTwoHourAppointments() {
 
 async function sendTwoHourReminder(appointment) {
   if (!appointment.kommo_lead_id) throw new Error("Agendamento sem lead vinculado");
+  await keepLeadScheduled(appointment);
   const message = buildTwoHourMessage(appointment);
   await kommo.sendProactiveMessage(String(appointment.kommo_lead_id), message);
   await kommo.addNote(
@@ -251,4 +264,5 @@ module.exports = {
   buildTwoHourMessage,
   scheduleDaily,
   scheduleEveryMinutes,
+  keepLeadScheduled,
 };

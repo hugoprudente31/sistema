@@ -1410,6 +1410,36 @@ test('reagendar para nova data sem informar presença junto reabre como Agendado
   } finally { r1(); r2.restore(); }
 });
 
+test('reagendar pelo modal com status/presença antigos reenviados também limpa o vermelho para todos os perfis autorizados', async function() {
+  const original = ag(E, {
+    status: 'Não Compareceu', compareceu: 'Não',
+    resultado_optometrista: 'Check-in Não veio', data_agendamento: '2026-07-15'
+  });
+  const r1 = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [original] } });
+  const r2 = withConnectCaptura(ag(E, {
+    status: 'Agendado', compareceu: 'Pendente',
+    resultado_optometrista: null, data_agendamento: '2026-07-24'
+  }));
+  try {
+    for (const perfil of ['vendedor', 'consultor de vendas', 'atendimento central', 'gerente de loja', 'admin']) {
+      const r = await fetch(baseUrl + '/api/agendamentos/100', {
+        method: 'PATCH', headers: H(tok(perfil, E)),
+        // Payload real do modal: ele sempre reenvia os valores antigos, ainda
+        // que o operador tenha alterado apenas data/horário.
+        body: JSON.stringify({
+          dataAgendamento: '2026-07-24',
+          statusAgenda: 'Não Compareceu',
+          compareceu: 'Não'
+        })
+      });
+      assert.equal(r.status, 200, perfil + ' deveria conseguir reagendar pelo modal');
+      assert.equal(r2.params.params[IDX_STATUS], 'Agendado', perfil + ': status deve voltar a Agendado');
+      assert.equal(r2.params.params[IDX_COMPARECEU], 'Pendente', perfil + ': presença deve voltar a Pendente');
+      assert.equal(r2.params.params[IDX_LIMPAR], 'LIMPAR', perfil + ': resultado antigo deve ser limpo');
+    }
+  } finally { r1(); r2.restore(); }
+});
+
 test('reagendar informando presença/status na mesma requisição não sobrescreve o valor explícito', async function() {
   const original = ag(E, {
     status: 'Não Compareceu', compareceu: 'Não',
