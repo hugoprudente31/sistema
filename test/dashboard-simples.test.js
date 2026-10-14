@@ -112,3 +112,49 @@ test('GET /api/dashboard responde 200 com sessão válida (perfil de loja, escop
     assert.equal(clientesCall.params[0], 'óticas TGT - Gonzaga', 'perfil de loja deve filtrar clientes pela própria loja');
   } finally { pool.query = original; }
 });
+
+test('Atendimento Central filtra o dashboard por várias lojas selecionadas', async () => {
+  const original = pool.query;
+  const chamadas = [];
+  pool.query = async (sql, params) => {
+    chamadas.push({ sql: String(sql), params });
+    if (String(sql).includes('FROM clientes')) return { rows: [{ total: 4 }] };
+    return { rows: [{
+      total_agendamentos: 7, os_com_valor: 0, faturamento_total: 0, desconto_total: 0,
+      os7_abertas: 1, os7_finalizadas: 0, os15_abertas: 1, os15_finalizadas: 1,
+      os30_abertas: 2, os30_finalizadas: 1
+    }] };
+  };
+  try {
+    const token = signSession({ id: '3', nome: 'Central', email: 'central@example.com', perfil: 'atendimento central', loja: '' });
+    const lojas = encodeURIComponent('Óticas TGT Enseada|Óticas TGT - Gonzaga');
+    const r = await fetch(baseUrl + '/api/dashboard?lojas=' + lojas, { headers: H(token) });
+    assert.equal(r.status, 200);
+    const body = await r.json();
+    assert.equal(body.dashboard.total_agendamentos, 7);
+    const clientesCall = chamadas.find((c) => c.sql.includes('FROM clientes'));
+    assert.deepEqual(clientesCall.params, ['Óticas TGT Enseada', 'Óticas TGT - Gonzaga']);
+    assert.match(clientesCall.sql, / OR /);
+  } finally { pool.query = original; }
+});
+
+test('Atendimento Central sem nenhuma loja marcada recebe dashboard zerado', async () => {
+  const original = pool.query;
+  const chamadas = [];
+  pool.query = async (sql) => {
+    chamadas.push(String(sql));
+    if (String(sql).includes('FROM clientes')) return { rows: [{ total: 0 }] };
+    return { rows: [{
+      total_agendamentos: 0, os_com_valor: 0, faturamento_total: 0, desconto_total: 0,
+      os7_abertas: 0, os7_finalizadas: 0, os15_abertas: 0, os15_finalizadas: 0,
+      os30_abertas: 0, os30_finalizadas: 0
+    }] };
+  };
+  try {
+    const token = signSession({ id: '3', nome: 'Central', email: 'central@example.com', perfil: 'atendimento central', loja: '' });
+    const r = await fetch(baseUrl + '/api/dashboard?lojas=__nenhuma__', { headers: H(token) });
+    assert.equal(r.status, 200);
+    assert.equal((await r.json()).dashboard.total_agendamentos, 0);
+    assert.ok(chamadas.filter((sql) => sql.includes('FROM clientes') || sql.includes('FROM agendamentos')).every((sql) => sql.includes('AND FALSE')));
+  } finally { pool.query = original; }
+});

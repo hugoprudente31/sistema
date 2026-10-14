@@ -58,6 +58,10 @@
       if (filters.statusOS && normalize(value(row, ['StatusOS', 'status_os'])) !== normalize(filters.statusOS)) return false;
       if (filters.estagio && normalize(value(row, ['Estagio', 'estagio'])) !== normalize(filters.estagio)) return false;
       if (filters.loja && normalize(value(row, ['Loja', 'loja'])) !== normalize(filters.loja)) return false;
+      if (Array.isArray(filters.lojas)) {
+        var lojasSelecionadas = filters.lojas.map(normalize).filter(Boolean);
+        if (!lojasSelecionadas.length || lojasSelecionadas.indexOf(normalize(value(row, ['Loja', 'loja']))) < 0) return false;
+      }
       if (filters.optometrista && normalize(value(row, ['Optometrista', 'optometrista'])).indexOf(normalize(filters.optometrista)) < 0) return false;
       if (filters.vendedor) {
         var vnd = normalize([value(row, ['VendedorNome', 'vendedor_nome']), value(row, ['AgendadoPorNome', 'agendado_por_nome'])].join(' '));

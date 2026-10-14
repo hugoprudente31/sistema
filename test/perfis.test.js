@@ -390,6 +390,40 @@ test('central: agendamentos de todas as 4 lojas — 200', async function() {
   } finally { restore(); }
 });
 
+test('central: caixas de seleção filtram a agenda por várias lojas no servidor', async function() {
+  const orig = pool.query;
+  let capturedSql = '';
+  let capturedParams = [];
+  pool.query = async function(sql, params) {
+    capturedSql = String(sql);
+    capturedParams = params || [];
+    return { rows: [ag(G), ag(E)] };
+  };
+  try {
+    const lojas = encodeURIComponent(G + '|' + E);
+    const r = await fetch(baseUrl + '/api/agendamentos?lojas=' + lojas, { headers: H(tok('atendimento central')) });
+    assert.equal(r.status, 200);
+    assert.equal((await r.json()).total, 2);
+    assert.deepEqual(capturedParams, [G, E]);
+    assert.match(capturedSql, / OR /);
+  } finally { pool.query = orig; }
+});
+
+test('central: nenhuma loja marcada não retorna agendamentos', async function() {
+  const orig = pool.query;
+  let capturedSql = '';
+  pool.query = async function(sql) {
+    capturedSql = String(sql);
+    return { rows: [] };
+  };
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos?lojas=__nenhuma__', { headers: H(tok('atendimento central')) });
+    assert.equal(r.status, 200);
+    assert.equal((await r.json()).total, 0);
+    assert.match(capturedSql, /WHERE a\.excluido_em IS NULL AND FALSE/);
+  } finally { pool.query = orig; }
+});
+
 test('central: acessa todos os agendamentos excluídos — 200', async function() {
   const restore = withQuery({ 'FROM agendamentos WHERE excluido_em IS NOT NULL': { rows: [ag(G), ag(E)] } });
   try {

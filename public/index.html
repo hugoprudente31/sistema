@@ -221,6 +221,11 @@
 
     .checkbox-line { display: flex; align-items: center; gap: 8px; padding-top: 28px; }
     .checkbox-line input { width: auto; }
+    .lojas-checkbox-wrap { grid-column: 1 / -1; }
+    .lojas-checkbox-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 5px; }
+    .loja-checkbox { display: inline-flex; align-items: center; gap: 7px; margin: 0; padding: 9px 12px; border: 1px solid #f1c7ae; border-radius: 12px; background: #fff; color: #374151; cursor: pointer; font-size: 13px; font-weight: 600; }
+    .loja-checkbox input { width: auto; margin: 0; accent-color: var(--p); }
+    .loja-checkbox:has(input:checked) { background: #fff3eb; border-color: var(--p); color: #b93800; }
 
     .loading-box {
       padding: 18px;
@@ -517,6 +522,11 @@
           <div><label>Loja</label><select id="filtroLoja" onchange="recarregarComFiltros()"></select></div>
           <div><label>Optometrista</label><input id="filtroOptometrista" type="text" oninput="debouncedReload()" placeholder="Digite o nome"></div>
           <div><label>Proprietário</label><input id="filtroOwner" type="text" oninput="debouncedReload()" placeholder="Nome do proprietário"></div>
+          <div id="filtroLojasCentralWrap" class="lojas-checkbox-wrap hidden">
+            <label>Lojas exibidas no Dashboard Operacional</label>
+            <div class="lojas-checkbox-list" id="filtroLojasCentral"></div>
+            <div class="legend-mini" style="margin-top:6px;">Os indicadores e a lista abaixo mostram somente as lojas marcadas.</div>
+          </div>
         </div>
         <div class="row-3">
           <div><label>Vendedor / Consultor</label><input id="filtroVendedor" type="text" oninput="debouncedReload()" placeholder="Nome do vendedor ou consultor"></div>
@@ -1287,6 +1297,7 @@ function buildAgendamentosUrl(extra) {
   if (f.dataAte)     p.push('ate='         + encodeURIComponent(f.dataAte));
   if (f.periodoDias) p.push('periodoDias=' + encodeURIComponent(f.periodoDias));
   if (f.loja)        p.push('loja='        + encodeURIComponent(f.loja));
+  if (Array.isArray(f.lojas)) p.push('lojas=' + encodeURIComponent(f.lojas.length ? f.lojas.join('|') : '__nenhuma__'));
   if (f.status)      p.push('status='      + encodeURIComponent(f.status));
   if (f.statusOS)    p.push('statusOS='    + encodeURIComponent(f.statusOS));
   if (f.estagio)     p.push('estagio='     + encodeURIComponent(f.estagio));
@@ -1310,7 +1321,10 @@ function getAgendamentosPostgres() {
 }
 
 function getDashboardPostgres() {
-  return apiGet('/api/dashboard').then(function(res) {
+  var f = (typeof coletarFiltros === 'function') ? coletarFiltros() : {};
+  var url = '/api/dashboard';
+  if (Array.isArray(f.lojas)) url += '?lojas=' + encodeURIComponent(f.lojas.length ? f.lojas.join('|') : '__nenhuma__');
+  return apiGet(url).then(function(res) {
     return (res && res.dashboard) ? res.dashboard : {};
   });
 }
@@ -2030,7 +2044,9 @@ function atualizarEscopoDashboard() {
   else if (f.dataDe) periodo = 'A partir de ' + formatDateBR(f.dataDe);
   else if (f.dataAte) periodo = 'Até ' + formatDateBR(f.dataAte);
   else if (f.periodoDias) periodo = 'Últimos ' + f.periodoDias + ' dias';
-  var loja = f.loja || 'Todas as lojas';
+  var loja = Array.isArray(f.lojas)
+    ? (f.lojas.length ? f.lojas.join(', ') : 'Nenhuma loja selecionada')
+    : (f.loja || 'Todas as lojas');
   var filtrosExtras = [];
   if (f.status) filtrosExtras.push('Status: ' + f.status);
   if (f.statusOS) filtrosExtras.push('Status OS: ' + f.statusOS);
@@ -2149,11 +2165,21 @@ function preencherEditLojas() {
 
 function preencherFiltroLojas() {
   var el = byId('filtroLoja');
+  var centralWrap = byId('filtroLojasCentralWrap');
   var html = '<option value="">Todas as lojas</option>';
   html += state.lojas.length ? state.lojas.map(function(l) {
     return '<option value="' + escapeHtml(l.Loja) + '">' + escapeHtml(l.Loja) + '</option>';
   }).join('') : '<option value="">Nenhuma loja encontrada</option>';
   el.innerHTML = html;
+
+  if (roleName() === 'atendimento central') {
+    el.parentElement.classList.add('hidden');
+    centralWrap.classList.remove('hidden');
+    preencherCheckboxesLojasCentral();
+    return;
+  }
+  el.parentElement.classList.remove('hidden');
+  centralWrap.classList.add('hidden');
 
   if (['optometrista', 'consultor de vendas', 'vendedor', 'outros', 'gerente de loja', 'comprador'].indexOf(roleName()) > -1 && state.user && state.user.loja && state.user.loja !== 'Todas') {
     el.value = state.user.loja;
@@ -2161,6 +2187,46 @@ function preencherFiltroLojas() {
   } else {
     el.disabled = false;
   }
+}
+
+function preencherCheckboxesLojasCentral() {
+  var container = byId('filtroLojasCentral');
+  if (!container) return;
+  var anteriores = {};
+  container.querySelectorAll('input[data-loja]').forEach(function(input) {
+    anteriores[input.getAttribute('data-loja')] = input.checked;
+  });
+  var primeiraCarga = !container.querySelector('input[data-loja]');
+  var lojas = state.lojas || [];
+  var todasMarcadas = primeiraCarga || lojas.every(function(l) { return anteriores[l.Loja] !== false; });
+  var html = '<label class="loja-checkbox"><input id="filtroTodasLojasCentral" type="checkbox" ' + (todasMarcadas ? 'checked ' : '') + 'onchange="alternarTodasLojasCentral(this.checked)">Todas as lojas</label>';
+  html += lojas.map(function(l) {
+    var marcada = primeiraCarga || anteriores[l.Loja] !== false;
+    return '<label class="loja-checkbox"><input type="checkbox" data-loja="' + escapeHtml(l.Loja) + '" ' + (marcada ? 'checked ' : '') + 'onchange="alterarLojaCentral()">' + escapeHtml(l.Loja) + '</label>';
+  }).join('');
+  container.innerHTML = html;
+}
+
+function lojasSelecionadasCentral() {
+  return Array.from(document.querySelectorAll('#filtroLojasCentral input[data-loja]:checked')).map(function(input) {
+    return input.getAttribute('data-loja');
+  });
+}
+
+function alternarTodasLojasCentral(marcar) {
+  document.querySelectorAll('#filtroLojasCentral input[data-loja]').forEach(function(input) { input.checked = marcar; });
+  recarregarComFiltros();
+}
+
+function alterarLojaCentral() {
+  var lojas = document.querySelectorAll('#filtroLojasCentral input[data-loja]');
+  var marcadas = document.querySelectorAll('#filtroLojasCentral input[data-loja]:checked');
+  var todas = byId('filtroTodasLojasCentral');
+  if (todas) {
+    todas.checked = lojas.length > 0 && marcadas.length === lojas.length;
+    todas.indeterminate = marcadas.length > 0 && marcadas.length < lojas.length;
+  }
+  recarregarComFiltros();
 }
 
 function preencherOwners() {
@@ -2276,6 +2342,11 @@ function coletarFiltros() {
     lojaUsuario: String((state.user && state.user.loja) || '').trim()
   };
 
+  if (role === 'atendimento central') {
+    filtros.loja = '';
+    filtros.lojas = lojasSelecionadasCentral();
+  }
+
   if (['optometrista', 'consultor de vendas', 'vendedor', 'outros', 'gerente de loja', 'comprador'].indexOf(role) > -1 && state.user && state.user.loja && state.user.loja !== 'Todas') {
     filtros.loja = state.user.loja;
   }
@@ -2301,6 +2372,11 @@ function limparFiltros() {
   byId('filtroMeus').checked = false;
   if (state.user && state.user.loja && state.user.loja !== 'Todas') byId('filtroLoja').value = state.user.loja;
   else byId('filtroLoja').value = '';
+  if (roleName() === 'atendimento central') {
+    document.querySelectorAll('#filtroLojasCentral input[data-loja]').forEach(function(input) { input.checked = true; });
+    var todasLojas = byId('filtroTodasLojasCentral');
+    if (todasLojas) { todasLojas.checked = true; todasLojas.indeterminate = false; }
+  }
   recarregarComFiltros();
 }
 
@@ -3210,6 +3286,7 @@ function construirDescFiltros() {
   if (f.proprietario) parts.push('Proprietário: ' + f.proprietario);
   if (f.origem)       parts.push('Origem: ' + f.origem);
   if (f.loja)         parts.push('Loja: ' + f.loja);
+  if (Array.isArray(f.lojas)) parts.push('Lojas: ' + (f.lojas.length ? f.lojas.join(', ') : 'nenhuma'));
   if (f.meus === 'true') parts.push('Meus serviços');
   return parts.join(' | ') || 'Sem filtros aplicados';
 }
@@ -4814,7 +4891,10 @@ function executarDedupKommo() {
         // quem não pode vê-los. Todos os perfis autorizados precisam desta
         // resposta para os KPIs de OS 7/15/30 dias; retornar {} para a Central
         // fazia esses cartões ficarem falsamente em 0 / 0.
-        return apiGet('/api/dashboard').then(function(res) {
+        var f = (typeof coletarFiltros === 'function') ? coletarFiltros() : {};
+        var url = '/api/dashboard';
+        if (Array.isArray(f.lojas)) url += '?lojas=' + encodeURIComponent(f.lojas.length ? f.lojas.join('|') : '__nenhuma__');
+        return apiGet(url).then(function(res) {
           return (res && res.dashboard) ? res.dashboard : {};
         });
       };
