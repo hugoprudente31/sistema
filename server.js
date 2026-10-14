@@ -3032,12 +3032,59 @@ app.post("/api/admin/notificacoes/gerar-retroativo", requireSuperAdmin, async (r
 
 app.get("/api/lixeira", requireAdminOuCentral, async (req, res) => {
   try {
+    const q = req.query || {};
+    const conditions = ["excluido_em IS NOT NULL"];
+    const params = [];
+    const add = (value, sql) => {
+      params.push(value);
+      conditions.push(sql.replace("?", `$${params.length}`));
+    };
+
+    const busca = clean(q.busca);
+    if (busca) {
+      params.push(`%${busca}%`);
+      const pos = params.length;
+      conditions.push(`(COALESCE(nome,'') ILIKE $${pos} OR COALESCE(whatsapp,'') ILIKE $${pos} OR COALESCE(email,'') ILIKE $${pos})`);
+    }
+    if (clean(q.loja)) add(clean(q.loja), `LOWER(COALESCE(loja,'')) = LOWER(?)`);
+    if (clean(q.status)) add(clean(q.status), `LOWER(COALESCE(status,'')) = LOWER(?)`);
+    if (clean(q.statusOS)) add(clean(q.statusOS), `LOWER(COALESCE(status_os,'')) = LOWER(?)`);
+    if (clean(q.excluidoPor)) add(`%${clean(q.excluidoPor)}%`, `COALESCE(ultima_alteracao_por_nome,'') ILIKE ?`);
+
+    const dataDe = /^\d{4}-\d{2}-\d{2}$/.test(clean(q.dataDe)) ? clean(q.dataDe) : "";
+    const dataAte = /^\d{4}-\d{2}-\d{2}$/.test(clean(q.dataAte)) ? clean(q.dataAte) : "";
+    if (dataDe) add(dataDe, `excluido_em::date >= ?::date`);
+    if (dataAte) add(dataAte, `excluido_em::date <= ?::date`);
+
+    const pagina = Math.max(1, Number.parseInt(q.pagina, 10) || 1);
+    const porPagina = Math.min(100, Math.max(10, Number.parseInt(q.porPagina, 10) || 25));
+    params.push(porPagina);
+    const limitPos = params.length;
+    params.push((pagina - 1) * porPagina);
+    const offsetPos = params.length;
+
     const result = await pool.query(
       `SELECT id, nome, whatsapp, email, loja, status, status_os, data_agendamento,
-              ultima_alteracao_por_nome, excluido_em
-       FROM agendamentos WHERE excluido_em IS NOT NULL ORDER BY excluido_em DESC LIMIT 500`
+              ultima_alteracao_por_nome, excluido_em, COUNT(*) OVER()::int AS total_filtrado
+       FROM agendamentos WHERE ${conditions.join(" AND ")}
+       ORDER BY excluido_em DESC
+       LIMIT $${limitPos} OFFSET $${offsetPos}`,
+      params
     );
-    res.json({ ok: true, agendamentos: result.rows });
+    const total = result.rows.length ? Number(result.rows[0].total_filtrado ?? result.rows.length) : 0;
+    const agendamentos = result.rows.map((row) => {
+      const item = { ...row };
+      delete item.total_filtrado;
+      return item;
+    });
+    res.json({
+      ok: true,
+      agendamentos,
+      total,
+      pagina,
+      porPagina,
+      totalPaginas: Math.max(1, Math.ceil(total / porPagina))
+    });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });
   }

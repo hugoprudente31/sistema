@@ -817,11 +817,32 @@
         </div>
       </div>
       <p style="color:#6b7280;font-size:13px;margin-bottom:12px;">Consulte todos os agendamentos excluídos. O Atendimento Central pode restaurar o lead e continuar o atendimento; somente o Admin pode excluir definitivamente.</p>
+      <div class="notice" style="margin-bottom:12px;">
+        <strong>Filtros dos leads excluídos</strong>
+        <div class="row-4" style="margin-top:10px;">
+          <div><label>Cliente</label><input id="lixeiraBusca" type="search" placeholder="Nome, WhatsApp ou e-mail" oninput="debouncedLixeira()"></div>
+          <div><label>Loja</label><select id="lixeiraLoja" onchange="aplicarFiltrosLixeira()"><option value="">Todas as lojas</option></select></div>
+          <div><label>Status do agendamento</label><select id="lixeiraStatus" onchange="aplicarFiltrosLixeira()"><option value="">Todos</option><option>Agendado</option><option>Confirmado</option><option>Compareceu</option><option>Não Compareceu</option><option>OS em Andamento</option><option>Concluído</option><option>Cancelado</option></select></div>
+          <div><label>Status da OS</label><select id="lixeiraStatusOS" onchange="aplicarFiltrosLixeira()"><option value="">Todos</option><option>Aberta</option><option>Em produção</option><option>Recebida</option><option>Pronta</option><option>Entregue</option><option>Concluído</option><option>Cancelada</option><option>Cancelado</option><option>Reembolso</option></select></div>
+        </div>
+        <div class="row-4" style="margin-top:10px;">
+          <div><label>Excluído de</label><input id="lixeiraDataDe" type="date" onchange="aplicarFiltrosLixeira()"></div>
+          <div><label>Excluído até</label><input id="lixeiraDataAte" type="date" onchange="aplicarFiltrosLixeira()"></div>
+          <div><label>Excluído por</label><input id="lixeiraExcluidoPor" type="search" placeholder="Nome do usuário" oninput="debouncedLixeira()"></div>
+          <div><label>&nbsp;</label><button class="secondary" onclick="limparFiltrosLixeira()">Limpar filtros</button></div>
+        </div>
+        <div id="lixeiraResumo" class="legend-mini" style="margin-top:10px;font-weight:700;">Carregando registros...</div>
+      </div>
       <div class="scroll-x">
         <table>
           <thead><tr><th>ID</th><th>Cliente</th><th>WhatsApp</th><th>Loja</th><th>Status</th><th>Excluído em</th><th>Por</th><th>Ações</th></tr></thead>
           <tbody id="lixeiraBody"></tbody>
         </table>
+      </div>
+      <div id="lixeiraPaginacao" style="display:none;align-items:center;justify-content:space-between;gap:12px;margin-top:14px;">
+        <button class="btn-relatorio secondary" id="lixeiraAnterior" onclick="carregarLixeira(lixeiraPagina-1)">← Anterior</button>
+        <span id="lixeiraPaginaInfo" style="font-size:13px;font-weight:700;color:#475569;"></span>
+        <button class="btn-relatorio secondary" id="lixeiraProxima" onclick="carregarLixeira(lixeiraPagina+1)">Próxima →</button>
       </div>
     </div>
 
@@ -4308,13 +4329,70 @@ function deletarUsuario(id, nome) {
     .finally(function(){ showLoading(false); });
 }
 
-function carregarLixeira() {
+var lixeiraPagina = 1;
+var _lixeiraDebounce = null;
+
+function preencherFiltroLixeiraLojas() {
+  var el = byId('lixeiraLoja');
+  if (!el) return;
+  var atual = el.value;
+  el.innerHTML = '<option value="">Todas as lojas</option>' + (state.lojas || []).map(function(l) {
+    return '<option value="' + escapeHtml(l.Loja) + '">' + escapeHtml(l.Loja) + '</option>';
+  }).join('');
+  el.value = atual;
+}
+
+function filtrosLixeiraQuery() {
+  var params = new URLSearchParams();
+  var campos = {
+    busca: 'lixeiraBusca', loja: 'lixeiraLoja', status: 'lixeiraStatus',
+    statusOS: 'lixeiraStatusOS', dataDe: 'lixeiraDataDe', dataAte: 'lixeiraDataAte',
+    excluidoPor: 'lixeiraExcluidoPor'
+  };
+  Object.keys(campos).forEach(function(chave) {
+    var el = byId(campos[chave]);
+    var valor = el ? el.value.trim() : '';
+    if (valor) params.set(chave, valor);
+  });
+  params.set('pagina', String(lixeiraPagina));
+  params.set('porPagina', '25');
+  return params.toString();
+}
+
+function aplicarFiltrosLixeira() {
+  lixeiraPagina = 1;
+  carregarLixeira(1);
+}
+
+function debouncedLixeira() {
+  clearTimeout(_lixeiraDebounce);
+  _lixeiraDebounce = setTimeout(aplicarFiltrosLixeira, 350);
+}
+
+function limparFiltrosLixeira() {
+  ['lixeiraBusca','lixeiraLoja','lixeiraStatus','lixeiraStatusOS','lixeiraDataDe','lixeiraDataAte','lixeiraExcluidoPor'].forEach(function(id) {
+    if (byId(id)) byId(id).value = '';
+  });
+  aplicarFiltrosLixeira();
+}
+
+function carregarLixeira(pagina) {
+  if (Number.isFinite(Number(pagina))) lixeiraPagina = Math.max(1, Number(pagina));
   byId('cardLixeira').classList.remove('hidden');
+  preencherFiltroLixeiraLojas();
   byId('lixeiraBody').innerHTML = '<tr><td colspan="8"><div class="loading-box">Carregando...</div></td></tr>';
-  apiGet('/api/lixeira').then(function(res) {
+  apiGet('/api/lixeira?' + filtrosLixeiraQuery()).then(function(res) {
     var rows = Array.isArray(res.agendamentos) ? res.agendamentos : [];
+    var total = Number(res.total || 0);
+    var totalPaginas = Math.max(1, Number(res.totalPaginas || 1));
+    lixeiraPagina = Math.min(Math.max(1, Number(res.pagina || lixeiraPagina)), totalPaginas);
+    byId('lixeiraResumo').textContent = total + ' lead(s) excluído(s) encontrado(s).';
+    byId('lixeiraPaginacao').style.display = totalPaginas > 1 ? 'flex' : 'none';
+    byId('lixeiraPaginaInfo').textContent = 'Página ' + lixeiraPagina + ' de ' + totalPaginas;
+    byId('lixeiraAnterior').disabled = lixeiraPagina <= 1;
+    byId('lixeiraProxima').disabled = lixeiraPagina >= totalPaginas;
     if (!rows.length) {
-      byId('lixeiraBody').innerHTML = '<tr><td colspan="8">Lixeira vazia.</td></tr>';
+      byId('lixeiraBody').innerHTML = '<tr><td colspan="8">Nenhum lead excluído encontrado para os filtros informados.</td></tr>';
       return;
     }
     var podeExcluirPermanente = !!(state.user && state.user.permissions && state.user.permissions.isAdmin);
@@ -4335,6 +4413,8 @@ function carregarLixeira() {
         '</td></tr>';
     }).join('');
   }).catch(function(err) {
+    byId('lixeiraResumo').textContent = 'Não foi possível carregar os resultados.';
+    byId('lixeiraPaginacao').style.display = 'none';
     byId('lixeiraBody').innerHTML = '<tr><td colspan="8" class="err">Erro: ' + escapeHtml(err.message||String(err)) + '</td></tr>';
   });
 }
