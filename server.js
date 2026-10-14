@@ -563,6 +563,18 @@ async function saveAppointmentBackup(db, { before = null, after = null, action, 
       after ? JSON.stringify(after) : null
     ]
   );
+  await db.query(
+    `INSERT INTO eventos_operacionais (
+       tipo, entidade_tipo, entidade_id, loja, usuario_nome, usuario_email,
+       usuario_perfil, acao, estado_anterior, estado_novo, dados
+     ) VALUES ($1,'agendamento',$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb)`,
+    ["agendamento", record.id || null, record.loja || null,
+      clean(session.nome || "Sistema"), clean(session.email),
+      clean(session.perfil || "sistema").toLowerCase(), action,
+      before ? JSON.stringify(before) : null,
+      after ? JSON.stringify(after) : null,
+      JSON.stringify({ cliente: record.nome || null, origem: record.origem || null })]
+  );
 }
 
 // ===============================
@@ -1361,12 +1373,15 @@ async function initDatabase() {
         NEW.atendimento_semaforo := 'vermelho';
         NEW.atendimento_semaforo_label := 'Não compareceu';
       ELSIF comp IN ('sim', 'compareceu') OR status_agenda IN ('compareceu', 'concluido', 'concluído') THEN
-        IF venda = 'sim' OR valor > 0 THEN
+        IF venda = 'sim' OR valor > 0 OR nullif(trim(coalesce(NEW.numero_os,'')),'') IS NOT NULL THEN
           NEW.atendimento_semaforo := 'verde';
           NEW.atendimento_semaforo_label := 'Compareceu e comprou';
-        ELSE
+        ELSIF venda IN ('nao','não') THEN
           NEW.atendimento_semaforo := 'amarelo';
           NEW.atendimento_semaforo_label := 'Compareceu e não comprou';
+        ELSE
+          NEW.atendimento_semaforo := 'amarelo';
+          NEW.atendimento_semaforo_label := 'Aguardando resultado comercial';
         END IF;
       ELSE
         NEW.atendimento_semaforo := '';
@@ -1378,7 +1393,7 @@ async function initDatabase() {
 
     DROP TRIGGER IF EXISTS trg_atualizar_atendimento_semaforo_tgt ON agendamentos;
     CREATE TRIGGER trg_atualizar_atendimento_semaforo_tgt
-    BEFORE INSERT OR UPDATE OF compareceu, status, venda_gerada, valor_venda, patologia, resultado_optometrista
+    BEFORE INSERT OR UPDATE OF compareceu, status, venda_gerada, valor_venda, numero_os, patologia, resultado_optometrista
     ON agendamentos
     FOR EACH ROW EXECUTE FUNCTION atualizar_atendimento_semaforo_tgt();
 
@@ -1449,6 +1464,30 @@ async function initDatabase() {
   await addColumnIfMissing("historico_alteracoes_agendamentos", "registro_anterior", "JSONB");
   await addColumnIfMissing("historico_alteracoes_agendamentos", "registro_novo", "JSONB");
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_hist_agendamento_data ON historico_alteracoes_agendamentos(agendamento_id, criado_em DESC);`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS eventos_operacionais (
+      id BIGSERIAL PRIMARY KEY,
+      tipo TEXT NOT NULL,
+      entidade_tipo TEXT NOT NULL,
+      entidade_id INTEGER,
+      loja TEXT,
+      usuario_nome TEXT,
+      usuario_email TEXT,
+      usuario_perfil TEXT,
+      acao TEXT NOT NULL,
+      estado_anterior JSONB,
+      estado_novo JSONB,
+      dados JSONB NOT NULL DEFAULT '{}'::jsonb,
+      ocorrido_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_eventos_operacionais_periodo ON eventos_operacionais(ocorrido_em DESC);
+    CREATE INDEX IF NOT EXISTS idx_eventos_operacionais_loja_usuario ON eventos_operacionais(loja, usuario_email, ocorrido_em DESC);
+    CREATE OR REPLACE FUNCTION impedir_alteracao_evento_operacional_tgt()
+    RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'A trilha de eventos operacionais é imutável'; END; $$ LANGUAGE plpgsql;
+    DROP TRIGGER IF EXISTS trg_eventos_operacionais_imutaveis_tgt ON eventos_operacionais;
+    CREATE TRIGGER trg_eventos_operacionais_imutaveis_tgt BEFORE UPDATE OR DELETE ON eventos_operacionais
+      FOR EACH ROW EXECUTE FUNCTION impedir_alteracao_evento_operacional_tgt();
+  `);
   await pool.query(`
     INSERT INTO historico_alteracoes_agendamentos (
       agendamento_id, loja, cliente_nome, acao, payload,
@@ -5238,6 +5277,76 @@ app.get("/api/admin/dashboard-executivo", requireAdmin, async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ ok: false, message: "Erro ao carregar o painel executivo.", error: error.message });
+  }
+});
+
+// Produtividade operacional por pessoa e função. "Venda realizada" mede o
+// resultado comercial; "venda registrada" exige OS ou valor lançado.
+app.get("/api/admin/desempenho", requireAdmin, async (req, res) => {
+  try {
+    const hoje = hojeBrasil();
+    const inicio = clean(req.query.inicio) || `${hoje.slice(0, 7)}-01`;
+    const fim = clean(req.query.fim) || hoje;
+    const loja = clean(req.query.loja);
+    const colaborador = clean(req.query.colaborador);
+    const perfil = clean(req.query.perfil).toLowerCase();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(inicio) || !/^\d{4}-\d{2}-\d{2}$/.test(fim) || inicio > fim) {
+      return res.status(400).json({ ok: false, message: "Período inválido." });
+    }
+
+    const params = [inicio, fim];
+    const filtros = ["a.excluido_em IS NULL", "COALESCE(a.data_agendamento,a.criado_em::date) BETWEEN $1::date AND $2::date"];
+    if (loja) { params.push(loja); filtros.push(storeSql("a.loja", `$${params.length}`)); }
+    if (colaborador) {
+      params.push(`%${colaborador}%`);
+      filtros.push(`(COALESCE(a.agendado_por_nome,'') ILIKE $${params.length} OR COALESCE(a.optometrista,'') ILIKE $${params.length} OR COALESCE(a.vendedor_nome,a.consultor_responsavel,'') ILIKE $${params.length})`);
+    }
+    const compareceu = `(LOWER(COALESCE(a.compareceu,'')) IN ('sim','compareceu','true','1') OR LOWER(COALESCE(a.status,'')) IN ('compareceu','concluído','concluido'))`;
+    const faltou = `(LOWER(COALESCE(a.compareceu,'')) IN ('não','nao','não compareceu','nao compareceu') OR LOWER(COALESCE(a.status,'')) IN ('não compareceu','nao compareceu'))`;
+    const vendeu = `(LOWER(COALESCE(a.venda_gerada,'')) IN ('sim','true','1') OR COALESCE(a.valor_venda,0) > 0)`;
+    const registrada = `(COALESCE(a.valor_venda,0) > 0 OR NULLIF(TRIM(COALESCE(a.numero_os,'')),'') IS NOT NULL)`;
+    const metricas = `COUNT(*)::int agendamentos,
+      COUNT(*) FILTER (WHERE ${compareceu})::int comparecimentos,
+      COUNT(*) FILTER (WHERE ${faltou})::int faltas,
+      COUNT(*) FILTER (WHERE ${vendeu})::int vendas_realizadas,
+      COUNT(*) FILTER (WHERE ${registrada})::int vendas_registradas,
+      COUNT(*) FILTER (WHERE ${compareceu} AND NOT ${registrada} AND LOWER(COALESCE(a.venda_gerada,'')) NOT IN ('sim','nao','não','true','false','1','0'))::int resultados_pendentes,
+      COUNT(*) FILTER (WHERE COALESCE(a.compareceu,'Pendente') ILIKE 'Pendente'
+        AND (a.data_agendamento + CASE WHEN COALESCE(a.horario,'') ~ '^([01]?[0-9]|2[0-3]):[0-5][0-9]$' THEN a.horario::time ELSE TIME '23:59' END) < (NOW() AT TIME ZONE 'America/Sao_Paulo'))::int comparecimentos_pendentes,
+      COALESCE(SUM(a.valor_venda) FILTER (WHERE ${registrada}),0)::numeric faturamento`;
+    const resumoResult = await pool.query(`SELECT ${metricas} FROM agendamentos a WHERE ${filtros.join(" AND ")}`, params);
+
+    const pessoaParams = [inicio, fim];
+    const pessoaFiltros = ["x.excluido_em IS NULL", "COALESCE(x.data_agendamento,x.criado_em::date) BETWEEN $1::date AND $2::date"];
+    if (loja) { pessoaParams.push(loja); pessoaFiltros.push(storeSql("x.loja", `$${pessoaParams.length}`)); }
+    if (colaborador) { pessoaParams.push(`%${colaborador}%`); pessoaFiltros.push(`x.colaborador ILIKE $${pessoaParams.length}`); }
+    if (perfil) { pessoaParams.push(perfil); pessoaFiltros.push(`LOWER(x.perfil_colaborador) = $${pessoaParams.length}`); }
+    const atribuicoes = `
+      SELECT a.*, COALESCE(NULLIF(a.agendado_por_nome,''),NULLIF(a.agendado_por_email,''),'Não informado') colaborador, 'Atendimento' perfil_colaborador FROM agendamentos a
+      UNION ALL SELECT a.*, COALESCE(NULLIF(a.optometrista,''),'Não informado') colaborador, 'Optometria' perfil_colaborador FROM agendamentos a
+      UNION ALL SELECT a.*, COALESCE(NULLIF(a.vendedor_nome,''),NULLIF(a.consultor_responsavel,''),'Não informado') colaborador, 'Comercial' perfil_colaborador FROM agendamentos a`;
+    const alias = (sql) => sql.replaceAll("a.", "x.");
+    const pessoasResult = await pool.query(`SELECT x.colaborador, x.perfil_colaborador AS perfil, COALESCE(NULLIF(x.loja,''),'Sem loja') loja,
+        COUNT(*)::int agendamentos,
+        COUNT(*) FILTER (WHERE ${alias(compareceu)})::int comparecimentos,
+        COUNT(*) FILTER (WHERE ${alias(faltou)})::int faltas,
+        COUNT(*) FILTER (WHERE ${alias(vendeu)})::int vendas_realizadas,
+        COUNT(*) FILTER (WHERE ${alias(registrada)})::int vendas_registradas,
+        COALESCE(SUM(x.valor_venda) FILTER (WHERE ${alias(registrada)}),0)::numeric faturamento
+      FROM (${atribuicoes}) x WHERE ${pessoaFiltros.join(" AND ")}
+      GROUP BY x.colaborador,x.perfil_colaborador,x.loja
+      ORDER BY vendas_registradas DESC, comparecimentos DESC, agendamentos DESC`, pessoaParams);
+    const r = resumoResult.rows[0];
+    const agendamentos = Number(r.agendamentos || 0);
+    const comparecimentos = Number(r.comparecimentos || 0);
+    const vendas = Number(r.vendas_realizadas || 0);
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ ok: true, periodo: { inicio, fim }, filtros: { loja: loja || null, colaborador: colaborador || null, perfil: perfil || null },
+      resumo: { ...r, taxa_comparecimento: agendamentos ? Number((comparecimentos * 100 / agendamentos).toFixed(1)) : 0,
+        taxa_conversao: comparecimentos ? Number((vendas * 100 / comparecimentos).toFixed(1)) : 0 },
+      pessoas: pessoasResult.rows });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: "Erro ao carregar o painel de desempenho.", error: error.message });
   }
 });
 

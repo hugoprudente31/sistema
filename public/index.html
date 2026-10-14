@@ -398,6 +398,7 @@
       </div>
       <div class="admin-nav-buttons" style="margin-top:12px;">
         <button class="active" data-admin-area="executivo" onclick="mostrarAreaAdmin('executivo',this)">Visão Executiva</button>
+        <button data-admin-area="desempenho" onclick="mostrarAreaAdmin('desempenho',this);carregarDesempenho()">Desempenho</button>
         <button data-admin-area="crm" onclick="mostrarAreaAdmin('crm',this)">CRM</button>
         <button data-admin-area="operacao" onclick="mostrarAreaAdmin('operacao',this)">Operação e OS</button>
         <button data-admin-area="financeiro" onclick="mostrarAreaAdmin('financeiro',this)">Financeiro</button>
@@ -712,6 +713,28 @@
         <div><h3>Administração do Grupo</h3><p>Metas, usuários, auditoria e recuperação de registros, separados da rotina operacional.</p></div>
         <button class="btn-relatorio" id="btnLixeira" onclick="carregarLixeira(); byId('cardLixeira').scrollIntoView({behavior:'smooth'});" style="background:#7f1d1d">Abrir lixeira</button>
       </div>
+    </div>
+
+    <div class="card hidden" id="cardDesempenho">
+      <div class="topbar">
+        <div><h3 style="margin:0;">Desempenho Operacional</h3><p class="legend-mini">Produtividade por loja, colaborador e função, sem misturar venda informada com venda registrada.</p></div>
+        <button class="btn-relatorio secondary" onclick="carregarDesempenho()">Atualizar</button>
+      </div>
+      <div class="executive-filters">
+        <div><label>Início</label><input id="desInicio" type="date"></div>
+        <div><label>Fim</label><input id="desFim" type="date"></div>
+        <div><label>Loja</label><select id="desLoja"><option value="">Todas as lojas</option></select></div>
+        <div><label>Função</label><select id="desPerfil"><option value="">Todas</option><option>Atendimento</option><option>Optometria</option><option>Comercial</option></select></div>
+      </div>
+      <div class="executive-filters">
+        <div style="grid-column:span 2"><label>Colaborador</label><input id="desColaborador" type="search" placeholder="Digite o nome"></div>
+        <div><button onclick="carregarDesempenho()">Aplicar filtros</button></div>
+        <div><button class="secondary" onclick="limparFiltrosDesempenho()">Limpar</button></div>
+      </div>
+      <div id="desAtualizado" class="legend-mini"></div>
+      <div class="row-4" id="desKpis" style="margin-top:14px;"></div>
+      <div class="notice" style="margin-top:14px;"><strong>Leitura dos números</strong>Venda realizada é o resultado comercial marcado pelo responsável. Venda registrada possui número de OS ou valor lançado no sistema.</div>
+      <div class="scroll-x" style="margin-top:14px;"><table><thead><tr><th>Colaborador</th><th>Função</th><th>Loja</th><th>Agendamentos</th><th>Comparecimentos</th><th>Faltas</th><th>Vendas realizadas</th><th>Vendas registradas</th><th>Conversão</th><th>Faturamento</th></tr></thead><tbody id="desPessoasBody"></tbody></table></div>
     </div>
 
     <div class="card hidden" id="cardDashboardExecutivo">
@@ -1670,6 +1693,11 @@ var ADMIN_AREAS = {
     resumo: 'Indicadores estratégicos, lojas, clientes, setores, consultores e alertas.',
     cards: ['cardDashboardExecutivo','cardDashboardOperacional']
   },
+  desempenho: {
+    titulo: 'Desempenho',
+    resumo: 'Produtividade, comparecimento, conversão e registro de vendas por loja, pessoa e função.',
+    cards: ['cardDesempenho']
+  },
   crm: {
     titulo: 'CRM',
     resumo: 'Kanban de leads por estágio e histórico de conversa — espelha o Kommo dentro do sistema.',
@@ -1784,6 +1812,7 @@ function aplicarPermissoesTela() {
   if (p.isAdmin) byId('adminWorkspaceNav').classList.remove('hidden');
   if (p.isAdmin) byId('cardMetasAdmin').classList.remove('hidden');
   if (p.isAdmin) byId('cardDashboardExecutivo').classList.remove('hidden');
+  if (p.isAdmin) byId('cardDesempenho').classList.remove('hidden');
   if (p.isAdmin) byId('cardCrmKanban').classList.remove('hidden');
   if (roleName() === 'atendimento central') byId('centralWorkspaceNav').classList.remove('hidden');
   if (p.isSuperAdmin) byId('areaTecnica').classList.remove('hidden');
@@ -3517,6 +3546,38 @@ function carregarDashboardExecutivo() {
   if (byId('execLoja').value) p.push('loja='+encodeURIComponent(byId('execLoja').value));
   byId('execAtualizado').textContent='Carregando indicadores...';
   return apiGet('/api/admin/dashboard-executivo?'+p.join('&')).then(function(res){if(!res.ok)throw new Error(res.message||'Erro ao carregar dashboard.');renderDashboardExecutivo(res);}).catch(function(err){byId('execAtualizado').textContent=err.message||String(err);toast(err.message||String(err),'err');});
+}
+
+function prepararFiltrosDesempenho() {
+  if (!byId('desInicio').value) byId('desInicio').value = hojeBrasil().slice(0,7) + '-01';
+  if (!byId('desFim').value) byId('desFim').value = hojeBrasil();
+  var select = byId('desLoja');
+  if (select.options.length === 1) (state.lojas || []).forEach(function(l) {
+    var nome = l.Loja || l.nome || ''; if (!nome) return;
+    var op = document.createElement('option'); op.value = nome; op.textContent = nome; select.appendChild(op);
+  });
+}
+function limparFiltrosDesempenho() {
+  byId('desInicio').value = hojeBrasil().slice(0,7) + '-01'; byId('desFim').value = hojeBrasil();
+  byId('desLoja').value = ''; byId('desPerfil').value = ''; byId('desColaborador').value = '';
+  carregarDesempenho();
+}
+function carregarDesempenho() {
+  if (!(state.user && state.user.permissions && state.user.permissions.isAdmin)) return Promise.resolve();
+  prepararFiltrosDesempenho();
+  var p = ['inicio='+encodeURIComponent(byId('desInicio').value),'fim='+encodeURIComponent(byId('desFim').value)];
+  if (byId('desLoja').value) p.push('loja='+encodeURIComponent(byId('desLoja').value));
+  if (byId('desPerfil').value) p.push('perfil='+encodeURIComponent(byId('desPerfil').value));
+  if (byId('desColaborador').value.trim()) p.push('colaborador='+encodeURIComponent(byId('desColaborador').value.trim()));
+  byId('desAtualizado').textContent = 'Carregando indicadores...';
+  return apiGet('/api/admin/desempenho?'+p.join('&')).then(function(data) {
+    if (!data.ok) throw new Error(data.message || 'Erro ao carregar desempenho.');
+    var r = data.resumo || {};
+    var k = [['Agendamentos',r.agendamentos],['Comparecimentos',r.comparecimentos],['Faltas',r.faltas],['Comparecimentos pendentes',r.comparecimentos_pendentes],['Vendas realizadas',r.vendas_realizadas],['Vendas registradas',r.vendas_registradas],['Resultados pendentes',r.resultados_pendentes],['Conversão',pctExecutivo(r.taxa_conversao)],['Taxa de comparecimento',pctExecutivo(r.taxa_comparecimento)],['Faturamento registrado',money(r.faturamento)]];
+    byId('desKpis').innerHTML = k.map(function(x){return '<div class="kpi"><div class="label">'+escapeHtml(x[0])+'</div><div class="value">'+escapeHtml(String(x[1] == null ? 0 : x[1]))+'</div></div>';}).join('');
+    byId('desPessoasBody').innerHTML = (data.pessoas || []).map(function(x){var conv=Number(x.comparecimentos||0)?Number(x.vendas_realizadas||0)*100/Number(x.comparecimentos):0;return '<tr><td><strong>'+escapeHtml(x.colaborador)+'</strong></td><td>'+escapeHtml(x.perfil)+'</td><td>'+escapeHtml(x.loja)+'</td><td>'+numExecutivo(x.agendamentos)+'</td><td>'+numExecutivo(x.comparecimentos)+'</td><td>'+numExecutivo(x.faltas)+'</td><td>'+numExecutivo(x.vendas_realizadas)+'</td><td>'+numExecutivo(x.vendas_registradas)+'</td><td>'+pctExecutivo(conv)+'</td><td>'+money(x.faturamento)+'</td></tr>';}).join('') || linhaVazia(10,'Nenhum dado para os filtros selecionados.');
+    byId('desAtualizado').textContent = 'Período: '+data.periodo.inicio.split('-').reverse().join('/')+' a '+data.periodo.fim.split('-').reverse().join('/')+' · atualizado agora';
+  }).catch(function(err){byId('desAtualizado').textContent=err.message||String(err);toast(err.message||String(err),'err');});
 }
 
 // ── CRM (Fase 1): kanban de leads + histórico de conversa ────────
