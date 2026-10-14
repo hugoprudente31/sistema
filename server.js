@@ -2620,9 +2620,10 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         patologiaAtualizada = resultadoOptometristaAtualizado === "Patologia" ? "Sim" : "Pendente";
       }
     }
-    // Restaurar da lixeira: somente admin
-    if (b.restaurar_lead && !isAdmin(req.session)) {
-      return res.status(403).json({ ok: false, message: "Apenas admin pode restaurar leads da lixeira." });
+    // Admin e Atendimento Central podem recuperar um lead para continuar o
+    // atendimento. A exclusão permanente continua exclusiva do Admin.
+    if (b.restaurar_lead && !hasRole(req.session, ["admin", "atendimento central"])) {
+      return res.status(403).json({ ok: false, message: "Perfil sem permissão para restaurar leads da lixeira." });
     }
     // Soft delete: admin, atendimento central e gerente de loja (só da própria loja — já verificado acima)
     if (b.excluir_lead && !hasRole(req.session, ["admin", "atendimento central", "gerente de loja"])) {
@@ -3029,7 +3030,7 @@ app.post("/api/admin/notificacoes/gerar-retroativo", requireSuperAdmin, async (r
   }
 });
 
-app.get("/api/lixeira", requireAdmin, async (req, res) => {
+app.get("/api/lixeira", requireAdminOuCentral, async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT id, nome, whatsapp, email, loja, status, status_os, data_agendamento,

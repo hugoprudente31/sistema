@@ -390,9 +390,27 @@ test('central: agendamentos de todas as 4 lojas — 200', async function() {
   } finally { restore(); }
 });
 
-test('central: NÃO acessa lixeira — 403', async function() {
-  const r = await fetch(baseUrl + '/api/lixeira', { headers: H(tok('atendimento central')) });
-  assert.equal(r.status, 403);
+test('central: acessa todos os agendamentos excluídos — 200', async function() {
+  const restore = withQuery({ 'FROM agendamentos WHERE excluido_em IS NOT NULL': { rows: [ag(G), ag(E)] } });
+  try {
+    const r = await fetch(baseUrl + '/api/lixeira', { headers: H(tok('atendimento central')) });
+    assert.equal(r.status, 200);
+    assert.equal((await r.json()).agendamentos.length, 2);
+  } finally { restore(); }
+});
+
+test('central: restaura lead excluído para continuar o atendimento — 200', async function() {
+  const original = ag(E, { excluido_em: '2026-10-14T10:00:00Z' });
+  const r1 = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [original] } });
+  const r2 = withConnect(ag(E, { excluido_em: null }));
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('atendimento central')),
+      body: JSON.stringify({ restaurar_lead: true })
+    });
+    assert.equal(r.status, 200);
+    assert.equal((await r.json()).agendamento.excluido_em, null);
+  } finally { r1(); r2(); }
 });
 
 test('central: NÃO acessa faturamentos (sem permissão financeira) — 403', async function() {
@@ -1301,8 +1319,8 @@ const NAO_ADMIN = [
   ['optometrista', E]
 ];
 
-test('todos os não-admin: GET /api/lixeira retorna 403', async function() {
-  for (const arr of NAO_ADMIN) {
+test('perfis de loja continuam sem acesso à lixeira', async function() {
+  for (const arr of NAO_ADMIN.filter(function(item) { return item[0] !== 'atendimento central'; })) {
     const r = await fetch(baseUrl + '/api/lixeira', { headers: H(tok(arr[0], arr[1])) });
     assert.equal(r.status, 403, arr[0] + ' deve ser bloqueado na lixeira');
   }
