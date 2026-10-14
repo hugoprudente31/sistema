@@ -22,6 +22,14 @@ test('filtro "Etapa do lead" é enviado ao backend (buildAgendamentosUrl manda e
   assert.match(body, /f\.estagio.*estagio=/, 'estagio tinha suporte no SQL do servidor mas nunca era enviado pela URL do painel');
 });
 
+test('Atendimento Central tem caixas por loja e envia a seleção à agenda e ao dashboard', () => {
+  assert.match(html, /id="filtroLojasCentral"/);
+  assert.match(html, /function lojasSelecionadasCentral\(\)/);
+  assert.match(html, /f\.lojas\.join\('\|'\)/);
+  assert.match(html, /__nenhuma__/);
+  assert.match(html, /Os indicadores e a lista abaixo mostram somente as lojas marcadas/);
+});
+
 test('"OS Atrasadas" usa o IsOverdue já calculado por linha, em vez de ficar sempre 0', () => {
   const start = html.indexOf('function buildDashboardLocal');
   const body = html.slice(start, html.indexOf('\nfunction ', start + 20));
@@ -48,7 +56,8 @@ test('Atendimento Central consulta o dashboard real em vez de receber objeto vaz
   assert.doesNotMatch(html, /if \(!window\.tgtPodeVerFinanceiro\(\)\) return Promise\.resolve\(\{\}\)/);
   const override = html.lastIndexOf('window.getDashboardPostgres = function()');
   const body = html.slice(override, html.indexOf('\n      };', override) + 10);
-  assert.match(body, /apiGet\('\/api\/dashboard'\)/);
+  assert.match(body, /var url = '\/api\/dashboard'/);
+  assert.match(body, /apiGet\(url\)/);
 });
 
 test('primeiro carregamento já aplica os KPIs de OS vindos do backend', () => {

@@ -2466,6 +2466,19 @@ app.get("/api/agendamentos", async (req, res) => {
       if (!req.session.loja) return res.json({ ok: true, total: 0, agendamentos: [] });
       params.push(req.session.loja);
       conditions.push(storeSql("a.loja", `$${params.length}`));
+    } else if (Object.prototype.hasOwnProperty.call(q, "lojas")) {
+      const lojas = clean(q.lojas) === "__nenhuma__"
+        ? []
+        : clean(q.lojas).split("|").map(clean).filter(Boolean).slice(0, 20);
+      if (!lojas.length) {
+        conditions.push("FALSE");
+      } else {
+        const lojasSql = lojas.map((loja) => {
+          params.push(loja);
+          return storeSql("a.loja", `$${params.length}`);
+        });
+        conditions.push(`(${lojasSql.join(" OR ")})`);
+      }
     } else if (q.loja) {
       params.push(q.loja);
       conditions.push(storeSql("a.loja", `$${params.length}`));
@@ -5000,11 +5013,22 @@ app.get("/api/dashboard", async (req, res) => {
         }
       });
     }
-    const params = scoped ? [req.session.loja] : [];
+    let lojasFiltro = scoped ? [clean(req.session.loja)] : null;
+    if (!scoped && Object.prototype.hasOwnProperty.call(req.query, "lojas")) {
+      lojasFiltro = clean(req.query.lojas) === "__nenhuma__"
+        ? []
+        : clean(req.query.lojas).split("|").map(clean).filter(Boolean).slice(0, 20);
+    }
+    const params = lojasFiltro || [];
+    const filtroLojasSql = (column) => {
+      if (lojasFiltro === null) return "";
+      if (!lojasFiltro.length) return "AND FALSE";
+      return `AND (${lojasFiltro.map((_, index) => storeSql(column, `$${index + 1}`)).join(" OR ")})`;
+    };
     const clientes = await pool.query(
       `SELECT COUNT(*)::int AS total FROM clientes
        WHERE nome NOT ILIKE '%teste%'
-       ${scoped ? `AND ${storeSql("loja_origem")}` : ""}`,
+       ${filtroLojasSql("loja_origem")}`,
       params
     );
     // os7/os15/os30: OS abertas/finalizadas nos últimos N dias (janela fixa
@@ -5030,7 +5054,7 @@ app.get("/api/dashboard", async (req, res) => {
         COUNT(*) FILTER (WHERE data_finalizacao_os BETWEEN CURRENT_DATE - INTERVAL '29 days' AND CURRENT_DATE)::int AS os30_finalizadas
       FROM agendamentos
       WHERE nome NOT ILIKE '%teste%' AND COALESCE(loja,'') NOT ILIKE '%teste%' AND excluido_em IS NULL
-      ${scoped ? `AND ${storeSql("loja")}` : ""}
+      ${filtroLojasSql("loja")}
     `, params);
     const showFinance = canViewFinanceSession(req.session);
     const r = resumo.rows[0];

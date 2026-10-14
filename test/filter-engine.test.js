@@ -25,6 +25,15 @@ test('combina loja, status, cliente e datas com normalização', () => {
   assert.deepEqual(result.map((r) => r.ID), [2]);
 });
 
+test('caixas de seleção permitem combinar várias lojas e nenhuma seleção não mostra registros', () => {
+  assert.deepEqual(
+    filterAppointments(rows, { lojas: ['Óticas TGT Enseada', 'Óticas TGT - Gonzaga'] }, user, '2026-06-19').map((r) => r.ID),
+    [1, 2, 3, 4]
+  );
+  assert.deepEqual(filterAppointments(rows, { lojas: ['Óticas TGT - Gonzaga'] }, user, '2026-06-19').map((r) => r.ID), [3]);
+  assert.deepEqual(filterAppointments(rows, { lojas: [] }, user, '2026-06-19'), []);
+});
+
 test('meus serviços e minhas OS ativas respeitam usuário e status', () => {
   assert.deepEqual(filterAppointments(rows, { meus: 'true' }, user, '2026-06-19').map((r) => r.ID), [1, 2]);
   assert.deepEqual(filterAppointments(rows, { minhasOSAtivas: 'true' }, user, '2026-06-19').map((r) => r.ID), [2]);
