@@ -412,6 +412,7 @@
         <button data-central-area="painel" onclick="mostrarAreaCentral('painel',this)">Painel de Agendados</button>
         <button data-central-area="agendamento" onclick="mostrarAreaCentral('agendamento',this)">Registro de Agendamento</button>
         <button data-central-area="crm" onclick="mostrarAreaCentral('crm',this)">CRM</button>
+        <button data-central-area="lixeira" onclick="mostrarAreaCentral('lixeira',this);carregarLixeira()">Leads Excluídos</button>
         <button data-central-area="configuracoes" onclick="mostrarAreaCentral('configuracoes',this)">Configurações</button>
       </div>
       <div class="admin-nav-summary" id="centralAreaResumo">Agenda, acompanhamento de OS e indicadores operacionais.</div>
@@ -810,12 +811,12 @@
 
     <div class="card hidden" id="cardLixeira">
       <div class="topbar" style="margin-bottom:14px;">
-        <h3 style="margin:0;">🗑 Lixeira de Leads (Admin)</h3>
+        <h3 style="margin:0;">🗑 Leads Excluídos</h3>
         <div style="display:flex;gap:10px;flex-wrap:wrap;">
           <button class="btn-relatorio secondary" onclick="carregarLixeira()">Atualizar</button>
         </div>
       </div>
-      <p style="color:#6b7280;font-size:13px;margin-bottom:12px;">Leads enviados para a lixeira. Somente o Admin consegue ver esta lista. Para excluir definitivamente, clique em <strong>Excluir</strong>.</p>
+      <p style="color:#6b7280;font-size:13px;margin-bottom:12px;">Consulte todos os agendamentos excluídos. O Atendimento Central pode restaurar o lead e continuar o atendimento; somente o Admin pode excluir definitivamente.</p>
       <div class="scroll-x">
         <table>
           <thead><tr><th>ID</th><th>Cliente</th><th>WhatsApp</th><th>Loja</th><th>Status</th><th>Excluído em</th><th>Por</th><th>Ações</th></tr></thead>
@@ -1705,6 +1706,11 @@ var CENTRAL_AREAS = {
     titulo: 'Painel de Agendados',
     resumo: 'Agenda, acompanhamento de OS e indicadores operacionais.',
     cards: ['cardDashboardOperacional', 'cardOperacaoOS']
+  },
+  lixeira: {
+    titulo: 'Leads Excluídos',
+    resumo: 'Recupere um cliente excluído para corrigir dados, reagendar ou concluir o atendimento.',
+    cards: ['cardLixeira']
   },
   configuracoes: {
     titulo: 'Configurações',
@@ -4311,6 +4317,7 @@ function carregarLixeira() {
       byId('lixeiraBody').innerHTML = '<tr><td colspan="8">Lixeira vazia.</td></tr>';
       return;
     }
+    var podeExcluirPermanente = !!(state.user && state.user.permissions && state.user.permissions.isAdmin);
     byId('lixeiraBody').innerHTML = rows.map(function(r) {
       var nomeEsc = escapeHtml(r.nome||'').replace(/'/g, "\\'");
       return '<tr>' +
@@ -4321,9 +4328,10 @@ function carregarLixeira() {
         '<td>' + escapeHtml(r.status||'') + '</td>' +
         '<td>' + escapeHtml(formatDateBR(r.excluido_em)) + '</td>' +
         '<td>' + escapeHtml(r.ultima_alteracao_por_nome||'') + '</td>' +
-        '<td style="display:flex;gap:6px">' +
+        '<td style="display:flex;gap:6px;flex-wrap:wrap">' +
         '<button class="secondary icon-btn" onclick="restaurarLead(' + r.id + ')">Restaurar</button>' +
-        '<button class="danger icon-btn" style="background:#7f1d1d" onclick="deletarPermanenteLead(' + r.id + ',\'' + nomeEsc + '\')">Excluir</button>' +
+        '<button class="icon-btn" onclick="restaurarEEditarLead(' + r.id + ')">Restaurar e editar</button>' +
+        (podeExcluirPermanente ? '<button class="danger icon-btn" style="background:#7f1d1d" onclick="deletarPermanenteLead(' + r.id + ',\'' + nomeEsc + '\')">Excluir definitivamente</button>' : '') +
         '</td></tr>';
     }).join('');
   }).catch(function(err) {
@@ -4336,6 +4344,23 @@ function restaurarLead(id) {
   showLoading(true);
   apiPatch('/api/agendamentos/' + id, { restaurar_lead: true })
     .then(function() { toast('Lead restaurado com sucesso.', 'ok'); carregarLixeira(); return carregarAgendaEDashboard(); })
+    .catch(function(err) { toast(err.message||String(err), 'err'); })
+    .finally(function() { showLoading(false); });
+}
+
+function restaurarEEditarLead(id) {
+  if (!confirm('Restaurar este lead e abrir os dados para continuar o atendimento?')) return;
+  showLoading(true);
+  apiPatch('/api/agendamentos/' + id, { restaurar_lead: true })
+    .then(function(res) {
+      if (!res || !res.ok || !res.agendamento) throw new Error((res && res.message) || 'Falha ao restaurar o lead.');
+      var row = mapAgendamentoDb(res.agendamento);
+      state.agendamentos = (state.agendamentos || []).filter(function(item) { return String(item.ID) !== String(row.ID); });
+      state.agendamentos.push(row);
+      toast('Lead restaurado. Atualize os dados e salve para finalizar a ação.', 'ok');
+      carregarLixeira();
+      abrirModalEdicao(row.ID);
+    })
     .catch(function(err) { toast(err.message||String(err), 'err'); })
     .finally(function() { showLoading(false); });
 }

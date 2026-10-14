@@ -62,3 +62,11 @@ test('horário de funcionamento por loja aparece somente na página de Configura
     assert.doesNotMatch(html.slice(inicio, fim), /cardConfigHorarioLoja/);
   }
 });
+
+test('Atendimento Central tem área própria para restaurar e continuar leads excluídos', () => {
+  assert.match(html, /data-central-area="lixeira"/);
+  assert.match(html, /Leads Excluídos/);
+  assert.match(html, /function restaurarEEditarLead\(id\)/);
+  assert.match(html, /Restaurar e editar/);
+  assert.match(html, /podeExcluirPermanente/);
+});
