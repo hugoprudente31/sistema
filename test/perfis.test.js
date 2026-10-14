@@ -399,6 +399,37 @@ test('central: acessa todos os agendamentos excluídos — 200', async function(
   } finally { restore(); }
 });
 
+test('central: filtra a lixeira no servidor e recebe paginação', async function() {
+  const orig = pool.query;
+  let capturedSql = '';
+  let capturedParams = [];
+  pool.query = async function(sql, params) {
+    capturedSql = sql;
+    capturedParams = params;
+    return { rows: [ag(G, { excluido_em: '2026-10-14T10:00:00Z', total_filtrado: 26 })] };
+  };
+  try {
+    const qs = new URLSearchParams({
+      busca: 'Maria', loja: G, status: 'Agendado', statusOS: 'Aberta',
+      dataDe: '2026-10-01', dataAte: '2026-10-14', excluidoPor: 'Gabrielle',
+      pagina: '2', porPagina: '25'
+    });
+    const r = await fetch(baseUrl + '/api/lixeira?' + qs, { headers: H(tok('atendimento central')) });
+    assert.equal(r.status, 200);
+    const body = await r.json();
+    assert.equal(body.total, 26);
+    assert.equal(body.pagina, 2);
+    assert.equal(body.totalPaginas, 2);
+    assert.equal(body.agendamentos[0].total_filtrado, undefined);
+    assert.match(capturedSql, /nome.*ILIKE/i);
+    assert.match(capturedSql, /LOWER\(COALESCE\(loja/);
+    assert.match(capturedSql, /excluido_em::date >=/);
+    assert.match(capturedSql, /ultima_alteracao_por_nome/);
+    assert.deepEqual(capturedParams.slice(0, 7), ['%Maria%', G, 'Agendado', 'Aberta', '%Gabrielle%', '2026-10-01', '2026-10-14']);
+    assert.deepEqual(capturedParams.slice(-2), [25, 25]);
+  } finally { pool.query = orig; }
+});
+
 test('central: restaura lead excluído para continuar o atendimento — 200', async function() {
   const original = ag(E, { excluido_em: '2026-10-14T10:00:00Z' });
   const r1 = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [original] } });

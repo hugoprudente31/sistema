@@ -70,3 +70,12 @@ test('Atendimento Central tem área própria para restaurar e continuar leads ex
   assert.match(html, /Restaurar e editar/);
   assert.match(html, /podeExcluirPermanente/);
 });
+
+test('Leads Excluídos oferece filtros legíveis e paginação', () => {
+  for (const id of ['lixeiraBusca', 'lixeiraLoja', 'lixeiraStatus', 'lixeiraStatusOS', 'lixeiraDataDe', 'lixeiraDataAte', 'lixeiraExcluidoPor']) {
+    assert.match(html, new RegExp('id="' + id + '"'));
+  }
+  assert.match(html, /function limparFiltrosLixeira\(\)/);
+  assert.match(html, /id="lixeiraResumo"/);
+  assert.match(html, /id="lixeiraPaginacao"/);
+});
