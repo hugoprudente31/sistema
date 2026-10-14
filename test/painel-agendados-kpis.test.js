@@ -44,6 +44,31 @@ test('painel prioriza os7/os15/os30 calculados no backend (não presos ao filtro
   assert.match(body, /state\.dashboardOsBackend = dashboardBackend/);
 });
 
+test('Atendimento Central consulta o dashboard real em vez de receber objeto vazio sem KPIs de OS', () => {
+  assert.doesNotMatch(html, /if \(!window\.tgtPodeVerFinanceiro\(\)\) return Promise\.resolve\(\{\}\)/);
+  const override = html.lastIndexOf('window.getDashboardPostgres = function()');
+  const body = html.slice(override, html.indexOf('\n      };', override) + 10);
+  assert.match(body, /apiGet\('\/api\/dashboard'\)/);
+});
+
+test('primeiro carregamento já aplica os KPIs de OS vindos do backend', () => {
+  const start = html.indexOf('function carregarAgendaEDashboard');
+  const body = html.slice(start, html.indexOf('\nfunction ', start + 20));
+  assert.match(body, /state\.dashboardOsBackend = dashboardBackend/);
+  assert.match(body, /aplicarOsBackendNoDashboard\(\)/);
+});
+
+test('dashboard mostra período analisado e descreve OS como abertas e finalizadas', () => {
+  assert.match(html, /id="dashboardEscopo"/);
+  assert.match(html, /function atualizarEscopoDashboard\(\)/);
+  assert.match(html, /abertas · .*finalizadas/);
+});
+
+test('integrações diferenciam ausência de dados de valor realmente zerado', () => {
+  assert.match(html, /kTempoResposta[^]*Sem dados/);
+  assert.match(html, /kAdsSpend[^]*A sincronização ainda não enviou dados deste mês/);
+});
+
 test('edição pontual (aplicarRespostaAgendamentoAtualizado) também reaplica os7/os15/os30 do backend, sem regredir pro fallback local', () => {
   const start = html.indexOf('function aplicarRespostaAgendamentoAtualizado');
   const body = html.slice(start, html.indexOf('\nfunction ', start + 20));

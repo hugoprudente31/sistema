@@ -441,9 +441,12 @@
     <div class="card" id="cardDashboardOperacional">
       <div class="area-heading" style="padding:12px 14px;margin-bottom:14px;">
         <h3>Visão Operacional do Grupo TGT</h3>
-        <p>Indicadores, prioridades do dia e acompanhamento das lojas em um único fluxo.</p>
+        <p>Indicadores do período selecionado e acompanhamento das lojas em um único fluxo.</p>
       </div>
       <h3>Dashboard Operacional</h3>
+      <div id="dashboardEscopo" class="notice" style="margin-bottom:14px;">
+        <strong>Período analisado</strong>Carregando período e filtros...
+      </div>
       <div class="row-4">
         <div class="kpi"><div class="label">Agendados/Confirmados</div><div class="value" id="kAgendados">0</div></div>
         <div class="kpi"><div class="label">Compareceram</div><div class="value" id="kCompareceram">0</div></div>
@@ -452,20 +455,20 @@
         <div class="kpi"><div class="label">OS Ativas</div><div class="value" id="kOsAtivas">0</div></div>
         <div class="kpi"><div class="label">OS Atrasadas</div><div class="value" id="kAtrasadas">0</div></div>
         <div class="kpi hidden" id="cardFaturamentoKpi"><div class="label">Faturamento</div><div class="value" id="kFaturamento">R$ 0,00</div></div>
-        <div class="kpi"><div class="label">Origem top</div><div class="value" id="kOrigemTop">—</div></div>
+        <div class="kpi"><div class="label">Principal origem</div><div class="value" id="kOrigemTop">—</div></div>
       </div>
       <div class="row-3 hidden" id="dashboardCentral" style="margin-top:14px;">
-        <div class="kpi"><div class="label">OS 7 dias</div><div class="value" id="kOs7">0 / 0</div></div>
-        <div class="kpi"><div class="label">OS 15 dias</div><div class="value" id="kOs15">0 / 0</div></div>
-        <div class="kpi"><div class="label">OS 30 dias</div><div class="value" id="kOs30">0 / 0</div></div>
+        <div class="kpi"><div class="label">OS nos últimos 7 dias</div><div class="value" id="kOs7">0 abertas · 0 finalizadas</div></div>
+        <div class="kpi"><div class="label">OS nos últimos 15 dias</div><div class="value" id="kOs15">0 abertas · 0 finalizadas</div></div>
+        <div class="kpi"><div class="label">OS nos últimos 30 dias</div><div class="value" id="kOs30">0 abertas · 0 finalizadas</div></div>
       </div>
       <div class="row-3 hidden" id="dashboardKommo" style="margin-top:14px;">
         <div class="kpi"><div class="label">Leads Hoje (Kommo)</div><div class="value" id="kLeadsHoje">—</div></div>
         <div class="kpi"><div class="label">Leads 7 Dias (Kommo)</div><div class="value" id="kLeads7d">—</div></div>
-        <div class="kpi"><div class="label">Tempo Médio Resposta</div><div class="value" id="kTempoResposta">—</div></div>
+        <div class="kpi"><div class="label">Tempo Médio de Resposta</div><div class="value" id="kTempoResposta">Carregando...</div><div class="legend-mini" id="kTempoRespostaStatus"></div></div>
       </div>
       <div class="row-3 hidden" id="dashboardMarketing" style="margin-top:14px;">
-        <div class="kpi"><div class="label">Investimento em Anúncios (mês)</div><div class="value" id="kAdsSpend">—</div></div>
+        <div class="kpi"><div class="label">Investimento em Anúncios (mês)</div><div class="value" id="kAdsSpend">Carregando...</div><div class="legend-mini" id="kAdsStatus"></div></div>
         <div class="kpi hidden" id="kAdsFaturamentoKpi"><div class="label">Faturamento (mês)</div><div class="value" id="kAdsFaturamento">—</div></div>
         <div class="kpi hidden" id="kAdsRoasKpi"><div class="label">ROAS (mês)</div><div class="value" id="kAdsRoas">—</div></div>
       </div>
@@ -1301,10 +1304,17 @@ function preencherDashboardKommo(kommo) {
   if (roles.indexOf(roleName()) === -1) return;
   var el = byId('dashboardKommo');
   if (el) el.classList.remove('hidden');
-  if (!kommo) return;
   var elHoje = byId('kLeadsHoje');
   var el7d   = byId('kLeads7d');
   var elResp = byId('kTempoResposta');
+  var elRespStatus = byId('kTempoRespostaStatus');
+  if (!kommo) {
+    if (elHoje) elHoje.textContent = 'Indisponível';
+    if (el7d) el7d.textContent = 'Indisponível';
+    if (elResp) elResp.textContent = 'Indisponível';
+    if (elRespStatus) elRespStatus.textContent = 'Não foi possível consultar o Kommo agora.';
+    return;
+  }
   if (elHoje) elHoje.textContent = kommo.leads_hoje != null ? String(kommo.leads_hoje) : '—';
   if (el7d)   el7d.textContent   = kommo.leads_7d   != null ? String(kommo.leads_7d)   : '—';
   if (elResp) {
@@ -1312,7 +1322,8 @@ function preencherDashboardKommo(kommo) {
       var min = Number(kommo.tempo_medio_resposta_min);
       elResp.textContent = min < 60 ? min + 'min' : Math.floor(min / 60) + 'h ' + (min % 60) + 'min';
     } else {
-      elResp.textContent = '—';
+      elResp.textContent = 'Sem dados';
+      if (elRespStatus) elRespStatus.textContent = 'Nenhuma conversa recente permitiu calcular o tempo.';
     }
   }
 }
@@ -1328,16 +1339,28 @@ function preencherDashboardMarketing(data) {
   if (roles.indexOf(roleName()) === -1) return;
   var el = byId('dashboardMarketing');
   if (el) el.classList.remove('hidden');
-  if (!data || !Array.isArray(data.lojas)) return;
+  var elSpend = byId('kAdsSpend');
+  var elStatus = byId('kAdsStatus');
+  if (!data || !Array.isArray(data.lojas)) {
+    if (elSpend) elSpend.textContent = 'Indisponível';
+    if (elStatus) elStatus.textContent = 'Não foi possível consultar os anúncios agora.';
+    return;
+  }
 
   var totalSpend = 0, totalFaturamento = 0, temFaturamento = false;
-  data.lojas.forEach(function(l) {
+  var linhasAnuncios = data.lojas.concat(Array.isArray(data.semLoja) ? data.semLoja : []);
+  linhasAnuncios.forEach(function(l) {
     totalSpend += Number(l.spend || 0);
     if (l.faturamento) { totalFaturamento += Number(l.faturamento); temFaturamento = true; }
   });
 
-  var elSpend = byId('kAdsSpend');
-  if (elSpend) elSpend.textContent = 'R$ ' + totalSpend.toFixed(2);
+  if (!linhasAnuncios.length) {
+    if (elSpend) elSpend.textContent = 'Sem dados';
+    if (elStatus) elStatus.textContent = 'A sincronização ainda não enviou dados deste mês.';
+  } else {
+    if (elSpend) elSpend.textContent = 'R$ ' + totalSpend.toFixed(2);
+    if (elStatus) elStatus.textContent = (data.semLoja || []).length ? 'Inclui anúncios ainda não vinculados a uma loja.' : 'Dados sincronizados do período.';
+  }
 
   if (temFaturamento && canFinance()) {
     var elFat = byId('kAdsFaturamento');
@@ -1867,6 +1890,11 @@ function carregarAgendaEDashboard() {
     state.agendamentosTodos = Array.isArray(results[0]) ? results[0] : [];
     state.agendamentos = aplicarFiltrosInteligentes(state.agendamentosTodos);
     state.dashboard = buildDashboardLocal(state.agendamentos, dashboardFiltrado(state.agendamentos));
+    var dashboardBackend = results[1] || {};
+    if (dashboardBackend.os7 || dashboardBackend.os15 || dashboardBackend.os30) {
+      state.dashboardOsBackend = dashboardBackend;
+    }
+    aplicarOsBackendNoDashboard();
     renderAgenda(state.agendamentos);
     preencherDashboard();
     atualizarResumoFiltros(state.agendamentos.length, state.agendamentosTodos.length);
@@ -1957,12 +1985,32 @@ function preencherDashboard() {
   byId('kAtrasadas').textContent = d.atrasadas || 0;
   byId('kOrigemTop').textContent = d.origemTop || '—';
   if (canFinance()) byId('kFaturamento').textContent = money(d.faturamento || 0);
+  atualizarEscopoDashboard();
   if (['admin', 'atendimento central', 'gerente de loja'].indexOf(roleName()) > -1) {
     byId('dashboardCentral').classList.remove('hidden');
-    byId('kOs7').textContent = ((d.os7 || {}).opened || 0) + ' / ' + ((d.os7 || {}).finalized || 0);
-    byId('kOs15').textContent = ((d.os15 || {}).opened || 0) + ' / ' + ((d.os15 || {}).finalized || 0);
-    byId('kOs30').textContent = ((d.os30 || {}).opened || 0) + ' / ' + ((d.os30 || {}).finalized || 0);
+    byId('kOs7').textContent = ((d.os7 || {}).opened || 0) + ' abertas · ' + ((d.os7 || {}).finalized || 0) + ' finalizadas';
+    byId('kOs15').textContent = ((d.os15 || {}).opened || 0) + ' abertas · ' + ((d.os15 || {}).finalized || 0) + ' finalizadas';
+    byId('kOs30').textContent = ((d.os30 || {}).opened || 0) + ' abertas · ' + ((d.os30 || {}).finalized || 0) + ' finalizadas';
   }
+}
+
+function atualizarEscopoDashboard() {
+  var el = byId('dashboardEscopo');
+  if (!el || typeof coletarFiltros !== 'function') return;
+  var f = coletarFiltros();
+  var periodo = 'Todos os registros';
+  if (f.dataDe && f.dataAte) periodo = formatDateBR(f.dataDe) + ' a ' + formatDateBR(f.dataAte);
+  else if (f.dataDe) periodo = 'A partir de ' + formatDateBR(f.dataDe);
+  else if (f.dataAte) periodo = 'Até ' + formatDateBR(f.dataAte);
+  else if (f.periodoDias) periodo = 'Últimos ' + f.periodoDias + ' dias';
+  var loja = f.loja || 'Todas as lojas';
+  var filtrosExtras = [];
+  if (f.status) filtrosExtras.push('Status: ' + f.status);
+  if (f.statusOS) filtrosExtras.push('Status OS: ' + f.statusOS);
+  if (f.origem) filtrosExtras.push('Origem: ' + f.origem);
+  el.innerHTML = '<strong>Período analisado</strong>' + escapeHtml(periodo) + ' · ' + escapeHtml(loja) +
+    (filtrosExtras.length ? '<br><span class="legend-mini">Filtros: ' + escapeHtml(filtrosExtras.join(' · ')) + '</span>' :
+      '<br><span class="legend-mini">Os indicadores principais seguem os filtros do Painel de Acompanhamento de OS.</span>');
 }
 
 function carregarFaturamento() {
@@ -4657,15 +4705,12 @@ function executarDedupKommo() {
       };
 
       window.getDashboardPostgres = function() {
-        if (!window.tgtPodeVerFinanceiro()) return Promise.resolve({});
-        return apiGet(buildAgendamentosUrl()).then(function(res) {
-          var rows = Array.isArray(res.agendamentos) ? res.agendamentos : [];
-          var mapped = window.aplicarRestricaoLojaUsuario(rows.map(mapAgendamentoDb)).filter(function(r) { return valor(r) > 0; });
-          return {
-            faturamento_total: mapped.reduce(function(a,r){ return a + valor(r); }, 0),
-            desconto_total: mapped.reduce(function(a,r){ return a + desc(r); }, 0),
-            total_agendamentos: mapped.length
-          };
+        // O backend já aplica escopo de loja e oculta valores financeiros de
+        // quem não pode vê-los. Todos os perfis autorizados precisam desta
+        // resposta para os KPIs de OS 7/15/30 dias; retornar {} para a Central
+        // fazia esses cartões ficarem falsamente em 0 / 0.
+        return apiGet('/api/dashboard').then(function(res) {
+          return (res && res.dashboard) ? res.dashboard : {};
         });
       };
     }

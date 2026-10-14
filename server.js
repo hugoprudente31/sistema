@@ -4252,8 +4252,10 @@ app.get("/api/dashboard/kommo", requireSession, async (req, res) => {
       kommoClient.request('GET', `/talks?limit=15&order[id]=desc`).catch(() => null)
     ]);
 
-    const leads_hoje = resHoje?._total_items ?? (resHoje?._embedded?.leads?.length ?? 0);
-    const leads_7d   = res7d?._total_items  ?? (res7d?._embedded?.leads?.length  ?? 0);
+    // Falha de integração não é igual a zero leads. `null` permite que a tela
+    // mostre "Indisponível" em vez de induzir a Central a uma leitura errada.
+    const leads_hoje = resHoje ? (resHoje._total_items ?? (resHoje._embedded?.leads?.length ?? 0)) : null;
+    const leads_7d   = res7d ? (res7d._total_items ?? (res7d._embedded?.leads?.length ?? 0)) : null;
 
     let tempo_medio_resposta_min = null;
     const talks = resTalks?._embedded?.talks || [];
