@@ -2675,6 +2675,13 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
     const dataAgendamentoAtual = current.rows[0].data_agendamento
       ? String(current.rows[0].data_agendamento).slice(0, 10) : null;
     const isReagendamentoDeData = Boolean(novaDataAgendamento) && novaDataAgendamento !== dataAgendamentoAtual;
+    const horarioFoiEnviado = Object.prototype.hasOwnProperty.call(b, "horario");
+    const isReagendamentoDeHorario = horarioFoiEnviado &&
+      clean(b.horario) !== clean(current.rows[0].horario);
+    // Ao mudar a data ou o horário, o novo responsável pelo agendamento é
+    // quem realizou o reagendamento. Edições cadastrais/financeiras comuns
+    // continuam preservando o responsável anterior.
+    const isReagendamento = isReagendamentoDeData || isReagendamentoDeHorario;
     // O modal de edição reenvia status e presença mesmo quando o usuário só
     // mudou a data. Considere como alteração manual apenas valores realmente
     // diferentes dos atuais; caso contrário o reagendamento ficaria preso no
@@ -2770,8 +2777,14 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         data_entrega_os = COALESCE($27, data_entrega_os),
         patologia = COALESCE($29, patologia),
         resultado_optometrista = CASE WHEN $31::text = 'LIMPAR' THEN NULL ELSE COALESCE($30, resultado_optometrista) END,
-        agendado_por_nome = COALESCE(NULLIF(agendado_por_nome,''), $19, agendado_por_nome),
-        agendado_por_email = COALESCE(NULLIF(agendado_por_email,''), $20, agendado_por_email),
+        agendado_por_nome = CASE
+          WHEN $32::boolean THEN COALESCE(NULLIF($19,''), agendado_por_nome)
+          ELSE COALESCE(NULLIF(agendado_por_nome,''), $19, agendado_por_nome)
+        END,
+        agendado_por_email = CASE
+          WHEN $32::boolean THEN COALESCE(NULLIF($20,''), agendado_por_email)
+          ELSE COALESCE(NULLIF(agendado_por_email,''), $20, agendado_por_email)
+        END,
         ultima_alteracao_por_nome = $21,
         ultima_alteracao_por_email = $22,
         ultima_alteracao_em = CURRENT_TIMESTAMP,
@@ -2810,7 +2823,8 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         b.excluir_lead ? 'LIXEIRA' : (b.restaurar_lead ? 'RESTAURAR' : null),
         patologiaAtualizada,
         resultadoOptometristaAtualizado,
-        limparResultadoOptometrista ? 'LIMPAR' : null
+        limparResultadoOptometrista ? 'LIMPAR' : null,
+        isReagendamento
         ]
       );
       if (!result.rows.length) {
