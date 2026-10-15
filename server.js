@@ -16,6 +16,7 @@ const {
 const { startRecoveryCron } = require("./kommo/recovery");
 const { startReminderCron, runReminders, runTwoHourReminders, scheduleDaily } = require("./kommo/reminder");
 const { startFollowupCron } = require("./kommo/followups");
+const { startOperationalWhatsappCron } = require("./lib/operationalWhatsapp");
 const mailingboss = require("./mailingboss");
 const kommoClient = require("./kommo/client");
 const { jornadaPadrao, resolverJornadaLoja, estaOptometristaDisponivel, gerarSlotsJornada } = require("./lib/horarios");
@@ -6068,6 +6069,7 @@ async function startServer() {
   startReminderCron();
   startRecoveryCron();
   startFollowupCron();
+  startOperationalWhatsappCron();
   startAuditoriaIntegridadeCron();
   startDatabaseMaintenanceCron();
   return new Promise((resolve) => {
