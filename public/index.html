@@ -560,7 +560,7 @@
         <table>
           <thead>
             <tr>
-              <th>ID</th><th>Data Registro</th><th>Cliente</th><th>Agendado por</th><th>Última alt.</th><th class="th-sortable" id="thDiaAgendado" onclick="alternarOrdenacaoAgenda('DataAgendamento')" title="Ordenar por Dia Agendado (A→Z / Z→A, do mais antigo ao mais recente e vice-versa)">Dia Agendado <span class="sort-icon" id="sortIconeDataAgendamento">⇅</span></th><th>Status Ag.</th><th>Presença</th><th>Resultado Optometrista</th><th>Nº OS</th><th>Status OS</th><th>Datas da OS</th><th>Loja</th><th>Optometrista</th><th>Lead Time</th><th>Valor</th><th>Desconto</th><th>Tag</th><th>Ações</th>
+              <th>ID</th><th>Data Registro</th><th>Cliente</th><th>Agendado por</th><th>Última alt.</th><th class="th-sortable" id="thDiaAgendado" onclick="alternarOrdenacaoAgenda('DataAgendamento')" title="Ordenar por Dia Agendado (A→Z / Z→A, do mais antigo ao mais recente e vice-versa)">Dia Agendado <span class="sort-icon" id="sortIconeDataAgendamento">⇅</span></th><th>Status Ag.</th><th>Atendimento</th><th>Nº OS</th><th>Status OS</th><th>Datas da OS</th><th>Loja</th><th>Optometrista</th><th>Lead Time</th><th>Valor</th><th>Desconto</th><th>Tag</th><th>Ações</th>
             </tr>
           </thead>
           <tbody id="agendaBody"></tbody>
@@ -1961,7 +1961,7 @@ function atualizarStatusSistema(res) {
 function carregarAgendaEDashboard() {
   var requestSeq = window._agendaRequestSeq = (window._agendaRequestSeq || 0) + 1;
   state.agendamentos = [];
-  byId('agendaBody').innerHTML = '<tr><td colspan="19"><div class="loading-box">Carregando agendamentos do PostgreSQL...</div></td></tr>';
+  byId('agendaBody').innerHTML = '<tr><td colspan="18"><div class="loading-box">Carregando agendamentos do PostgreSQL...</div></td></tr>';
 
   return Promise.all([
     getAgendamentosPostgres(),
@@ -1983,7 +1983,7 @@ function carregarAgendaEDashboard() {
     getDashboardKommo().then(function(kommo) { preencherDashboardKommo(kommo); });
     getDashboardMarketing().then(function(marketing) { preencherDashboardMarketing(marketing); });
   }).catch(function(err) {
-    byId('agendaBody').innerHTML = '<tr><td colspan="19">Erro ao carregar agendamentos.</td></tr>';
+    byId('agendaBody').innerHTML = '<tr><td colspan="18">Erro ao carregar agendamentos.</td></tr>';
     setMsg('msgForm', 'Erro ao carregar agenda: ' + (err.message || err), 'err');
   });
 }
@@ -1992,7 +1992,7 @@ function recarregarComFiltros(force) {
   if (window._reloadingFiltros && !force) return window._reloadingFiltros;
   var requestSeq = window._agendaRequestSeq = (window._agendaRequestSeq || 0) + 1;
 
-  byId('agendaBody').innerHTML = '<tr><td colspan="19"><div class="loading-box">Atualizando dados...</div></td></tr>';
+  byId('agendaBody').innerHTML = '<tr><td colspan="18"><div class="loading-box">Atualizando dados...</div></td></tr>';
 
   var reloadPromise = Promise.all([
     getAgendamentosPostgres(),
@@ -2019,7 +2019,7 @@ function recarregarComFiltros(force) {
     atualizarResumoFiltros(state.agendamentos.length, state.agendamentosTodos.length);
     if (canFinance()) return carregarFaturamento();
   }).catch(function(err) {
-    byId('agendaBody').innerHTML = '<tr><td colspan="19">Erro ao carregar agendamentos.</td></tr>';
+    byId('agendaBody').innerHTML = '<tr><td colspan="18">Erro ao carregar agendamentos.</td></tr>';
     setMsg('msgForm', 'Erro ao aplicar filtros: ' + (err.message || err), 'err');
     throw err;
   }).finally(function() {
@@ -2968,13 +2968,26 @@ function atualizarIconeOrdenacaoAgenda() {
   }
 }
 
+function atendimentoLabel(r) {
+  var resultado = normalizeKey(r.ResultadoOptometrista || '');
+  if (resultado === 'patologia') return 'Patologia';
+  if (resultado === 'check-in sim veio') return 'Compareceu';
+  if (resultado === 'check-in nao veio') return 'Não compareceu';
+  if (resultado && resultado !== 'pendente') return r.ResultadoOptometrista;
+
+  var presenca = normalizeKey(r.Compareceu || '');
+  if (presenca === 'sim' || presenca === 'compareceu') return 'Compareceu';
+  if (presenca === 'nao' || presenca === 'nao compareceu') return 'Não compareceu';
+  return 'Pendente';
+}
+
 function renderAgenda(rowsParam) {
   var rows = Array.isArray(rowsParam) ? rowsParam : (state.agendamentos || []);
   rows = ordenarAgendamentos(rows, state.ordenacaoAgenda);
   atualizarIconeOrdenacaoAgenda();
   var body = byId('agendaBody');
   if (!rows.length) {
-    body.innerHTML = '<tr><td colspan="19">Nenhum serviço encontrado.</td></tr>';
+    body.innerHTML = '<tr><td colspan="18">Nenhum serviço encontrado.</td></tr>';
     return;
   }
 
@@ -2990,8 +3003,7 @@ function renderAgenda(rowsParam) {
       '<td>' + escapeHtml(ultimaAlt) + ultimaAltData + '</td>' +
       '<td>' + escapeHtml(formatDateBR(r.DataAgendamentoBR || r.DataAgendamento || '')) + '<br>' + escapeHtml(r.Horario || '') + '</td>' +
       '<td><span class="status ' + statusClassAgendamento(r) + '">' + escapeHtml(r.StatusAgenda) + '</span>' + (r.AtendimentoSemaforoLabel ? '<div style="margin-top:6px;"><span class="status ' + statusClassAtendimentoSemaforo(r) + '">' + escapeHtml(r.AtendimentoSemaforoLabel) + '</span></div>' : '') + (ETAPAS_LEAD_INEDITAS_NO_STATUS.indexOf(r.Estagio) > -1 ? '<div style="margin-top:6px;"><span class="pill" title="Etapa do lead">' + escapeHtml(r.Estagio) + '</span></div>' : '') + '</td>' +
-      '<td>' + escapeHtml(r.Compareceu || 'Pendente') + '</td>' +
-      '<td><strong>' + escapeHtml(r.ResultadoOptometrista || 'Pendente') + '</strong></td>' +
+      '<td><strong>' + escapeHtml(atendimentoLabel(r)) + '</strong></td>' +
       '<td>' + escapeHtml(r.NumeroOS || '') + '</td>' +
       '<td><span class="status ' + statusClassOS(r) + '">' + escapeHtml(r.StatusOS || '') + '</span></td>' +
       '<td>Abertura: ' + escapeHtml(formatDateBR(r.DataAberturaOSBR || r.DataAberturaOS || '')) + '<br>Entrada: ' + escapeHtml(formatDateBR(r.DataEntradaOSBR || r.DataEntradaOS || '')) + '<br>Entrega: ' + escapeHtml(formatDateBR(r.DataEntregaOSBR || r.DataEntregaOS || '')) + '<br>Finalização: ' + escapeHtml(formatDateBR(r.DataFinalizacaoOSBR || r.DataFinalizacaoOS || '')) + '</td>' +

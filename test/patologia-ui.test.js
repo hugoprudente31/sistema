@@ -7,9 +7,15 @@ const path = require('node:path');
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
 
-test('painel exibe o resultado único do optometrista para os usuários da loja', function() {
-  assert.match(html, /<th>Resultado Optometrista<\/th>/);
-  assert.match(html, /r\.ResultadoOptometrista \|\| 'Pendente'/);
+test('painel reúne presença e resultado do optometrista em uma única coluna Atendimento', function() {
+  assert.match(html, /<th>Atendimento<\/th>/);
+  assert.doesNotMatch(html, /<th>Presença<\/th>/);
+  assert.doesNotMatch(html, /<th>Resultado Optometrista<\/th>/);
+  assert.match(html, /escapeHtml\(atendimentoLabel\(r\)\)/);
+  assert.match(html, /if \(resultado === 'patologia'\) return 'Patologia'/);
+  assert.match(html, /if \(resultado === 'check-in sim veio'\) return 'Compareceu'/);
+  assert.match(html, /if \(resultado === 'check-in nao veio'\) return 'Não compareceu'/);
+  assert.doesNotMatch(html, /colspan="19"/);
 });
 
 test('perfil optometrista recebe exatamente as três escolhas clínicas', function() {
