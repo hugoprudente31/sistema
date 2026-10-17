@@ -22,6 +22,25 @@ test('filtro "Etapa do lead" é enviado ao backend (buildAgendamentosUrl manda e
   assert.match(body, /f\.estagio.*estagio=/, 'estagio tinha suporte no SQL do servidor mas nunca era enviado pela URL do painel');
 });
 
+test('todos os filtros de seleção são enviados ao backend antes do LIMIT', () => {
+  const start = html.indexOf('function buildAgendamentosUrl');
+  const body = html.slice(start, html.indexOf('\nfunction ', start + 20));
+  ['cliente', 'optometrista', 'vendedor', 'proprietario', 'origem', 'accessTag', 'resultado', 'meus', 'minhasOSAtivas']
+    .forEach((filtro) => assert.match(body, new RegExp('f\\.' + filtro), filtro + ' deve chegar ao servidor'));
+});
+
+test('painel oferece o filtro rápido Somente agendados e o envia ao servidor', () => {
+  assert.match(html, /id="filtroSomenteAgendados"/);
+  assert.match(html, /somenteAgendados=true/);
+});
+
+test('qualquer consultor da própria loja recebe a ação Corrigir/Reagendar', () => {
+  const start = html.indexOf('function getActionHtml');
+  const body = html.slice(start, html.indexOf('\nfunction ', start + 20));
+  assert.match(body, /else if \(comprador \|\| consultor\)/);
+  assert.doesNotMatch(body, /consultor && \(isOwner \|\| canManageOS\(\)\)/);
+});
+
 test('Atendimento Central tem caixas por loja e envia a seleção à agenda e ao dashboard', () => {
   assert.match(html, /id="filtroLojasCentral"/);
   assert.match(html, /function lojasSelecionadasCentral\(\)/);

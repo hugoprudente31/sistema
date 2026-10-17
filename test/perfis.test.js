@@ -1472,7 +1472,7 @@ function withConnectCaptura(updateRow) {
   return { params: captured, restore: function() { pool.connect = orig; } };
 }
 const IDX_STATUS = 9, IDX_COMPARECEU = 10, IDX_RESULTADO_OPT = 29, IDX_LIMPAR = 30;
-const IDX_AGENDADO_POR_NOME = 18, IDX_AGENDADO_POR_EMAIL = 19, IDX_REAGENDAMENTO = 31;
+const IDX_AGENDADO_POR_NOME = 18, IDX_AGENDADO_POR_EMAIL = 19, IDX_ATUALIZA_AGENDADO_POR = 31;
 
 test('reagendar para nova data sem informar presença junto reabre como Agendado/Pendente e limpa resultado do optometrista', async function() {
   const original = ag(E, {
@@ -1493,7 +1493,7 @@ test('reagendar para nova data sem informar presença junto reabre como Agendado
       assert.equal(r2.params.params[IDX_LIMPAR], 'LIMPAR', perfil + ': resultado do optometrista deveria ser limpo');
       assert.equal(r2.params.params[IDX_AGENDADO_POR_NOME], 'Test', perfil + ': deve atribuir o reagendamento ao usuário atual');
       assert.equal(r2.params.params[IDX_AGENDADO_POR_EMAIL], `t@${perfil.replace(/\s+/g, '')}.com`, perfil + ': deve registrar o e-mail do usuário atual');
-      assert.equal(r2.params.params[IDX_REAGENDAMENTO], true, perfil + ': deve marcar a atualização como reagendamento');
+      assert.equal(r2.params.params[IDX_ATUALIZA_AGENDADO_POR], true, perfil + ': deve atribuir a última alteração do lead');
     }
   } finally { r1(); r2.restore(); }
 });
@@ -1563,7 +1563,7 @@ test('editar outros campos sem mudar a data não reabre nem limpa o resultado do
     assert.equal(r2.params.params[IDX_STATUS], null, 'sem mudança de data, status não deveria ser forçado');
     assert.equal(r2.params.params[IDX_COMPARECEU], null, 'sem mudança de data, presença não deveria ser forçada');
     assert.equal(r2.params.params[IDX_LIMPAR], null, 'sem mudança de data, resultado do optometrista não deveria ser limpo');
-    assert.equal(r2.params.params[IDX_REAGENDAMENTO], false, 'edição comum deve preservar quem agendou');
+    assert.equal(r2.params.params[IDX_ATUALIZA_AGENDADO_POR], true, 'edição cadastral deve transferir Agendado por ao último perfil que alterou o lead');
   } finally { r1(); r2.restore(); }
 });
 
@@ -1582,9 +1582,26 @@ test('alterar somente o horário também atribui Agendado por ao perfil que reag
     assert.equal(r.status, 200);
     assert.equal(r2.params.params[IDX_AGENDADO_POR_NOME], 'Test');
     assert.equal(r2.params.params[IDX_AGENDADO_POR_EMAIL], 't@atendimentocentral.com');
-    assert.equal(r2.params.params[IDX_REAGENDAMENTO], true, 'mudança de horário deve contar como reagendamento');
+    assert.equal(r2.params.params[IDX_ATUALIZA_AGENDADO_POR], true, 'mudança de horário deve contar como alteração do lead');
     assert.match(r2.params.sql, /WHEN \$32::boolean THEN COALESCE\(NULLIF\(\$19,''\), agendado_por_nome\)/,
-      'UPDATE deve substituir Agendado por somente quando for reagendamento');
+      'UPDATE deve substituir Agendado por quando o cadastro do lead mudar');
+  } finally { r1(); r2.restore(); }
+});
+
+test('alterar somente OS ou compra preserva Agendado por', async function() {
+  const original = ag(E, {
+    agendado_por_nome: 'Atendente Original', agendado_por_email: 'original@tgt.com',
+    numero_os: '', valor_venda: 0
+  });
+  const r1 = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [original] } });
+  const r2 = withConnectCaptura(ag(E, { numero_os: 'OS-123', valor_venda: 900 }));
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('gerente de loja', E)),
+      body: JSON.stringify({ numeroOS: 'OS-123', valorVenda: 900 })
+    });
+    assert.equal(r.status, 200);
+    assert.equal(r2.params.params[IDX_ATUALIZA_AGENDADO_POR], false, 'OS/compra não deve trocar quem está em Agendado por');
   } finally { r1(); r2.restore(); }
 });
 
