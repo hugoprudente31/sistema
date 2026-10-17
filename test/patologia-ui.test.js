@@ -7,14 +7,16 @@ const path = require('node:path');
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
 
-test('painel reúne presença e resultado do optometrista em uma única coluna Atendimento', function() {
-  assert.match(html, /<th>Atendimento<\/th>/);
+test('painel operacional não repete presença ou resultado em uma coluna própria', function() {
+  assert.doesNotMatch(html, /<th>Atendimento<\/th>/);
   assert.doesNotMatch(html, /<th>Presença<\/th>/);
   assert.doesNotMatch(html, /<th>Resultado Optometrista<\/th>/);
-  assert.match(html, /escapeHtml\(atendimentoLabel\(r\)\)/);
-  assert.match(html, /if \(resultado === 'patologia'\) return 'Patologia'/);
-  assert.match(html, /if \(resultado === 'check-in sim veio'\) return 'Compareceu'/);
-  assert.match(html, /if \(resultado === 'check-in nao veio'\) return 'Não compareceu'/);
+  assert.doesNotMatch(html, /function atendimentoLabel\(/);
+  assert.match(html, /statusClassAgendamento\(r\)/);
+  assert.match(html, /AtendimentoSemaforoLabel/);
+  assert.match(html, /marcarResultadoOptometrista/);
+  assert.match(html, /colspan="17"/);
+  assert.doesNotMatch(html, /colspan="18"/);
   assert.doesNotMatch(html, /colspan="19"/);
 });
 
