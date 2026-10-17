@@ -55,6 +55,7 @@
       if (from && (!date || date < from)) return false;
       if (to && (!date || date > to)) return false;
       if (filters.status && normalize(value(row, ['StatusAgenda', 'status'])) !== normalize(filters.status)) return false;
+      if (String(filters.somenteAgendados) === 'true' && ['agendado', 'confirmado'].indexOf(normalize(value(row, ['StatusAgenda', 'status']))) < 0) return false;
       if (filters.statusOS && normalize(value(row, ['StatusOS', 'status_os'])) !== normalize(filters.statusOS)) return false;
       if (filters.estagio && normalize(value(row, ['Estagio', 'estagio'])) !== normalize(filters.estagio)) return false;
       if (filters.loja && normalize(value(row, ['Loja', 'loja'])) !== normalize(filters.loja)) return false;

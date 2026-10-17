@@ -537,6 +537,7 @@
         <div style="display:flex;gap:20px;align-items:center;margin-top:6px;">
           <div class="checkbox-line"><input id="filtroMeus" type="checkbox" onchange="recarregarComFiltros()"><label for="filtroMeus" style="margin:0;">Meus Serviços</label></div>
           <div class="checkbox-line"><input id="filtroMinhasOSAtivas" type="checkbox" onchange="recarregarComFiltros()"><label for="filtroMinhasOSAtivas" style="margin:0;">Minhas OS Ativas</label></div>
+          <div class="checkbox-line"><input id="filtroSomenteAgendados" type="checkbox" onchange="recarregarComFiltros()"><label for="filtroSomenteAgendados" style="margin:0;">Somente agendados (inclui confirmados)</label></div>
         </div>
         <div class="filtro-btn-row">
           <label>Resultado da visita</label>
@@ -1324,6 +1325,16 @@ function buildAgendamentosUrl(extra) {
   if (f.status)      p.push('status='      + encodeURIComponent(f.status));
   if (f.statusOS)    p.push('statusOS='    + encodeURIComponent(f.statusOS));
   if (f.estagio)     p.push('estagio='     + encodeURIComponent(f.estagio));
+  if (f.cliente)     p.push('cliente='     + encodeURIComponent(f.cliente));
+  if (f.optometrista)p.push('optometrista='+ encodeURIComponent(f.optometrista));
+  if (f.vendedor)    p.push('vendedor='    + encodeURIComponent(f.vendedor));
+  if (f.proprietario)p.push('proprietario='+ encodeURIComponent(f.proprietario));
+  if (f.origem)      p.push('origem='      + encodeURIComponent(f.origem));
+  if (f.accessTag)   p.push('accessTag='   + encodeURIComponent(f.accessTag));
+  if (f.resultado && f.resultado.length) p.push('resultado=' + encodeURIComponent(f.resultado.join('|')));
+  if (f.meus === 'true') p.push('meus=true');
+  if (f.minhasOSAtivas === 'true') p.push('minhasOSAtivas=true');
+  if (f.somenteAgendados === 'true') p.push('somenteAgendados=true');
   if (extra) p.push(extra);
   return '/api/agendamentos' + (p.length ? '?' + p.join('&') : '');
 }
@@ -2364,6 +2375,7 @@ function coletarFiltros() {
     }()),
     meus: byId('filtroMeus').checked ? 'true' : 'false',
     minhasOSAtivas: byId('filtroMinhasOSAtivas').checked ? 'true' : 'false',
+    somenteAgendados: byId('filtroSomenteAgendados').checked ? 'true' : 'false',
     userEmail: String((state.user && state.user.email) || '').trim(),
     userId: String((state.user && state.user.id) || '').trim(),
     loginEmail: String((state.user && (state.user.loginKey || state.user.email)) || '').trim(),
@@ -2399,6 +2411,7 @@ function limparFiltros() {
   document.querySelectorAll('#filtroResultadoGroup .filtro-btn.ativo').forEach(function(b) { b.classList.remove('ativo'); });
   byId('filtroMinhasOSAtivas').checked = false;
   byId('filtroMeus').checked = false;
+  byId('filtroSomenteAgendados').checked = false;
   if (state.user && state.user.loja && state.user.loja !== 'Todas') byId('filtroLoja').value = state.user.loja;
   else byId('filtroLoja').value = '';
   if (roleName() === 'atendimento central') {
@@ -3054,7 +3067,6 @@ function getActionHtml(r) {
   var gerente = role === 'gerente de loja' && ownStore;
   var comprador = role === 'comprador' && ownStore;
   var consultor = ['consultor de vendas', 'vendedor', 'outros'].indexOf(role) > -1 && ownStore;
-  var isOwner = typeof window.isOwnerDoRegistro === 'function' ? window.isOwnerDoRegistro(r) : true;
   var buttons = '';
   var options = '<option value="">Mais ações</option>';
 
@@ -3087,7 +3099,7 @@ function getActionHtml(r) {
   if (central || gerente) {
     buttons += '<button class="secondary" onclick="abrirModalEdicao(\'' + id + '\')">Editar</button>';
     options += '<option value="editar">Editar/Reagendar</option>';
-  } else if (comprador || (consultor && (isOwner || canManageOS()))) {
+  } else if (comprador || consultor) {
     buttons += '<button class="secondary" onclick="abrirModalEdicao(\'' + id + '\')">Corrigir</button>';
     options += '<option value="editar">Corrigir/Reagendar</option>';
   }

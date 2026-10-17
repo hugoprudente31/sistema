@@ -2541,11 +2541,81 @@ app.get("/api/agendamentos", async (req, res) => {
 
     if (q.status) { params.push(q.status); conditions.push(`LOWER(COALESCE(a.status,'')) = LOWER($${params.length})`); }
     if (q.statusOS) { params.push(q.statusOS); conditions.push(`LOWER(COALESCE(a.status_os,'')) = LOWER($${params.length})`); }
+    if (String(q.somenteAgendados) === "true") {
+      conditions.push(`LOWER(COALESCE(a.status,'')) IN ('agendado','confirmado')`);
+    }
     // Etapa do lead (Novo Lead/Bot Ativo/Atendimento Humano/Agendado/Compareceu/
     // Vendido/Perdido) — mesmo cálculo usado no CRM Kanban (CRM_ESTAGIO_CASE_SQL,
     // definido mais abaixo no arquivo; seguro referenciar aqui porque o módulo
     // inteiro já terminou de carregar antes de qualquer requisição chegar).
     if (q.estagio) { params.push(q.estagio); conditions.push(`(${CRM_ESTAGIO_CASE_SQL}) = $${params.length}`); }
+
+    // Estes filtros eram aplicados apenas no navegador, depois do LIMIT. Em
+    // períodos movimentados isso fazia uma busca válida parecer incompleta,
+    // pois o registro procurado podia estar além das primeiras 1.000/5.000
+    // linhas. Mantê-los no SQL garante que o LIMIT seja aplicado ao resultado
+    // já filtrado.
+    if (q.cliente) {
+      params.push(`%${clean(q.cliente)}%`);
+      conditions.push(`CONCAT_WS(' ', a.nome, a.whatsapp, a.email) ILIKE $${params.length}`);
+    }
+    if (q.optometrista) {
+      params.push(`%${clean(q.optometrista)}%`);
+      conditions.push(`COALESCE(a.optometrista,'') ILIKE $${params.length}`);
+    }
+    if (q.vendedor) {
+      params.push(`%${clean(q.vendedor)}%`);
+      conditions.push(`CONCAT_WS(' ', a.vendedor_nome, a.consultor_responsavel, a.vendedor_atendeu_nome, a.agendado_por_nome) ILIKE $${params.length}`);
+    }
+    if (q.proprietario) {
+      params.push(`%${clean(q.proprietario)}%`);
+      conditions.push(`CONCAT_WS(' ', a.proprietario_nome, a.agendado_por_nome, a.responsavel) ILIKE $${params.length}`);
+    }
+    if (q.origem) {
+      params.push(`%${clean(q.origem)}%`);
+      conditions.push(`COALESCE(a.origem,'') ILIKE $${params.length}`);
+    }
+    if (q.accessTag) {
+      params.push(`%${clean(q.accessTag)}%`);
+      conditions.push(`COALESCE(a.access_tags,'') ILIKE $${params.length}`);
+    }
+
+    const filtroDoUsuarioAtual = () => {
+      const partes = [];
+      const email = clean(req.session.email);
+      const nome = clean(req.session.nome);
+      if (email) {
+        params.push(email);
+        partes.push(`LOWER(COALESCE(a.agendado_por_email,'')) = LOWER($${params.length})`);
+        partes.push(`LOWER(COALESCE(a.criado_por_email,'')) = LOWER($${params.length})`);
+        partes.push(`LOWER(COALESCE(a.vendedor_atendeu_email,'')) = LOWER($${params.length})`);
+      }
+      if (nome) {
+        params.push(nome);
+        partes.push(`LOWER(COALESCE(a.agendado_por_nome,'')) = LOWER($${params.length})`);
+        partes.push(`LOWER(COALESCE(a.proprietario_nome,'')) = LOWER($${params.length})`);
+        partes.push(`LOWER(COALESCE(a.responsavel,'')) = LOWER($${params.length})`);
+        partes.push(`LOWER(COALESCE(a.vendedor_nome,'')) = LOWER($${params.length})`);
+      }
+      return partes.length ? `(${partes.join(" OR ")})` : "FALSE";
+    };
+    if (String(q.meus) === "true") conditions.push(filtroDoUsuarioAtual());
+    if (String(q.minhasOSAtivas) === "true") {
+      conditions.push(filtroDoUsuarioAtual());
+      conditions.push(`NULLIF(TRIM(COALESCE(a.numero_os,'')), '') IS NOT NULL`);
+      conditions.push(`LOWER(COALESCE(a.status_os,'')) NOT IN ('concluido','concluído','entregue','cancelada','cancelado')`);
+    }
+
+    const resultados = clean(q.resultado).split("|").map(clean).filter(Boolean).slice(0, 10);
+    if (resultados.length) {
+      const opcoes = [];
+      if (resultados.includes("compareceu")) opcoes.push(`(LOWER(COALESCE(a.compareceu,'')) = 'sim' OR LOWER(COALESCE(a.status,'')) = 'compareceu')`);
+      if (resultados.includes("nao-compareceu")) opcoes.push(`(LOWER(COALESCE(a.compareceu,'')) IN ('nao','não') OR LOWER(COALESCE(a.status,'')) IN ('nao compareceu','não compareceu'))`);
+      if (resultados.includes("comprou")) opcoes.push(`(NULLIF(TRIM(COALESCE(a.numero_os,'')), '') IS NOT NULL AND LOWER(COALESCE(a.status_os,'')) NOT IN ('','cancelada','cancelado','reembolso'))`);
+      if (resultados.includes("cancelou")) opcoes.push(`LOWER(COALESCE(a.status,'')) = 'cancelado'`);
+      if (resultados.includes("reagendou")) opcoes.push(`COALESCE(a.access_tags,'') ILIKE '%reagendado%'`);
+      if (opcoes.length) conditions.push(`(${opcoes.join(" OR ")})`);
+    }
 
     // Sem filtro de data: LIMIT 1000 (carga inicial rápida). Com filtro: até 5000.
     const temFiltroData = !!(dataDe || dataAte);
@@ -2559,11 +2629,8 @@ app.get("/api/agendamentos", async (req, res) => {
         ORDER BY a.id DESC LIMIT ${limite}`,
       params
     );
-    // Filtros que não entram no WHERE acima (cliente, vendedor, optometrista,
-    // proprietário, origem, tag, "meus", resultado da visita) são aplicados só
-    // no painel, DEPOIS deste LIMIT — se a página bateu no teto, pode haver
-    // registro além dele que essa busca nunca vê. `capped` avisa o front-end
-    // disso pra ele poder alertar o usuário em vez de deixar parecer "não existe".
+    // `capped` continua avisando quando até o resultado já filtrado excede o
+    // limite máximo de segurança da resposta.
     res.json({ ok: true, total: result.rows.length, agendamentos: result.rows, capped: result.rows.length >= limite });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });
@@ -2732,15 +2799,39 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
     const isReagendamentoDeHorario = horarioFoiEnviado &&
       clean(b.horario) !== clean(current.rows[0].horario);
     // Ao mudar a data ou o horário, o novo responsável pelo agendamento é
-    // quem realizou o reagendamento. Edições cadastrais/financeiras comuns
-    // continuam preservando o responsável anterior.
+    // quem realizou o reagendamento.
     const isReagendamento = isReagendamentoDeData || isReagendamentoDeHorario;
+    const normalizarCampoReagendamento = (valor) => clean(valor)
+      .toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    // "Agendado por" representa o último perfil que realmente mexeu no
+    // cadastro do lead. Alterações exclusivas de OS/compra não transferem a
+    // autoria. Comparamos os valores porque o modal reenvia campos desabilitados
+    // e inalterados junto com o que o usuário de fato modificou.
+    const alterouCampoLead = [
+      [["origem"], "origem"],
+      [["nome", "nomeCompleto"], "nome"],
+      [["whatsapp", "whatsApp"], "whatsapp"],
+      [["email"], "email"],
+      [["loja"], "loja"],
+      [["optometrista"], "optometrista"],
+      [["data_agendamento", "dataAgendamento"], "data_agendamento"],
+      [["horario"], "horario"],
+      [["observacao"], "observacao"],
+      [["status", "statusAgenda"], "status"],
+      [["compareceu"], "compareceu"],
+      [["patologia"], "patologia"],
+      [["resultado_optometrista", "resultadoOptometrista"], "resultado_optometrista"]
+    ].some(([chaves, coluna]) => {
+      const chave = chaves.find((nome) => Object.prototype.hasOwnProperty.call(b, nome));
+      if (!chave) return false;
+      const novo = coluna === "data_agendamento" ? (novaDataAgendamento || clean(b[chave])) : clean(b[chave]);
+      return normalizarCampoReagendamento(novo) !== normalizarCampoReagendamento(current.rows[0][coluna]);
+    });
+    const atualizarAgendadoPor = isReagendamento || alterouCampoLead;
     // O modal de edição reenvia status e presença mesmo quando o usuário só
     // mudou a data. Considere como alteração manual apenas valores realmente
     // diferentes dos atuais; caso contrário o reagendamento ficaria preso no
     // vermelho de "Não Compareceu".
-    const normalizarCampoReagendamento = (valor) => clean(valor)
-      .toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
     const statusFoiAlterado = statusEnviadoPresenca &&
       normalizarCampoReagendamento(b.status || b.statusAgenda) !==
         normalizarCampoReagendamento(current.rows[0].status);
@@ -2877,7 +2968,7 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         patologiaAtualizada,
         resultadoOptometristaAtualizado,
         limparResultadoOptometrista ? 'LIMPAR' : null,
-        isReagendamento
+        atualizarAgendadoPor
         ]
       );
       if (!result.rows.length) {

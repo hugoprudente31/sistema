@@ -44,3 +44,10 @@ test('filtro de etapa do lead usa igualdade normalizada, não substring', () => 
   assert.deepEqual(filterAppointments(rows, { estagio: 'bot ativo' }, user, '2026-06-19').map((r) => r.ID), [4]);
   assert.equal(filterAppointments(rows, { estagio: 'Agendado' }, user, '2026-06-19').length, 1);
 });
+
+test('somente agendados inclui Agendado e Confirmado, mas exclui os demais status', () => {
+  assert.deepEqual(
+    filterAppointments(rows, { somenteAgendados: 'true' }, user, '2026-06-19').map((r) => r.ID),
+    [1, 4]
+  );
+});
