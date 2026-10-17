@@ -3374,17 +3374,34 @@ function abrirJanelaPDF(titulo, filtrosDesc, kpis, colunas, linhas) {
   win.document.close();
 }
 
+function calcularTotaisAgendaRelatorio(rows) {
+  return (rows || []).reduce(function(totais, r) {
+    var presenca = normalizeKey(r.Compareceu || r.compareceu || '');
+    var statusAgenda = normalizeKey(r.StatusAgenda || r.status || '');
+    var compareceu = presenca === 'sim' || presenca === 'compareceu' || statusAgenda === 'compareceu';
+    var falta = presenca === 'nao' || presenca === 'nao compareceu' || statusAgenda === 'nao compareceu';
+    var comOS = !!String(r.NumeroOS || r.numero_os || '').trim();
+
+    if (compareceu) totais.compareceram += 1;
+    if (falta) totais.faltas += 1;
+    if (comOS) totais.comOS += 1;
+    if (compareceu && !comOS) totais.somenteExame += 1;
+    totais.valorTotal += Number(r.ValorVenda || r.valor_venda || 0);
+    return totais;
+  }, { compareceram: 0, faltas: 0, somenteExame: 0, comOS: 0, valorTotal: 0 });
+}
+
 function gerarAgendaPDF() {
   var filtered = aplicarFiltrosInteligentes(state.agendamentos || []);
   if (!filtered.length) { toast('Nenhum dado para exportar.', 'err'); return; }
-  var compar   = filtered.filter(function(r) { return String(r.Compareceu||r.compareceu||'').toLowerCase().indexOf('sim') >= 0 || String(r.StatusAgenda||r.status||'').toLowerCase() === 'compareceu'; }).length;
-  var comOS    = filtered.filter(function(r) { return !!(r.NumeroOS || r.numero_os); }).length;
-  var valorTot = filtered.reduce(function(s,r) { return s + Number(r.ValorVenda||r.valor_venda||0); }, 0);
+  var totais = calcularTotaisAgendaRelatorio(filtered);
   var kpis = [
     { label: 'Total de registros', valor: filtered.length },
-    { label: 'Compareceram',       valor: compar },
-    { label: 'Com OS',             valor: comOS },
-    { label: 'Valor total',        valor: money(valorTot) },
+    { label: 'Compareceram',       valor: totais.compareceram },
+    { label: 'Faltas',             valor: totais.faltas },
+    { label: 'Só realizou o exame (não comprou)', valor: totais.somenteExame },
+    { label: 'Com OS',             valor: totais.comOS },
+    { label: 'Valor total',        valor: money(totais.valorTotal) },
   ];
   var colunas = ['Data', 'Cliente', 'Status', 'Status OS', 'Nº OS', 'Valor', 'Desconto', 'Vendedor', 'Optometrista', 'Loja'];
   var linhas  = filtered.map(function(r) {
