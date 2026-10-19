@@ -2779,6 +2779,23 @@ function runAction(fn, id) {
 
   if (fn === 'confirmarAgendamento') {
     patch.statusAgenda = 'Confirmado';
+    var row = (state.agendamentos || []).find(function(item) { return String(item.ID) === String(id); });
+    var landingPage = row && (
+      normalizeKey(row.OrigemSync || '') === 'landing_page' ||
+      normalizeKey(row.Origem || '').indexOf('landing page') > -1 ||
+      normalizeKey(row.Responsavel || '') === 'landing page' ||
+      normalizeKey(row.AccessTags || '').indexOf('origem:site') > -1
+    );
+    if (landingPage) {
+      var nomeCentral = prompt('Informe o nome real da pessoa da Central que confirmou este agendamento:');
+      if (nomeCentral === null) return Promise.resolve(false);
+      nomeCentral = String(nomeCentral).trim();
+      if (nomeCentral.length < 2 || ['atendimento central', 'central'].indexOf(normalizeKey(nomeCentral)) > -1) {
+        toast('Informe o nome real da pessoa da Central.', 'err');
+        return Promise.resolve(false);
+      }
+      patch.confirmadoPorCentralNome = nomeCentral;
+    }
   } else if (fn === 'marcarCompareceu') {
     patch.statusAgenda = 'Compareceu';
     patch.compareceu = 'Sim';
