@@ -2675,6 +2675,19 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         message: "Agendamentos da Landing Page só podem ser confirmados pelo perfil Atendimento Central."
       });
     }
+    const confirmadorCentralNome = clean(
+      b.confirmado_por_central_nome || b.confirmadoPorCentralNome
+    );
+    if (estaConfirmandoLandingPage) {
+      const nomeGenerico = ["atendimento central", "central", "usuario autenticado"]
+        .includes(normalizarOrigem(confirmadorCentralNome));
+      if (confirmadorCentralNome.length < 2 || nomeGenerico) {
+        return res.status(400).json({
+          ok: false,
+          message: "Informe o nome real da pessoa da Central que confirmou o agendamento."
+        });
+      }
+    }
     // O formulário sempre reenvia o status/presença atual junto com qualquer
     // edição (mesmo quando só se está corrigindo nome/WhatsApp/e-mail), então
     // só bloqueamos quando o valor de status realmente MUDA para compareceu/
@@ -2801,6 +2814,7 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
 
     const actorNome = clean(req.session.nome || "Usuário autenticado");
     const actorEmail = clean(req.session.email);
+    const agendadoPorNome = estaConfirmandoLandingPage ? confirmadorCentralNome : actorNome;
 
     // Reagendar para uma nova data sem informar presença/status/resultado junto
     // reabre o registro como pendente — evita ficar com "Não Compareceu" ou
@@ -2978,7 +2992,7 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         (v => (v === '' || v === undefined || v === null) ? null : v)(b.desconto),
         b.vendedor_atendeu_nome || b.vendedorAtendeuNome || b.vendedor_nome || b.vendedorNome || b.consultor_responsavel || null,
         b.vendedor_atendeu_email || null,
-        actorNome,
+        agendadoPorNome,
         actorEmail || null,
         actorNome,
         actorEmail || null,

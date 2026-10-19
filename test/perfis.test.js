@@ -910,15 +910,39 @@ test('Landing Page: somente Atendimento Central pode confirmar', async function(
     } finally { restore(); }
   }
 
-  const restoreQuery = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [landing] } });
-  const restoreConnect = withConnect(ag(P, { status: 'Confirmado', agendado_por_nome: 'Eduarda' }));
+  const restoreSemNome = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [landing] } });
   try {
     const response = await fetch(baseUrl + '/api/agendamentos/100', {
       method: 'PATCH', headers: H(tok('atendimento central')),
       body: JSON.stringify({ statusAgenda: 'Confirmado' })
     });
+    assert.equal(response.status, 400);
+    assert.match((await response.json()).message, /nome real/);
+  } finally { restoreSemNome(); }
+
+  const restoreQuery = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [landing] } });
+  const originalConnect = pool.connect;
+  let updateParams;
+  pool.connect = async function() {
+    return {
+      query: async function(sql, params) {
+        if (sql.includes('UPDATE agendamentos SET')) {
+          updateParams = params;
+          return { rows: [ag(P, { status: 'Confirmado', agendado_por_nome: 'Eduarda' })] };
+        }
+        return { rows: [] };
+      },
+      release: function() {}
+    };
+  };
+  try {
+    const response = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('atendimento central')),
+      body: JSON.stringify({ statusAgenda: 'Confirmado', confirmadoPorCentralNome: 'Eduarda' })
+    });
     assert.equal(response.status, 200);
-  } finally { restoreQuery(); restoreConnect(); }
+    assert.equal(updateParams[18], 'Eduarda', 'deve gravar o nome preenchido, não o nome genérico do perfil');
+  } finally { restoreQuery(); pool.connect = originalConnect; }
 });
 
 test('consultor Pitangueiras: PATCH em agendamento da Gonzaga — 403 cross-store', async function() {
