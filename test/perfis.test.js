@@ -885,6 +885,42 @@ test('consultor Pitangueiras: PATCH status (campo permitido) — 200', async fun
   } finally { r1(); r2(); }
 });
 
+test('Landing Page: somente Atendimento Central pode confirmar', async function() {
+  const landing = ag(P, {
+    origem: 'Landing Page',
+    origem_sync: 'landing_page',
+    responsavel: 'Landing Page',
+    access_tags: 'origem:site;fluxo:pendente-confirmacao'
+  });
+  const perfisBloqueados = [
+    ['admin', ''],
+    ['gerente de loja', P],
+    ['consultor de vendas', P]
+  ];
+
+  for (const [perfil, loja] of perfisBloqueados) {
+    const restore = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [landing] } });
+    try {
+      const response = await fetch(baseUrl + '/api/agendamentos/100', {
+        method: 'PATCH', headers: H(tok(perfil, loja)),
+        body: JSON.stringify({ statusAgenda: 'Confirmado' })
+      });
+      assert.equal(response.status, 403, perfil + ' não deve confirmar lead da Landing Page');
+      assert.match((await response.json()).message, /Atendimento Central/);
+    } finally { restore(); }
+  }
+
+  const restoreQuery = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [landing] } });
+  const restoreConnect = withConnect(ag(P, { status: 'Confirmado', agendado_por_nome: 'Eduarda' }));
+  try {
+    const response = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('atendimento central')),
+      body: JSON.stringify({ statusAgenda: 'Confirmado' })
+    });
+    assert.equal(response.status, 200);
+  } finally { restoreQuery(); restoreConnect(); }
+});
+
 test('consultor Pitangueiras: PATCH em agendamento da Gonzaga — 403 cross-store', async function() {
   const restore = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(G)] } });
   try {

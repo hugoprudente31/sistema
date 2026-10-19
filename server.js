@@ -2653,6 +2653,28 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
     if (!hasRole(req.session, ["admin", "atendimento central", "gerente de loja", "consultor de vendas", "vendedor", "comprador", "optometrista"])) {
       return res.status(403).json({ ok: false, message: "Perfil sem permissão para alterar agendamentos." });
     }
+    const normalizarOrigem = (valor) => clean(valor)
+      .toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const registroLandingPage =
+      normalizarOrigem(current.rows[0].origem_sync) === "landing_page" ||
+      normalizarOrigem(current.rows[0].origem).includes("landing page") ||
+      normalizarOrigem(current.rows[0].responsavel) === "landing page" ||
+      normalizarOrigem(current.rows[0].proprietario_nome) === "landing page" ||
+      normalizarOrigem(current.rows[0].access_tags).includes("origem:site");
+    const statusAtual = normalizarOrigem(current.rows[0].status);
+    const statusSolicitado = normalizarOrigem(b.status || b.statusAgenda);
+    const estaConfirmandoLandingPage = registroLandingPage &&
+      statusSolicitado === "confirmado" && statusAtual !== "confirmado";
+
+    // Leads da Landing Page chegam como pendentes e precisam da validação
+    // humana da Central. É essa confirmação que grava o nome exibido em
+    // "Agendado por" como "Landing Page (Nome da atendente)".
+    if (estaConfirmandoLandingPage && roleOf(req.session) !== "atendimento central") {
+      return res.status(403).json({
+        ok: false,
+        message: "Agendamentos da Landing Page só podem ser confirmados pelo perfil Atendimento Central."
+      });
+    }
     // O formulário sempre reenvia o status/presença atual junto com qualquer
     // edição (mesmo quando só se está corrigindo nome/WhatsApp/e-mail), então
     // só bloqueamos quando o valor de status realmente MUDA para compareceu/

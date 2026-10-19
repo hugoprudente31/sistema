@@ -1283,6 +1283,7 @@ function mapAgendamentoDb(r) {
     DataEntregaOS: r.data_entrega_os ? String(r.data_entrega_os).slice(0,10) : '',
     StatusOS: r.status_os || '',
     AccessTags: r.access_tags || '',
+    OrigemSync: r.origem_sync || '',
     LeadTimeDias: r.lead_time_dias || '',
     VendedorNome: r.vendedor_nome || '',
     VendedorConsultorId: r.vendedor_consultor_id || '',
@@ -1298,6 +1299,16 @@ function mapAgendamentoDb(r) {
     AgendadoPorNome: (function() {
       var conta = r.agendado_por_nome || '';
       var real = r.proprietario_nome || r.vendedor_nome || r.responsavel || '';
+      var origemLanding = normalizeKey(r.origem_sync || '') === 'landing_page' ||
+        normalizeKey(r.origem || '').indexOf('landing page') > -1 ||
+        normalizeKey(r.responsavel || '') === 'landing page' ||
+        normalizeKey(r.proprietario_nome || '') === 'landing page' ||
+        normalizeKey(r.access_tags || '').indexOf('origem:site') > -1;
+      if (origemLanding) {
+        return conta && normalizeKey(conta) !== 'landing page'
+          ? 'Landing Page (' + conta + ')'
+          : 'Landing Page';
+      }
       if (real && normalizeKey(real) !== normalizeKey(conta)) {
         return conta ? real + ' (' + conta + ')' : real;
       }
@@ -3065,12 +3076,16 @@ function getActionHtml(r) {
   var gerente = role === 'gerente de loja' && ownStore;
   var comprador = role === 'comprador' && ownStore;
   var consultor = ['consultor de vendas', 'vendedor', 'outros'].indexOf(role) > -1 && ownStore;
+  var landingPage = normalizeKey(r.OrigemSync || '') === 'landing_page' ||
+    normalizeKey(r.Origem || '').indexOf('landing page') > -1 ||
+    normalizeKey(r.Responsavel || '') === 'landing page' ||
+    normalizeKey(r.AccessTags || '').indexOf('origem:site') > -1;
   var buttons = '';
   var options = '<option value="">Mais ações</option>';
 
   // Cancelar e excluir — Admin, Central, Gerente
   if (central || gerente) {
-    if (st === 'Agendado') options += '<option value="confirmar">Confirmar</option>';
+    if (st === 'Agendado' && (!landingPage || role === 'atendimento central')) options += '<option value="confirmar">Confirmar</option>';
     if (['Agendado', 'Confirmado'].indexOf(st) > -1) options += '<option value="cancelar">Cancelar</option>';
     options += '<option value="excluir">Excluir</option>';
   }
