@@ -1306,8 +1306,8 @@ function mapAgendamentoDb(r) {
         normalizeKey(r.access_tags || '').indexOf('origem:site') > -1;
       if (origemLanding) {
         return conta && normalizeKey(conta) !== 'landing page'
-          ? 'Landing Page (' + conta + ')'
-          : 'Landing Page';
+          ? 'LP ' + conta
+          : 'LP';
       }
       if (real && normalizeKey(real) !== normalizeKey(conta)) {
         return conta ? real + ' (' + conta + ')' : real;
