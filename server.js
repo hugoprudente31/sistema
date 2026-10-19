@@ -2668,7 +2668,7 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
 
     // Leads da Landing Page chegam como pendentes e precisam da validação
     // humana da Central. É essa confirmação que grava o nome exibido em
-    // "Agendado por" como "Landing Page (Nome da atendente)".
+    // "Agendado por" como "LP Nome da atendente".
     if (estaConfirmandoLandingPage && roleOf(req.session) !== "atendimento central") {
       return res.status(403).json({
         ok: false,
