@@ -34,11 +34,20 @@ test('painel oferece o filtro rápido Somente agendados e o envia ao servidor', 
   assert.match(html, /somenteAgendados=true/);
 });
 
-test('qualquer consultor da própria loja recebe a ação Corrigir/Reagendar', () => {
+test('ações Editar/Corrigir e Reagendar aparecem separadas no painel', () => {
   const start = html.indexOf('function getActionHtml');
   const body = html.slice(start, html.indexOf('\nfunction ', start + 20));
   assert.match(body, /else if \(comprador \|\| consultor\)/);
   assert.doesNotMatch(body, /consultor && \(isOwner \|\| canManageOS\(\)\)/);
+  assert.match(body, /abrirModalEdicao/);
+  assert.match(body, /abrirModalReagendamento/);
+  assert.match(body, /option value="reagendar">Reagendar/);
+  assert.doesNotMatch(body, /Editar\/Reagendar|Corrigir\/Reagendar/);
+});
+
+test('modal de reagendamento envia ação explícita para atualizar Agendado por', () => {
+  assert.match(html, /payload = \{[\s\S]*?reagendamento: true[\s\S]*?\};/);
+  assert.match(html, /Salvar reagendamento/);
 });
 
 test('Atendimento Central tem caixas por loja e envia a seleção à agenda e ao dashboard', () => {
