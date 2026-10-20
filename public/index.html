@@ -625,7 +625,7 @@
           <div class="row"><div><label>WhatsApp</label><input id="editWhatsApp" type="text"></div><div><label>Email</label><input id="editEmail" type="email"></div></div>
           <div class="row"><div><label>Loja</label><select id="editLoja"></select></div><div><label>Optometrista</label><input id="editOptometrista" type="text"></div></div>
           <div class="row"><div><label>Data do Agendamento</label><input id="editDataAgendamento" type="date"></div><div><label>Horário</label><input id="editHorario" type="time"></div></div>
-          <div class="row"><div><label>Status do Agendamento</label><select id="editStatusAgenda"><option>Agendado</option><option>Confirmado</option><option>Compareceu</option><option>Não Compareceu</option><option>OS em Andamento</option><option>Concluído</option><option>Cancelado</option></select></div><div><label>Presença</label><select id="editCompareceu"><option value="Pendente">Pendente</option><option value="Sim">Sim — compareceu</option><option value="Não">Não — não compareceu</option></select></div></div>
+          <div class="row"><div><label>Status do Agendamento</label><select id="editStatusAgenda"><option>Agendado</option><option>Reagendado</option><option>Confirmado</option><option>Compareceu</option><option>Não Compareceu</option><option>OS em Andamento</option><option>Concluído</option><option>Cancelado</option></select></div><div><label>Presença</label><select id="editCompareceu"><option value="Pendente">Pendente</option><option value="Sim">Sim — compareceu</option><option value="Não">Não — não compareceu</option></select></div></div>
           <div class="row"><div><label>Status da OS</label><select id="editStatusOS"><option value=""></option><option>Aberta</option><option>Em produção</option><option>Recebida</option><option>Pronta</option><option>Entregue</option><option>Concluído</option><option>Cancelada</option><option>Cancelado</option><option>Reembolso</option></select></div><div></div></div>
           <div class="row"><div><label>Número da OS</label><input id="editNumeroOS" type="text"></div><div><label>Data de Abertura da OS</label><input id="editDataAberturaOS" type="date"></div></div>
           <div class="row"><div><label>Data de Entrada da OS</label><input id="editDataEntradaOS" type="date"></div><div><label>Data prevista de entrega</label><input id="editDataEntregaOS" type="date"></div></div>
@@ -1529,7 +1529,7 @@ function buildDashboardLocal(rows, db) {
     var os = normalizeKey(r.StatusOS || '');
     var comp = normalizeKey(r.Compareceu || '');
 
-    if (['agendado','confirmado'].indexOf(st) > -1) agendados++;
+    if (['agendado','reagendado','confirmado'].indexOf(st) > -1) agendados++;
     if (comp === 'sim' || st === 'compareceu') compareceram++;
     if (comp === 'nao' || comp === 'não' || st === 'nao compareceu' || st === 'não compareceu') naoCompareceram++;
     if (st === 'concluido' || st === 'concluído' || os === 'concluido' || os === 'concluído' || os === 'entregue') concluidos++;
@@ -2948,6 +2948,7 @@ function statusClassAgendamento(r) {
   if (r.IsConcluidaVisual) return 'green';
   if (r.IsOverdue) return 'red';
   if (r.StatusAgenda === 'OS em Andamento') return 'blue';
+  if (r.StatusAgenda === 'Reagendado') return 'blue';
   if (r.StatusAgenda === 'Cancelado') return 'gray';
   return '';
 }
@@ -3130,25 +3131,25 @@ function getActionHtml(r) {
 
   // Cancelar e excluir — Admin, Central, Gerente
   if (central || gerente) {
-    if (st === 'Agendado' && (!landingPage || role === 'atendimento central')) options += '<option value="confirmar">Confirmar</option>';
-    if (['Agendado', 'Confirmado'].indexOf(st) > -1) options += '<option value="cancelar">Cancelar</option>';
+    if (['Agendado', 'Reagendado'].indexOf(st) > -1 && (!landingPage || role === 'atendimento central')) options += '<option value="confirmar">Confirmar</option>';
+    if (['Agendado', 'Reagendado', 'Confirmado'].indexOf(st) > -1) options += '<option value="cancelar">Cancelar</option>';
     options += '<option value="excluir">Excluir</option>';
   }
 
   // Comprador pode cancelar
-  if (comprador && ['Agendado', 'Confirmado'].indexOf(st) > -1) {
+  if (comprador && ['Agendado', 'Reagendado', 'Confirmado'].indexOf(st) > -1) {
     options += '<option value="cancelar">Cancelar</option>';
   }
 
   // Resultado clínico — o optometrista escolhe exatamente uma das três opções.
-  if (role === 'optometrista' && ownStore && ['Agendado', 'Confirmado', 'Compareceu', 'Não Compareceu'].indexOf(st) > -1) {
+  if (role === 'optometrista' && ownStore && ['Agendado', 'Reagendado', 'Confirmado', 'Compareceu', 'Não Compareceu'].indexOf(st) > -1) {
     var resultadoAtual = normalizeKey(r.ResultadoOptometrista || '');
     buttons += '<div class="clinical-actions"><strong>Marcar resultado:</strong>' +
       '<button class="clinical-choice clinical-choice-yes' + (resultadoAtual === 'check-in sim veio' ? ' choice-selected' : '') + '" aria-pressed="' + (resultadoAtual === 'check-in sim veio') + '" onclick="marcarResultadoOptometrista(\'' + id + '\', \'Check-in Sim veio\')">Check-in Sim veio</button>' +
       '<button class="clinical-choice clinical-choice-no' + (resultadoAtual === 'check-in nao veio' ? ' choice-selected' : '') + '" aria-pressed="' + (resultadoAtual === 'check-in nao veio') + '" onclick="marcarResultadoOptometrista(\'' + id + '\', \'Check-in Não veio\')">Check-in Não veio</button>' +
       '<button class="clinical-choice clinical-choice-pathology' + (resultadoAtual === 'patologia' ? ' choice-selected' : '') + '" aria-pressed="' + (resultadoAtual === 'patologia') + '" onclick="marcarResultadoOptometrista(\'' + id + '\', \'Patologia\')">Patologia</button></div>';
   // Admin e gerente mantêm o check-in operacional existente.
-  } else if (['admin', 'gerente de loja'].indexOf(role) > -1 && ['Agendado', 'Confirmado'].indexOf(st) > -1) {
+  } else if (['admin', 'gerente de loja'].indexOf(role) > -1 && ['Agendado', 'Reagendado', 'Confirmado'].indexOf(st) > -1) {
     buttons += '<button onclick="marcarCompareceu(\'' + id + '\')">Check-in Sim</button>';
     buttons += '<button class="secondary" onclick="marcarNaoCompareceu(\'' + id + '\')">Check-in Não</button>';
   }
