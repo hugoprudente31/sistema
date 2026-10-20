@@ -19,6 +19,6 @@ test('API filtra critérios de seleção no SQL antes de aplicar LIMIT', () => {
   assert.ok(body.indexOf('if (q.cliente)') < body.indexOf('ORDER BY a.id DESC LIMIT'), 'filtros precisam ser montados antes do LIMIT');
 });
 
-test('API entende Somente agendados como Agendado ou Confirmado', () => {
-  assert.match(server, /q\.somenteAgendados[^]*IN \('agendado','confirmado'\)/);
+test('API entende Somente agendados como Agendado, Reagendado ou Confirmado', () => {
+  assert.match(server, /q\.somenteAgendados[^]*IN \('agendado','reagendado','confirmado'\)/);
 });

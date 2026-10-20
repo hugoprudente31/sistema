@@ -2543,7 +2543,7 @@ app.get("/api/agendamentos", async (req, res) => {
     if (q.status) { params.push(q.status); conditions.push(`LOWER(COALESCE(a.status,'')) = LOWER($${params.length})`); }
     if (q.statusOS) { params.push(q.statusOS); conditions.push(`LOWER(COALESCE(a.status_os,'')) = LOWER($${params.length})`); }
     if (String(q.somenteAgendados) === "true") {
-      conditions.push(`LOWER(COALESCE(a.status,'')) IN ('agendado','confirmado')`);
+      conditions.push(`LOWER(COALESCE(a.status,'')) IN ('agendado','reagendado','confirmado')`);
     }
     // Etapa do lead (Novo Lead/Bot Ativo/Atendimento Humano/Agendado/Compareceu/
     // Vendido/Perdido) — mesmo cálculo usado no CRM Kanban (CRM_ESTAGIO_CASE_SQL,
@@ -2614,7 +2614,7 @@ app.get("/api/agendamentos", async (req, res) => {
       if (resultados.includes("nao-compareceu")) opcoes.push(`(LOWER(COALESCE(a.compareceu,'')) IN ('nao','não') OR LOWER(COALESCE(a.status,'')) IN ('nao compareceu','não compareceu'))`);
       if (resultados.includes("comprou")) opcoes.push(`(NULLIF(TRIM(COALESCE(a.numero_os,'')), '') IS NOT NULL AND LOWER(COALESCE(a.status_os,'')) NOT IN ('','cancelada','cancelado','reembolso'))`);
       if (resultados.includes("cancelou")) opcoes.push(`LOWER(COALESCE(a.status,'')) = 'cancelado'`);
-      if (resultados.includes("reagendou")) opcoes.push(`COALESCE(a.access_tags,'') ILIKE '%reagendado%'`);
+      if (resultados.includes("reagendou")) opcoes.push(`(LOWER(COALESCE(a.status,'')) = 'reagendado' OR COALESCE(a.access_tags,'') ILIKE '%reagendado%')`);
       if (opcoes.length) conditions.push(`(${opcoes.join(" OR ")})`);
     }
 
@@ -2913,7 +2913,9 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
     // registro — uma venda já conta a história real do atendimento, então não
     // deve virar "Agendado"/pendente nem ter o resultado do optometrista apagado.
     const reagendamentoSemVenda = reagendamentoLimpo && !compraAtiva;
-    const statusReagendamento = reagendamentoSemVenda ? "Agendado" : null;
+    const statusReagendamento = reagendamentoSemVenda
+      ? (reagendamentoSolicitado ? "Reagendado" : "Agendado")
+      : null;
     const compareceuReagendamento = reagendamentoSemVenda ? "Pendente" : null;
     const limparResultadoOptometrista = reagendamentoSemVenda;
 

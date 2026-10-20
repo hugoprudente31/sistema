@@ -6,12 +6,13 @@ const rows = [
   { ID: 1, NomeCompleto: 'José Silva', Loja: 'Óticas TGT Enseada', DataAgendamento: '2026-06-19', StatusAgenda: 'Agendado', StatusOS: '', AgendadoPorEmail: 'vendedor@tgt.com', Estagio: 'Agendado' },
   { ID: 2, NomeCompleto: 'Maria Souza', Loja: 'Óticas TGT Enseada', DataAgendamento: '2026-06-10', StatusAgenda: 'Concluído', NumeroOS: 'OS-2', StatusOS: 'Em produção', AgendadoPorEmail: 'vendedor@tgt.com', Estagio: 'Vendido' },
   { ID: 3, NomeCompleto: 'Carlos Lima', Loja: 'Óticas TGT - Gonzaga', DataAgendamento: '2026-01-10', StatusAgenda: 'Cancelado', NumeroOS: 'OS-3', StatusOS: 'Cancelado', AgendadoPorEmail: 'outro@tgt.com', Estagio: 'Perdido' },
-  { ID: 4, NomeCompleto: 'Atendimento Futuro', Loja: 'Óticas TGT Enseada', DataAgendamento: '2026-07-01', StatusAgenda: 'Confirmado', AgendadoPorEmail: 'outro@tgt.com', Estagio: 'Bot Ativo' }
+  { ID: 4, NomeCompleto: 'Atendimento Futuro', Loja: 'Óticas TGT Enseada', DataAgendamento: '2026-07-01', StatusAgenda: 'Confirmado', AgendadoPorEmail: 'outro@tgt.com', Estagio: 'Bot Ativo' },
+  { ID: 5, NomeCompleto: 'Cliente Reagendado', Loja: 'Óticas TGT Enseada', DataAgendamento: '2026-07-02', StatusAgenda: 'Reagendado', AgendadoPorEmail: 'outro@tgt.com', Estagio: 'Reagendado' }
 ];
 const user = { nome: 'Vendedor', email: 'vendedor@tgt.com' };
 
 test('sem filtro mostra todos os registros permitidos', () => {
-  assert.equal(filterAppointments(rows, {}, user, '2026-06-19').length, 4);
+  assert.equal(filterAppointments(rows, {}, user, '2026-06-19').length, 5);
 });
 
 test('período inteligente só é aplicado quando selecionado', () => {
@@ -28,7 +29,7 @@ test('combina loja, status, cliente e datas com normalização', () => {
 test('caixas de seleção permitem combinar várias lojas e nenhuma seleção não mostra registros', () => {
   assert.deepEqual(
     filterAppointments(rows, { lojas: ['Óticas TGT Enseada', 'Óticas TGT - Gonzaga'] }, user, '2026-06-19').map((r) => r.ID),
-    [1, 2, 3, 4]
+    [1, 2, 3, 4, 5]
   );
   assert.deepEqual(filterAppointments(rows, { lojas: ['Óticas TGT - Gonzaga'] }, user, '2026-06-19').map((r) => r.ID), [3]);
   assert.deepEqual(filterAppointments(rows, { lojas: [] }, user, '2026-06-19'), []);
@@ -45,9 +46,9 @@ test('filtro de etapa do lead usa igualdade normalizada, não substring', () => 
   assert.equal(filterAppointments(rows, { estagio: 'Agendado' }, user, '2026-06-19').length, 1);
 });
 
-test('somente agendados inclui Agendado e Confirmado, mas exclui os demais status', () => {
+test('somente agendados inclui Agendado, Reagendado e Confirmado, mas exclui os demais status', () => {
   assert.deepEqual(
     filterAppointments(rows, { somenteAgendados: 'true' }, user, '2026-06-19').map((r) => r.ID),
-    [1, 4]
+    [1, 4, 5]
   );
 });
