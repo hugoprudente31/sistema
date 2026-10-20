@@ -619,7 +619,7 @@
     <div id="editModal" class="hidden">
       <div class="modal-backdrop">
         <div class="modal-card">
-          <div class="topbar"><h3 style="margin:0;">Editar Agendamento / OS</h3><button class="secondary icon-btn" onclick="fecharModalEdicao()">Fechar</button></div>
+          <div class="topbar"><h3 id="editModalTitulo" style="margin:0;">Editar Agendamento / OS</h3><button class="secondary icon-btn" onclick="fecharModalEdicao()">Fechar</button></div>
           <div class="row"><div><label>ID do Agendamento</label><input id="editId" type="text" disabled></div><div><label>Data de Registro</label><input id="editDataCadastro" type="text" disabled></div></div>
           <div class="row"><div><label>Origem</label><input id="editOrigem" type="text"></div><div><label>Nome completo</label><input id="editNomeCompleto" type="text"></div></div>
           <div class="row"><div><label>WhatsApp</label><input id="editWhatsApp" type="text"></div><div><label>Email</label><input id="editEmail" type="email"></div></div>
@@ -632,7 +632,7 @@
           <div class="row"><div><label>Data de Finalização da OS</label><input id="editDataFinalizacaoOS" type="date"></div><div><label>Vendedor Nome</label><input id="editVendedorNome" type="text"></div></div>
           <div class="row"><div><label>Valor Venda</label><input id="editValorVenda" type="number" min="0" step="0.01"></div><div><label>Desconto</label><input id="editDesconto" type="number" min="0" step="0.01"></div></div>
           <div><label>Observação</label><textarea id="editObservacao"></textarea></div>
-          <div class="row" style="margin-top:14px"><div><button onclick="salvarEdicaoLinha()">Salvar edição</button></div><div><button class="secondary" onclick="fecharModalEdicao()">Cancelar</button></div></div>
+          <div class="row" style="margin-top:14px"><div><button id="editSalvarBtn" onclick="salvarEdicaoLinha()">Salvar edição</button></div><div><button class="secondary" onclick="fecharModalEdicao()">Cancelar</button></div></div>
           <div id="msgEdit" class="msg"></div>
         </div>
       </div>
@@ -2569,13 +2569,14 @@ function limparFormulario(clearMsg) {
   preencherConsultorSessao();
 }
 
-function abrirModalEdicao(id) {
+function abrirModalEdicao(id, modo) {
   var row = (state.agendamentos || []).find(function(r) { return String(r.ID) === String(id); });
   if (!row) {
     setMsg('msgForm', 'Registro não encontrado para edição.', 'err');
     return;
   }
   state.editingRow = row;
+  state.editingMode = modo === 'reagendar' ? 'reagendar' : 'editar';
   byId('editId').value = row.ID || '';
   byId('editDataCadastro').value = formatDateBR(row.DataCadastroBR || row.DataCadastro || '');
   byId('editOrigem').value = row.Origem || '';
@@ -2599,6 +2600,20 @@ function abrirModalEdicao(id) {
   byId('editDesconto').value = row.Desconto || '';
   byId('editObservacao').value = row.Observacao || '';
   aplicarPermissoesModal();
+  if (state.editingMode === 'reagendar') {
+    byId('editModalTitulo').textContent = 'Reagendar atendimento';
+    byId('editSalvarBtn').textContent = 'Salvar reagendamento';
+    var camposReagendamento = ['editDataAgendamento', 'editHorario'];
+    ['editOrigem', 'editNomeCompleto', 'editWhatsApp', 'editEmail', 'editLoja', 'editOptometrista',
+      'editStatusAgenda', 'editCompareceu', 'editStatusOS', 'editNumeroOS', 'editDataAberturaOS',
+      'editDataEntradaOS', 'editDataEntregaOS', 'editDataFinalizacaoOS', 'editVendedorNome',
+      'editValorVenda', 'editDesconto', 'editObservacao']
+      .forEach(function(campo) { byId(campo).disabled = true; });
+    camposReagendamento.forEach(function(campo) { byId(campo).disabled = false; });
+  } else {
+    byId('editModalTitulo').textContent = 'Editar Agendamento / OS';
+    byId('editSalvarBtn').textContent = 'Salvar edição';
+  }
   byId('editModal').classList.remove('hidden');
   setMsg('msgEdit', '', '');
 }
@@ -2606,6 +2621,7 @@ function abrirModalEdicao(id) {
 function fecharModalEdicao() {
   byId('editModal').classList.add('hidden');
   state.editingRow = null;
+  state.editingMode = null;
   setMsg('msgEdit', '', '');
 }
 
@@ -2676,6 +2692,13 @@ function salvarEdicaoLinha() {
     observacao: byId('editObservacao').value.trim()
   };
   if (!byId('editCompareceu').disabled) payload.compareceu = byId('editCompareceu').value;
+  if (state.editingMode === 'reagendar') {
+    payload = {
+      dataAgendamento: byId('editDataAgendamento').value.trim(),
+      horario: byId('editHorario').value.trim(),
+      reagendamento: true
+    };
+  }
 
   if (!id) {
     setMsg('msgEdit', 'ID do agendamento não encontrado.', 'err');
@@ -2697,6 +2720,10 @@ function salvarEdicaoLinha() {
     .finally(function() {
       showLoading(false);
     });
+}
+
+function abrirModalReagendamento(id) {
+  return abrirModalEdicao(id, 'reagendar');
 }
 
 function confirmarAgendamento(id) { return runAction('confirmarAgendamento', id); }
@@ -2909,6 +2936,7 @@ function executarAcaoAgenda(id, acao, selectEl) {
   else if (acao === 'excluir') result = excluirAgendamento(id);
   else if (acao === 'os') result = abrirPromptOS(id, row);
   else if (acao === 'editar') result = abrirModalEdicao(id);
+  else if (acao === 'reagendar') result = abrirModalReagendamento(id);
   else if (acao === 'negociacao') result = typeof window.abrirModalNegociacao === 'function' ? window.abrirModalNegociacao(id, row) : null;
 
   Promise.resolve(result).finally(function() {
@@ -3128,10 +3156,14 @@ function getActionHtml(r) {
   // Corrigir — Gonzaga pode corrigir registros operacionais da própria loja.
   if (central || gerente) {
     buttons += '<button class="secondary" onclick="abrirModalEdicao(\'' + id + '\')">Editar</button>';
-    options += '<option value="editar">Editar/Reagendar</option>';
+    buttons += '<button class="secondary" onclick="abrirModalReagendamento(\'' + id + '\')">Reagendar</button>';
+    options += '<option value="editar">Editar</option>';
+    options += '<option value="reagendar">Reagendar</option>';
   } else if (comprador || consultor) {
     buttons += '<button class="secondary" onclick="abrirModalEdicao(\'' + id + '\')">Corrigir</button>';
-    options += '<option value="editar">Corrigir/Reagendar</option>';
+    buttons += '<button class="secondary" onclick="abrirModalReagendamento(\'' + id + '\')">Reagendar</button>';
+    options += '<option value="editar">Corrigir</option>';
+    options += '<option value="reagendar">Reagendar</option>';
   }
 
   // OS — conforme permissão assinada pelo servidor.

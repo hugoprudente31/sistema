@@ -2837,7 +2837,14 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
       clean(b.horario) !== clean(current.rows[0].horario);
     // Ao mudar a data ou o horário, o novo responsável pelo agendamento é
     // quem realizou o reagendamento.
-    const isReagendamento = isReagendamentoDeData || isReagendamentoDeHorario;
+    const reagendamentoSolicitado = b.reagendamento === true || b.reagendamento === "true";
+    if (reagendamentoSolicitado && !isReagendamentoDeData && !isReagendamentoDeHorario) {
+      return res.status(400).json({
+        ok: false,
+        message: "Para reagendar, altere a data ou o horário do atendimento."
+      });
+    }
+    const isReagendamento = reagendamentoSolicitado || isReagendamentoDeData || isReagendamentoDeHorario;
     const normalizarCampoReagendamento = (valor) => clean(valor)
       .toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
     // "Agendado por" representa o último perfil que realmente mexeu no
