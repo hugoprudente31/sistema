@@ -173,11 +173,11 @@
     .row-green td { background: #dcfce7 !important; }
     .row-blue td { background: #dbeafe !important; border-bottom-color: #93c5fd; }
     .row-pathology td {
-      background: #dbeafe !important;
-      border-bottom-color: #93c5fd;
+      background: #ffe4ea !important;
+      border-bottom-color: #ff4d6d;
       transition: background-color .2s ease, box-shadow .2s ease;
     }
-    .row-pathology td:first-child { box-shadow: inset 5px 0 0 #2563eb; }
+    .row-pathology td:first-child { box-shadow: inset 5px 0 0 #ff1744; }
 
     .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; min-width: 320px; }
     .actions button, .actions select { max-width: 180px; }
@@ -196,10 +196,10 @@
     .clinical-actions .clinical-choice:focus-visible { outline: 3px solid rgba(37, 99, 235, .28); outline-offset: 2px; }
     .clinical-actions .clinical-choice-yes { background: #dcfce7; color: #166534; border-color: #86efac; }
     .clinical-actions .clinical-choice-no { background: #fee2e2; color: #b91c1c; border-color: #fca5a5; }
-    .clinical-actions .clinical-choice-pathology { background: #dbeafe; color: #1d4ed8; border-color: #93c5fd; }
+    .clinical-actions .clinical-choice-pathology { background: #ffe4ea; color: #b00020; border-color: #ff4d6d; box-shadow: 0 0 8px rgba(255, 23, 68, .28); }
     .clinical-actions .clinical-choice-yes.choice-selected { background: #15803d; color: #fff; border-color: #14532d; box-shadow: 0 0 0 3px rgba(21, 128, 61, .18); }
     .clinical-actions .clinical-choice-no.choice-selected { background: #dc2626; color: #fff; border-color: #991b1b; box-shadow: 0 0 0 3px rgba(220, 38, 38, .18); }
-    .clinical-actions .clinical-choice-pathology.choice-selected { background: #2563eb; color: #fff; border-color: #1e40af; box-shadow: 0 0 0 3px rgba(37, 99, 235, .2); }
+    .clinical-actions .clinical-choice-pathology.choice-selected { background: #ff1744; color: #fff; border-color: #d50000; box-shadow: 0 0 0 3px rgba(255, 23, 68, .3), 0 0 16px rgba(255, 23, 68, .72); }
     .clinical-actions .clinical-choice.choice-selected::before { content: '✓ '; font-weight: 900; }
 
     .btn-relatorio {
@@ -1238,7 +1238,7 @@ function mapAgendamentoDb(r) {
   } else if (semaforo) {
     semaforo = semaforo === 'azul' ? 'azul' : semaforo;
   } else if (resultadoOptometrista === 'patologia' || patologia === 'sim') {
-    semaforo = 'azul'; semaforoLabel = 'Patologia';
+    semaforo = 'vermelho'; semaforoLabel = 'Patologia';
   } else if (compareceu === 'nao' || compareceu === 'nao compareceu' || status === 'nao compareceu') {
     semaforo = 'vermelho'; semaforoLabel = 'Não compareceu';
   } else if (compareceu === 'sim' || compareceu === 'compareceu' || status === 'compareceu' || status === 'concluido') {

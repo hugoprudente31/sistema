@@ -41,8 +41,10 @@ test('as três escolhas clínicas têm cores próprias antes e depois do clique'
   assert.match(html, /aria-pressed=/);
 });
 
-test('resultado Patologia sinaliza toda a linha do cliente em azul', function() {
+test('resultado Patologia sinaliza toda a linha e o botão em vermelho neon', function() {
   assert.match(html, /ResultadoOptometrista[^\n]+patologia[^\n]+row-pathology/);
   assert.match(html, /\.row-pathology td/);
-  assert.match(html, /#dbeafe !important/);
+  assert.match(html, /#ffe4ea !important/);
+  assert.match(html, /clinical-choice-pathology\.choice-selected[^}]+#ff1744/);
+  assert.match(html, /semaforo = 'vermelho'; semaforoLabel = 'Patologia'/);
 });
