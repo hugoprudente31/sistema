@@ -7,9 +7,9 @@ const path = require('node:path');
 
 const painel = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
 
-test('coluna Agendado por abrevia Landing Page como LP seguido do nome da Central', function() {
-  assert.match(painel, /\? 'LP ' \+ conta/);
-  assert.doesNotMatch(painel, /\? 'Landing Page \(' \+ conta/);
+test('coluna Agendado por identifica toda Landing Page como Setor de Relacionamento e Pós-Vendas', function() {
+  assert.match(painel, /if \(origemLanding\) \{\s*return 'Setor de Relacionamento e Pós-Vendas';/);
+  assert.doesNotMatch(painel, /\? 'LP ' \+ conta/);
 });
 
 test('confirmação da Landing Page pede e envia o nome real da pessoa da Central', function() {
