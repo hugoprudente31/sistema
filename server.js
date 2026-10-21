@@ -1570,7 +1570,19 @@ async function initDatabase() {
         RAISE EXCEPTION 'Nome de cliente inválido. Não é permitido cadastrar registros com nome TESTE.';
       END IF;
       responsavel_registro := COALESCE(NULLIF(NEW.agendado_por_nome, ''), NULLIF(j->>'responsavel', ''), NULLIF(j->>'proprietario_nome', ''), NULLIF(j->>'criado_por_nome', ''), NULLIF(NEW.ultima_alteracao_por_nome, ''), 'Sistema/Landing');
-      NEW.agendado_por_nome := COALESCE(NULLIF(NEW.agendado_por_nome, ''), responsavel_registro);
+      IF LOWER(COALESCE(NEW.origem_sync, '')) = 'landing_page'
+        OR LOWER(COALESCE(j->>'origem', '')) LIKE '%landing page%'
+        OR LOWER(COALESCE(j->>'responsavel', '')) = 'landing page'
+        OR LOWER(COALESCE(j->>'proprietario_nome', '')) = 'landing page'
+        OR LOWER(COALESCE(j->>'access_tags', '')) LIKE '%origem:site%' THEN
+        -- A autoria de um lead criado pela LP pertence permanentemente ao
+        -- setor que criou o canal. Nenhuma edicao posterior, inclusive OS,
+        -- atendimento ou reagendamento, pode transferir essa autoria.
+        NEW.agendado_por_nome := 'Setor de Relacionamento e Pós-Vendas';
+        NEW.agendado_por_email := 'relacionamento.posvendas@sistema.local';
+      ELSE
+        NEW.agendado_por_nome := COALESCE(NULLIF(NEW.agendado_por_nome, ''), responsavel_registro);
+      END IF;
       -- So preenche ultima_alteracao_por_nome quando ainda esta vazio (ex: INSERT
       -- vindo do bot/landing page sem essa info). Nao pode sobrescrever o valor que
       -- a aplicacao ja gravou nesta mesma UPDATE com quem REALMENTE fez a alteracao
@@ -1595,6 +1607,25 @@ async function initDatabase() {
     CREATE TRIGGER trg_validar_agendamento_tgt
     BEFORE INSERT OR UPDATE ON agendamentos
     FOR EACH ROW EXECUTE FUNCTION validar_agendamento_tgt();
+  `);
+
+  // Corrige também os registros históricos da Landing Page para que a coluna
+  // "Agendado por" siga a mesma autoria institucional aplicada aos novos leads.
+  await pool.query(`
+    UPDATE agendamentos
+       SET agendado_por_nome = 'Setor de Relacionamento e Pós-Vendas',
+           agendado_por_email = 'relacionamento.posvendas@sistema.local'
+     WHERE (
+          LOWER(COALESCE(origem_sync, '')) = 'landing_page'
+       OR LOWER(COALESCE(origem, '')) LIKE '%landing page%'
+       OR LOWER(COALESCE(responsavel, '')) = 'landing page'
+       OR LOWER(COALESCE(proprietario_nome, '')) = 'landing page'
+       OR LOWER(COALESCE(access_tags, '')) LIKE '%origem:site%'
+     )
+       AND (
+         agendado_por_nome IS DISTINCT FROM 'Setor de Relacionamento e Pós-Vendas'
+         OR agendado_por_email IS DISTINCT FROM 'relacionamento.posvendas@sistema.local'
+       )
   `);
 
   const comprasCorrigidas = await pool.query(`
@@ -2667,8 +2698,8 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
       statusSolicitado === "confirmado" && statusAtual !== "confirmado";
 
     // Leads da Landing Page chegam como pendentes e precisam da validação
-    // humana da Central. É essa confirmação que grava o nome exibido em
-    // "Agendado por" como "LP Nome da atendente".
+    // humana da Central. O nome real fica no histórico da última alteração;
+    // "Agendado por" permanece com o setor que criou o canal da LP.
     if (estaConfirmandoLandingPage && roleOf(req.session) !== "atendimento central") {
       return res.status(403).json({
         ok: false,
@@ -2812,9 +2843,13 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
       return res.status(400).json({ ok: false, message: "Não é permitido cadastrar cliente com nome TESTE." });
     }
 
-    const actorNome = clean(req.session.nome || "Usuário autenticado");
+    const actorNome = estaConfirmandoLandingPage
+      ? confirmadorCentralNome
+      : clean(req.session.nome || "Usuário autenticado");
     const actorEmail = clean(req.session.email);
-    const agendadoPorNome = estaConfirmandoLandingPage ? confirmadorCentralNome : actorNome;
+    const agendadoPorNome = registroLandingPage
+      ? "Setor de Relacionamento e Pós-Vendas"
+      : actorNome;
 
     // Reagendar para uma nova data sem informar presença/status/resultado junto
     // reabre o registro como pendente — evita ficar com "Não Compareceu" ou
@@ -2871,7 +2906,7 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
       const novo = coluna === "data_agendamento" ? (novaDataAgendamento || clean(b[chave])) : clean(b[chave]);
       return normalizarCampoReagendamento(novo) !== normalizarCampoReagendamento(current.rows[0][coluna]);
     });
-    const atualizarAgendadoPor = isReagendamento || alterouCampoLead;
+    const atualizarAgendadoPor = !registroLandingPage && (isReagendamento || alterouCampoLead);
     // O modal de edição reenvia status e presença mesmo quando o usuário só
     // mudou a data. Considere como alteração manual apenas valores realmente
     // diferentes dos atuais; caso contrário o reagendamento ficaria preso no

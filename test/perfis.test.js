@@ -928,7 +928,7 @@ test('Landing Page: somente Atendimento Central pode confirmar', async function(
       query: async function(sql, params) {
         if (sql.includes('UPDATE agendamentos SET')) {
           updateParams = params;
-          return { rows: [ag(P, { status: 'Confirmado', agendado_por_nome: 'Eduarda' })] };
+          return { rows: [ag(P, { status: 'Confirmado', agendado_por_nome: 'Setor de Relacionamento e Pós-Vendas' })] };
         }
         return { rows: [] };
       },
@@ -941,8 +941,28 @@ test('Landing Page: somente Atendimento Central pode confirmar', async function(
       body: JSON.stringify({ statusAgenda: 'Confirmado', confirmadoPorCentralNome: 'Eduarda' })
     });
     assert.equal(response.status, 200);
-    assert.equal(updateParams[18], 'Eduarda', 'deve gravar o nome preenchido, não o nome genérico do perfil');
+    assert.equal(updateParams[18], 'Setor de Relacionamento e Pós-Vendas', 'a autoria da LP deve permanecer com o setor criador');
+    assert.equal(updateParams[20], 'Eduarda', 'o nome de quem confirmou deve ficar registrado como última alteração');
+    assert.equal(updateParams[31], false, 'confirmar uma LP não pode transferir a autoria do agendamento');
   } finally { restoreQuery(); pool.connect = originalConnect; }
+});
+
+test('Landing Page: atualização de OS preserva permanentemente a autoria do Setor de Relacionamento e Pós-Vendas', async function() {
+  const landing = ag(P, {
+    origem: 'Landing Page', origem_sync: 'landing_page', responsavel: 'Landing Page',
+    access_tags: 'origem:site', agendado_por_nome: 'Setor de Relacionamento e Pós-Vendas'
+  });
+  const r1 = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [landing] } });
+  const r2 = withConnectCaptura(ag(P, { numero_os: 'OS-LP-1' }));
+  try {
+    const response = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('gerente de loja', P)),
+      body: JSON.stringify({ numeroOS: 'OS-LP-1' })
+    });
+    assert.equal(response.status, 200);
+    assert.equal(r2.params.params[IDX_AGENDADO_POR_NOME], 'Setor de Relacionamento e Pós-Vendas');
+    assert.equal(r2.params.params[IDX_ATUALIZA_AGENDADO_POR], false);
+  } finally { r1(); r2.restore(); }
 });
 
 test('consultor Pitangueiras: PATCH em agendamento da Gonzaga — 403 cross-store', async function() {

@@ -1305,9 +1305,7 @@ function mapAgendamentoDb(r) {
         normalizeKey(r.proprietario_nome || '') === 'landing page' ||
         normalizeKey(r.access_tags || '').indexOf('origem:site') > -1;
       if (origemLanding) {
-        return conta && normalizeKey(conta) !== 'landing page'
-          ? 'LP ' + conta
-          : 'LP';
+        return 'Setor de Relacionamento e Pós-Vendas';
       }
       if (real && normalizeKey(real) !== normalizeKey(conta)) {
         return conta ? real + ' (' + conta + ')' : real;
