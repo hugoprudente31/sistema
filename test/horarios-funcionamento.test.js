@@ -55,9 +55,9 @@ test("resolverJornadaLoja usa a configuração do banco quando existe", async ()
   assert.equal(jornada.horaFim, "19:00");
 });
 
-test("gerarSlotsJornada gera slots de 15 em 15 min e pula o intervalo", () => {
-  const slots = gerarSlotsJornada({ aberto: true, horaInicio: "10:00", horaFim: "10:45", intervaloInicio: "10:15", intervaloFim: "10:30" });
-  assert.deepEqual(slots, ["10:00", "10:30", "10:45"]);
+test("gerarSlotsJornada gera slots de 20 em 20 min e pula o intervalo", () => {
+  const slots = gerarSlotsJornada({ aberto: true, horaInicio: "10:00", horaFim: "11:00", intervaloInicio: "10:20", intervaloFim: "10:40" });
+  assert.deepEqual(slots, ["10:00", "10:40", "11:00"]);
 });
 
 test("gerarSlotsJornada devolve lista vazia quando a loja está fechada", () => {
