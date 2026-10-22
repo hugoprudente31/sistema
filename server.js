@@ -19,7 +19,7 @@ const { startFollowupCron } = require("./kommo/followups");
 const { startOperationalWhatsappCron } = require("./lib/operationalWhatsapp");
 const mailingboss = require("./mailingboss");
 const kommoClient = require("./kommo/client");
-const { jornadaPadrao, resolverJornadaLoja, estaOptometristaDisponivel, gerarSlotsJornada } = require("./lib/horarios");
+const { INTERVALO_ATENDIMENTO_MINUTOS, jornadaPadrao, resolverJornadaLoja, estaOptometristaDisponivel, gerarSlotsJornada } = require("./lib/horarios");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -715,14 +715,18 @@ function horarioValidoPorRegra(data, horario, loja = "") {
     return { ok: false, message: "Aos sábados, escolha entre 10:00 e 16:00." };
   }
 
+  if ((minutos - 600) % INTERVALO_ATENDIMENTO_MINUTOS !== 0) {
+    return { ok: false, message: "Escolha um horário da grade de atendimento, com intervalos de 20 minutos." };
+  }
+
   const lojaKey = clean(loja).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   const isGonzagaSantos = lojaKey.includes("gonzaga") || lojaKey.includes("santos");
 
-  if (!isGonzagaSantos && (hr === "13:00" || hr === "13:15" || hr === "13:30" || hr === "13:45")) {
+  if (!isGonzagaSantos && hr >= "13:00" && hr < "14:00") {
     return { ok: false, message: "Horário de almoço não disponível. Escolha um horário fora do intervalo 13:00–14:00." };
   }
 
-  if (isGonzagaSantos && !jornadaEspecialGonzaga && dia >= 1 && dia <= 5 && ["14:00", "14:15", "14:30", "14:45"].includes(hr)) {
+  if (isGonzagaSantos && !jornadaEspecialGonzaga && dia >= 1 && dia <= 5 && hr >= "14:00" && hr < "15:00") {
     return { ok: false, message: "Horário de almoço não disponível em Gonzaga. Escolha um horário fora do intervalo 14:00–15:00." };
   }
 
@@ -749,15 +753,15 @@ function gerarHorariosBase(data, loja = "") {
   const fim = dia === 6 ? 16 * 60 : (jornadaEspecialGonzaga ? 19 * 60 : 18 * 60);
   const horarios = [];
 
-  for (let m = inicio; m <= fim; m += 15) {
+  for (let m = inicio; m <= fim; m += INTERVALO_ATENDIMENTO_MINUTOS) {
     const hh = String(Math.floor(m / 60)).padStart(2, "0");
     const mm = String(m % 60).padStart(2, "0");
     const h = `${hh}:${mm}`;
-    // Bloqueia almoço 13:00–13:45 (1 hora, 4 slots de 15 min) para todas as lojas exceto Gonzaga
+    // Bloqueia a hora de almoço para todas as lojas exceto Gonzaga.
     const lojaKey = clean(loja).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
     const isGonzagaSantos = lojaKey.includes("gonzaga") || lojaKey.includes("santos");
-    const almocoPadrao = ["13:00", "13:15", "13:30", "13:45"].includes(h);
-    const almocoGonzaga = !jornadaEspecialGonzaga && dia >= 1 && dia <= 5 && ["14:00", "14:15", "14:30", "14:45"].includes(h);
+    const almocoPadrao = h >= "13:00" && h < "14:00";
+    const almocoGonzaga = !jornadaEspecialGonzaga && dia >= 1 && dia <= 5 && h >= "14:00" && h < "15:00";
     if ((!isGonzagaSantos && !almocoPadrao) || (isGonzagaSantos && !almocoGonzaga)) horarios.push(h);
   }
 
@@ -2102,11 +2106,11 @@ app.get("/api/public/horarios-disponiveis", validarLandingApiKey, async (req, re
       }
       horariosBase = gerarSlotsJornada(jornadaConfig);
     } else {
-      // Unidade Santos/Gonzaga tem almoço 14:00-14:45 em dias úteis (seg-sex) — 4 slots de 15 min
+      // Unidade Santos/Gonzaga tem almoço 14:00-15:00 em dias úteis (seg-sex).
       const lojaKey = loja.toLowerCase().replace(/[^a-z]/g, "");
       const isGonzagaSantos = lojaKey.includes("gonzaga") || lojaKey.includes("santos");
       if (isGonzagaSantos && !isGonzagaSemAlmocoEm29Jul2026(loja, data) && diaRef >= 1 && diaRef <= 5) {
-        horariosBase = horariosBase.filter(h => h !== "14:00" && h !== "14:15" && h !== "14:30" && h !== "14:45");
+        horariosBase = horariosBase.filter(h => h < "14:00" || h >= "15:00");
       }
     }
     if (bloqueioAgenda?.hora_inicio && bloqueioAgenda?.hora_fim) {
@@ -2221,11 +2225,9 @@ app.post("/api/public/agendamentos", validarLandingApiKey, async (req, res) => {
         return res.status(400).json({ ok: false, message: "Loja fechada nesta data (horário configurado)." });
       }
       if (/^\d{2}:\d{2}$/.test(horario)) {
-        const dentroJornada = horario >= jornadaConfigPost.horaInicio && horario <= jornadaConfigPost.horaFim;
-        const noIntervalo = !!(jornadaConfigPost.intervaloInicio && jornadaConfigPost.intervaloFim &&
-          horario >= jornadaConfigPost.intervaloInicio && horario < jornadaConfigPost.intervaloFim);
-        if (!dentroJornada || noIntervalo) {
-          return res.status(400).json({ ok: false, message: "Horário fora do funcionamento configurado para esta loja." });
+        const horariosDaGrade = gerarSlotsJornada(jornadaConfigPost);
+        if (!horariosDaGrade.includes(horario)) {
+          return res.status(400).json({ ok: false, message: "Horário fora da grade configurada de 20 minutos para esta loja." });
         }
       }
     } else {
@@ -2244,8 +2246,8 @@ app.post("/api/public/agendamentos", validarLandingApiKey, async (req, res) => {
     }
 
     if (!usaJornadaConfig) {
-      // Unidade Santos/Gonzaga: almoço 14:00-14:45 em dias úteis (4 slots de 15 min)
-      if (horario === "14:00" || horario === "14:15" || horario === "14:30" || horario === "14:45") {
+      // Unidade Santos/Gonzaga: almoço 14:00-15:00 em dias úteis.
+      if (horario >= "14:00" && horario < "15:00") {
         const lojaKeyPost = loja.toLowerCase().replace(/[^a-z]/g, "");
         if (lojaKeyPost.includes("gonzaga") || lojaKeyPost.includes("santos")) {
           const diaPost = new Date(dataAgendamento + "T12:00:00").getDay();
@@ -2453,6 +2455,21 @@ app.post("/api/agendamentos", async (req, res) => {
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
+      const horarioNovo = clean(b.horario || "");
+      if (dataAgendamento && horarioNovo && dataAgendamento >= hojeBrasil()) {
+        const diaSemana = new Date(dataAgendamento + "T12:00:00").getDay();
+        const jornada = await resolverJornadaLoja(client, b.loja || "", diaSemana);
+        const horariosDaGrade = jornada.origem === "config"
+          ? gerarSlotsJornada(jornada)
+          : gerarHorariosBase(dataAgendamento, b.loja || "");
+        if (!horariosDaGrade.includes(horarioNovo)) {
+          await client.query("ROLLBACK");
+          return res.status(400).json({
+            ok: false,
+            message: "Escolha um horário da grade de atendimento, com intervalos de 20 minutos."
+          });
+        }
+      }
       const bloqueioHorario = await buscarBloqueioDisponibilidade(
         client,
         b.loja || "",
@@ -2961,6 +2978,23 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
       const alteraHorarioAgenda = ["loja", "data_agendamento", "dataAgendamento", "horario"]
         .some((key) => Object.prototype.hasOwnProperty.call(b, key));
       if (alteraHorarioAgenda) {
+        const lojaFinal = b.loja || current.rows[0].loja || "";
+        const dataFinal = novaDataAgendamento || dataAgendamentoAtual || "";
+        const horarioFinal = clean(b.horario || current.rows[0].horario || "");
+        if (dataFinal && horarioFinal && dataFinal >= hojeBrasil()) {
+          const diaSemana = new Date(dataFinal + "T12:00:00").getDay();
+          const jornada = await resolverJornadaLoja(client, lojaFinal, diaSemana);
+          const horariosDaGrade = jornada.origem === "config"
+            ? gerarSlotsJornada(jornada)
+            : gerarHorariosBase(dataFinal, lojaFinal);
+          if (!horariosDaGrade.includes(horarioFinal)) {
+            await client.query("ROLLBACK");
+            return res.status(400).json({
+              ok: false,
+              message: "Escolha um horário da grade de atendimento, com intervalos de 20 minutos."
+            });
+          }
+        }
         const bloqueioHorario = await buscarBloqueioDisponibilidade(
           client,
           b.loja || current.rows[0].loja || "",

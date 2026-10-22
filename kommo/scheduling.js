@@ -4,7 +4,7 @@
 const crypto = require("crypto");
 const { pool } = require("../lib/db");
 const mailingboss = require("../mailingboss");
-const { resolverJornadaLoja, estaOptometristaDisponivel, gerarSlotsJornada } = require("../lib/horarios");
+const { INTERVALO_ATENDIMENTO_MINUTOS, resolverJornadaLoja, estaOptometristaDisponivel, gerarSlotsJornada } = require("../lib/horarios");
 
 // ── Horário do optometrista (menu "Informações" do bot) ───────────
 // O bot conhece a loja só pelo prefixo interno (gon/ens/pit/tgt); o nome
@@ -197,11 +197,11 @@ const PUBLIC_BLOCKING_STATUSES = [
 // Gerado dinamicamente — não hardcodar aqui para manter alinhamento com gerarHorariosBase
 const TODOS_HORARIOS = (function() {
   const slots = [];
-  for (let m = 10 * 60; m <= 18 * 60; m += 15) {
+  for (let m = 10 * 60; m <= 18 * 60; m += INTERVALO_ATENDIMENTO_MINUTOS) {
     const hh = String(Math.floor(m / 60)).padStart(2, "0");
     const mm = String(m % 60).padStart(2, "0");
     const h = `${hh}:${mm}`;
-    if (h !== "13:00" && h !== "13:15" && h !== "13:30" && h !== "13:45") slots.push(h);
+    if (h < "13:00" || h >= "14:00") slots.push(h);
   }
   return slots;
 })();
@@ -489,7 +489,7 @@ function cacheSet(key, data) {
 
 function generateSlots(startHour, endHour) {
   const slots = [];
-  for (let m = startHour * 60; m <= endHour * 60; m += 15) {
+  for (let m = startHour * 60; m <= endHour * 60; m += INTERVALO_ATENDIMENTO_MINUTOS) {
     const hh = String(Math.floor(m / 60)).padStart(2, "0");
     const mm = String(m % 60).padStart(2, "0");
     slots.push(`${hh}:${mm}`);
@@ -508,11 +508,11 @@ function getHorariosLoja(loja, data) {
   let slots = generateSlots(10, day === 6 ? 16 : 18);
   const lojaKey = stripAccents(loja).replace(/[^a-z]/g, "");
   const isGonzagaSantos = lojaKey.includes("gonzaga") || lojaKey.includes("santos");
-  // Gonzaga: almoço 14:00–14:45 em dias úteis. Demais lojas: 13:00–13:45.
+  // Gonzaga: almoço 14:00–15:00 em dias úteis. Demais lojas: 13:00–14:00.
   if (isGonzagaSantos && day >= 1 && day <= 5) {
-    slots = slots.filter((h) => h !== "14:00" && h !== "14:15" && h !== "14:30" && h !== "14:45");
+    slots = slots.filter((h) => h < "14:00" || h >= "15:00");
   } else if (!isGonzagaSantos) {
-    slots = slots.filter((h) => h !== "13:00" && h !== "13:15" && h !== "13:30" && h !== "13:45");
+    slots = slots.filter((h) => h < "13:00" || h >= "14:00");
   }
 
   return slots;

@@ -114,6 +114,7 @@ test("Kommo e landing usam os mesmos horários de atendimento", () => {
   const gonzaga = scheduling.getHorariosLoja("óticas TGT - Gonzaga", weekday);
   const enseada = scheduling.getHorariosLoja("óticas TGT Enseada", weekday);
   assert.equal(gonzaga[0], "10:00");
+  assert.equal(gonzaga[1], "10:20");
   assert.equal(gonzaga.includes("09:30"), false);
   assert.equal(gonzaga.includes("13:00"), true);
   assert.equal(gonzaga.includes("14:00"), false);

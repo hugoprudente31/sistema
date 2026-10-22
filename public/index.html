@@ -487,7 +487,7 @@
       <div class="row"><div><label>Origem *</label><select id="origem"></select></div><div><label>Nome completo *</label><input id="nomeCompleto" type="text" placeholder="Nome do cliente"></div></div>
       <div class="row"><div><label>WhatsApp *</label><input id="whatsApp" type="text" placeholder="13999999999"></div><div><label>Email *</label><input id="emailCliente" type="email" placeholder="cliente@email.com"></div></div>
       <div class="row"><div><label>Loja *</label><select id="loja" onchange="carregarOptometristas()"></select></div><div><label>Optometrista *</label><select id="optometrista"></select></div></div>
-      <div class="row"><div><label>Data do agendamento *</label><input id="dataAgendamento" type="date"></div><div><label>Horário *</label><input id="horario" type="time"></div></div>
+      <div class="row"><div><label>Data do agendamento *</label><input id="dataAgendamento" type="date"></div><div><label>Horário *</label><input id="horario" type="time" step="1200"></div></div>
       <div class="row"><div><label>Status *</label><select id="statusAgenda"><option value="">Selecione</option><option>Agendado</option><option>Confirmado</option></select></div><div><label>Tag de acesso</label><select id="accessTag"></select><div class="legend-mini" style="margin-top:6px;">Tags padronizadas de origem, perfil, prioridade, fluxo, comercial, loja e operação.</div></div></div>
       <div class="row"><div><label>Consultor / Vendedor <span style="color:#e24b4a">*</span></label><input id="consultorVendedor" type="text" list="listaVendedoresConsultores" placeholder="Digite ou selecione seu nome completo"><datalist id="listaVendedoresConsultores"></datalist><div class="legend-mini">Ao selecionar um nome existente, o sistema reutiliza o mesmo ID. Nomes novos são cadastrados automaticamente.</div></div><div><label>Observação *</label><textarea id="observacao" placeholder="Informações importantes"></textarea></div></div>
       <div class="row"><div><button onclick="salvarAgendamento()">Salvar agendamento</button></div><div><button class="secondary" onclick="limparFormulario()">Limpar</button></div></div>
@@ -624,7 +624,7 @@
           <div class="row"><div><label>Origem</label><input id="editOrigem" type="text"></div><div><label>Nome completo</label><input id="editNomeCompleto" type="text"></div></div>
           <div class="row"><div><label>WhatsApp</label><input id="editWhatsApp" type="text"></div><div><label>Email</label><input id="editEmail" type="email"></div></div>
           <div class="row"><div><label>Loja</label><select id="editLoja"></select></div><div><label>Optometrista</label><input id="editOptometrista" type="text"></div></div>
-          <div class="row"><div><label>Data do Agendamento</label><input id="editDataAgendamento" type="date"></div><div><label>Horário</label><input id="editHorario" type="time"></div></div>
+          <div class="row"><div><label>Data do Agendamento</label><input id="editDataAgendamento" type="date"></div><div><label>Horário</label><input id="editHorario" type="time" step="1200"></div></div>
           <div class="row"><div><label>Status do Agendamento</label><select id="editStatusAgenda"><option>Agendado</option><option>Reagendado</option><option>Confirmado</option><option>Compareceu</option><option>Não Compareceu</option><option>OS em Andamento</option><option>Concluído</option><option>Cancelado</option></select></div><div><label>Presença</label><select id="editCompareceu"><option value="Pendente">Pendente</option><option value="Sim">Sim — compareceu</option><option value="Não">Não — não compareceu</option></select></div></div>
           <div class="row"><div><label>Status da OS</label><select id="editStatusOS"><option value=""></option><option>Aberta</option><option>Em produção</option><option>Recebida</option><option>Pronta</option><option>Entregue</option><option>Concluído</option><option>Cancelada</option><option>Cancelado</option><option>Reembolso</option></select></div><div></div></div>
           <div class="row"><div><label>Número da OS</label><input id="editNumeroOS" type="text"></div><div><label>Data de Abertura da OS</label><input id="editDataAberturaOS" type="date"></div></div>
@@ -2470,6 +2470,7 @@ function validarHorarioVisual() {
   if (day === 0) return 'Domingo não está disponível para agendamento.';
   if (day >= 1 && day <= 5 && (minutes < 600 || minutes > 1080)) return 'De segunda a sexta, escolha um horário entre 10:00 e 18:00.';
   if (day === 6 && (minutes < 600 || minutes > 960)) return 'Aos sábados, escolha um horário entre 10:00 e 16:00.';
+  if ((minutes - 600) % 20 !== 0) return 'Escolha um horário da grade de atendimento, com intervalos de 20 minutos.';
   return null;
 }
 
