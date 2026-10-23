@@ -912,12 +912,14 @@ test('Landing Page: somente Atendimento Central pode confirmar', async function(
 
   const restoreSemNome = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [landing] } });
   try {
+    const tokenSemNome = signSession({ id: 'central-sem-nome', email: 'central-sem-nome@example.com', perfil: 'atendimento central', loja: '' });
     const response = await fetch(baseUrl + '/api/agendamentos/100', {
-      method: 'PATCH', headers: H(tok('atendimento central')),
+      method: 'PATCH', headers: H(tokenSemNome),
       body: JSON.stringify({ statusAgenda: 'Confirmado' })
     });
-    assert.equal(response.status, 400);
-    assert.match((await response.json()).message, /nome real/);
+    const body = await response.json();
+    assert.equal(response.status, 400, JSON.stringify(body));
+    assert.match(body.message, /nome real/);
   } finally { restoreSemNome(); }
 
   const restoreQuery = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [landing] } });
@@ -928,7 +930,7 @@ test('Landing Page: somente Atendimento Central pode confirmar', async function(
       query: async function(sql, params) {
         if (sql.includes('UPDATE agendamentos SET')) {
           updateParams = params;
-          return { rows: [ag(P, { status: 'Confirmado', agendado_por_nome: 'Setor de Relacionamento e Pós-Vendas' })] };
+          return { rows: [ag(P, { status: 'Confirmado', agendado_por_nome: 'Relacionamento Pós Vendas' })] };
         }
         return { rows: [] };
       },
@@ -941,16 +943,16 @@ test('Landing Page: somente Atendimento Central pode confirmar', async function(
       body: JSON.stringify({ statusAgenda: 'Confirmado', confirmadoPorCentralNome: 'Eduarda' })
     });
     assert.equal(response.status, 200);
-    assert.equal(updateParams[18], 'Setor de Relacionamento e Pós-Vendas', 'a autoria da LP deve permanecer com o setor criador');
+    assert.equal(updateParams[18], 'Relacionamento Pós Vendas', 'a autoria da LP deve permanecer com o setor criador');
     assert.equal(updateParams[20], 'Eduarda', 'o nome de quem confirmou deve ficar registrado como última alteração');
     assert.equal(updateParams[31], false, 'confirmar uma LP não pode transferir a autoria do agendamento');
   } finally { restoreQuery(); pool.connect = originalConnect; }
 });
 
-test('Landing Page: atualização de OS preserva permanentemente a autoria do Setor de Relacionamento e Pós-Vendas', async function() {
+test('Landing Page: atualização de OS preserva permanentemente a autoria de Relacionamento Pós Vendas', async function() {
   const landing = ag(P, {
     origem: 'Landing Page', origem_sync: 'landing_page', responsavel: 'Landing Page',
-    access_tags: 'origem:site', agendado_por_nome: 'Setor de Relacionamento e Pós-Vendas'
+    access_tags: 'origem:site', agendado_por_nome: 'Relacionamento Pós Vendas'
   });
   const r1 = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [landing] } });
   const r2 = withConnectCaptura(ag(P, { numero_os: 'OS-LP-1' }));
@@ -960,7 +962,7 @@ test('Landing Page: atualização de OS preserva permanentemente a autoria do Se
       body: JSON.stringify({ numeroOS: 'OS-LP-1' })
     });
     assert.equal(response.status, 200);
-    assert.equal(r2.params.params[IDX_AGENDADO_POR_NOME], 'Setor de Relacionamento e Pós-Vendas');
+    assert.equal(r2.params.params[IDX_AGENDADO_POR_NOME], 'Relacionamento Pós Vendas');
     assert.equal(r2.params.params[IDX_ATUALIZA_AGENDADO_POR], false);
   } finally { r1(); r2.restore(); }
 });
