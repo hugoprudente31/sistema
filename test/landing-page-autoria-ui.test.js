@@ -7,8 +7,8 @@ const path = require('node:path');
 
 const painel = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
 
-test('coluna Agendado por identifica toda Landing Page como Relacionamento Pós Vendas', function() {
-  assert.match(painel, /if \(origemLanding\) \{\s*return 'Relacionamento Pós Vendas';/);
+test('coluna Agendado por identifica toda Landing Page como Setor de Relacionamento Pós Vendas', function() {
+  assert.match(painel, /if \(origemLanding\) \{\s*return 'Setor de Relacionamento Pós Vendas';/);
   assert.doesNotMatch(painel, /\? 'LP ' \+ conta/);
 });
 

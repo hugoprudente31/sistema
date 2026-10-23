@@ -4,7 +4,16 @@
 const crypto = require("crypto");
 const { pool } = require("../lib/db");
 const mailingboss = require("../mailingboss");
-const { INTERVALO_ATENDIMENTO_MINUTOS, resolverJornadaLoja, estaOptometristaDisponivel, gerarSlotsJornada } = require("../lib/horarios");
+const {
+  INTERVALO_ATENDIMENTO_MINUTOS,
+  STATUS_AGENDA_PENDENTES,
+  STATUS_QUE_OCUPAM_HORARIO,
+  sqlHorarioConflita,
+  horaFimSabado,
+  resolverJornadaLoja,
+  estaOptometristaDisponivel,
+  gerarSlotsJornada
+} = require("../lib/horarios");
 
 // ── Horário do optometrista (menu "Informações" do bot) ───────────
 // O bot conhece a loja só pelo prefixo interno (gon/ens/pit/tgt); o nome
@@ -187,12 +196,7 @@ async function listarBloqueios() {
   return rows;
 }
 
-const PUBLIC_BLOCKING_STATUSES = [
-  "Agendado",
-  "Confirmado",
-  "Compareceu",
-  "OS em Andamento",
-];
+const PUBLIC_BLOCKING_STATUSES = STATUS_QUE_OCUPAM_HORARIO;
 
 // Gerado dinamicamente — não hardcodar aqui para manter alinhamento com gerarHorariosBase
 const TODOS_HORARIOS = (function() {
@@ -325,7 +329,7 @@ async function reagendarAgendamentoPorLead({ leadId, data, horario }) {
        ORDER BY data_agendamento DESC, horario DESC, id DESC
        LIMIT 1
        FOR UPDATE`,
-      [String(leadId), ["Agendado", "Confirmado"]]
+      [String(leadId), STATUS_AGENDA_PENDENTES]
     );
 
     if (!current.rows.length) {
@@ -421,7 +425,7 @@ async function cancelarAgendamentoPorLead({ leadId, motivo = "Cancelado pelo cli
         ORDER BY data_agendamento DESC, horario DESC, id DESC
         LIMIT 1
         FOR UPDATE`,
-      [String(leadId), ["Agendado", "Confirmado"]]
+      [String(leadId), STATUS_AGENDA_PENDENTES]
     );
     if (!current.rows.length) {
       await client.query("ROLLBACK");
@@ -505,7 +509,7 @@ function getHorariosLoja(loja, data) {
   const day = date.getDay();
   if (day === 0) return [];
 
-  let slots = generateSlots(10, day === 6 ? 16 : 18);
+  let slots = generateSlots(10, day === 6 ? Number(horaFimSabado(loja).slice(0, 2)) : 18);
   const lojaKey = stripAccents(loja).replace(/[^a-z]/g, "");
   const isGonzagaSantos = lojaKey.includes("gonzaga") || lojaKey.includes("santos");
   // Gonzaga: almoço 14:00–15:00 em dias úteis. Demais lojas: 13:00–14:00.
@@ -584,7 +588,7 @@ async function buscarPrimeiroOptometristaLivre(client, loja, data, horario, opto
        WHERE ${lojaComparableSql("loja")} = ${lojaComparableSql("$1")}
          AND LOWER(COALESCE(optometrista, '')) = LOWER($2)
          AND data_agendamento = $3
-         AND horario = $4
+         AND ${sqlHorarioConflita("horario", "$4")}
          AND status = ANY($5::text[])
          AND excluido_em IS NULL
          AND ($6::text IS NULL OR gas_id IS DISTINCT FROM $6)

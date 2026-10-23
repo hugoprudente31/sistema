@@ -66,7 +66,7 @@ test("recuperação consulta agendamento ativo com status e exclusão seguros", 
   const appointment = await recovery.getActiveAppointment("789", db);
   assert.equal(appointment.id, 99);
   assert.deepEqual(query.params, ["789"]);
-  assert.match(query.sql, /status IN \('Agendado', 'Confirmado'\)/);
+  assert.match(query.sql, /status IN \('Agendado', 'Reagendado', 'Confirmado'\)/);
   assert.match(query.sql, /excluido_em IS NULL/);
 });
 

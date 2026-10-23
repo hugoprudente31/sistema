@@ -335,7 +335,7 @@ router.post("/api/admin/bloqueios", requireWebhookSecret, async (req, res) => {
         WHERE LOWER(REGEXP_REPLACE(COALESCE(loja,''), '\\s*-\\s*', ' ', 'g')) = LOWER(REGEXP_REPLACE($1, '\\s*-\\s*', ' ', 'g'))
           AND data_agendamento = $2
           AND excluido_em IS NULL
-          AND status IN ('Agendado','Confirmado')
+          AND status IN ('Agendado','Reagendado','Confirmado')
           AND ($3::text = '' OR (horario >= $3 AND horario < $4))
         ORDER BY horario, id`,
       [bloqueio.loja, bloqueio.data, bloqueio.horaInicio, bloqueio.horaFim]
@@ -366,7 +366,7 @@ router.post("/api/admin/test-reminder", requireWebhookSecret, async (req, res) =
               TO_CHAR(data_agendamento, 'DD/MM/YYYY') AS data_agendamento
          FROM agendamentos
         WHERE kommo_lead_id = $1
-          AND status IN ('Agendado', 'Confirmado')
+          AND status IN ('Agendado', 'Reagendado', 'Confirmado')
           AND excluido_em IS NULL
         ORDER BY data_agendamento DESC, horario DESC, id DESC
         LIMIT 1`,
@@ -474,7 +474,7 @@ router.post("/api/admin/migrate-tv-leads", requireWebhookSecret, async (req, res
       `SELECT DISTINCT kommo_lead_id AS lead_id
        FROM agendamentos
        WHERE kommo_lead_id IS NOT NULL
-         AND status IN ('Agendado','Confirmado')
+         AND status IN ('Agendado','Reagendado','Confirmado')
          AND excluido_em IS NULL`
     );
     const existing = new Set(dbLeads.map(r => String(r.lead_id)));
