@@ -33,8 +33,10 @@ test('somente a identidade oficial recebe Super Admin', () => {
   assert.equal(hugo.permissions.canManageSystem, true);
   assert.equal(hugo.permissions.canManageKommo, true);
   assert.equal(hugo.permissions.canManageLandingPages, true);
+  assert.equal(hugo.permissions.canViewLeadOrigin, true);
   assert.equal(outro.perfil, 'admin');
   assert.equal(outro.permissions.isSuperAdmin, false);
+  assert.equal(outro.permissions.canViewLeadOrigin, false);
   assert.equal(buildPermissions({ email: 'fake@example.com', cargo: 'super_admin' }).isSuperAdmin, false);
   assert.equal(isSuperAdmin({ email: HUGO_EMAIL, perfil: 'super_admin' }), true);
 });

@@ -402,6 +402,36 @@ function isSuperAdmin(session) {
   return isHugoAccount(session) && roleOf(session) === "super_admin";
 }
 
+function canViewLeadOrigin(session) {
+  return isSuperAdmin(session);
+}
+
+function ocultarOrigemLead(record, session) {
+  if (!record || canViewLeadOrigin(session)) return record;
+  const sanitized = { ...record };
+  delete sanitized.origem;
+  delete sanitized.origem_sync;
+  if (Object.prototype.hasOwnProperty.call(sanitized, "access_tags")) {
+    sanitized.access_tags = clean(sanitized.access_tags)
+      .split(/[;,|]/)
+      .map((tag) => tag.trim())
+      .filter((tag) => tag && !tag.toLowerCase().startsWith("origem:"))
+      .join(";");
+  }
+  return sanitized;
+}
+
+function ocultarOrigemHistorico(record, session) {
+  if (!record || canViewLeadOrigin(session)) return record;
+  const sanitized = { ...record };
+  ["registro_anterior", "registro_novo"].forEach((field) => {
+    if (sanitized[field] && typeof sanitized[field] === "object") {
+      sanitized[field] = ocultarOrigemLead(sanitized[field], session);
+    }
+  });
+  return sanitized;
+}
+
 function hasRole(session, roles) {
   const role = roleOf(session);
   return roles.includes(role) || (isSuperAdmin(session) && roles.includes("admin"));
@@ -499,6 +529,7 @@ function buildPermissions(user) {
     canManageSystem: superAdmin,
     canManageKommo: superAdmin,
     canManageLandingPages: superAdmin,
+    canViewLeadOrigin: superAdmin,
     canViewAll: admin || Boolean(configured.canViewAll),
     canCreateAgendamento: admin || Boolean(configured.canCreateAgendamento),
     canManageOS: admin || Boolean(configured.canManageOS) || sellerGonzaga,
@@ -1582,7 +1613,7 @@ async function initDatabase() {
         -- A autoria de um lead criado pela LP pertence permanentemente ao
         -- setor que criou o canal. Nenhuma edicao posterior, inclusive OS,
         -- atendimento ou reagendamento, pode transferir essa autoria.
-        NEW.agendado_por_nome := 'Setor de Relacionamento e Pós-Vendas';
+        NEW.agendado_por_nome := 'Relacionamento Pós Vendas';
         NEW.agendado_por_email := 'relacionamento.posvendas@sistema.local';
       ELSE
         NEW.agendado_por_nome := COALESCE(NULLIF(NEW.agendado_por_nome, ''), responsavel_registro);
@@ -1617,7 +1648,7 @@ async function initDatabase() {
   // "Agendado por" siga a mesma autoria institucional aplicada aos novos leads.
   await pool.query(`
     UPDATE agendamentos
-       SET agendado_por_nome = 'Setor de Relacionamento e Pós-Vendas',
+       SET agendado_por_nome = 'Relacionamento Pós Vendas',
            agendado_por_email = 'relacionamento.posvendas@sistema.local'
      WHERE (
           LOWER(COALESCE(origem_sync, '')) = 'landing_page'
@@ -1627,7 +1658,7 @@ async function initDatabase() {
        OR LOWER(COALESCE(access_tags, '')) LIKE '%origem:site%'
      )
        AND (
-         agendado_por_nome IS DISTINCT FROM 'Setor de Relacionamento e Pós-Vendas'
+         agendado_por_nome IS DISTINCT FROM 'Relacionamento Pós Vendas'
          OR agendado_por_email IS DISTINCT FROM 'relacionamento.posvendas@sistema.local'
        )
   `);
@@ -2530,7 +2561,7 @@ app.post("/api/agendamentos", async (req, res) => {
       // Sync não-bloqueante para o Kommo e Mailingboss
       setImmediate(() => sincronizarAgendamentoKommo(result.rows[0]));
       setImmediate(() => mailingboss.sincronizarLead(result.rows[0], "painel"));
-      res.json({ ok: true, message: "Agendamento salvo no PostgreSQL.", agendamento: result.rows[0] });
+      res.json({ ok: true, message: "Agendamento salvo no PostgreSQL.", agendamento: ocultarOrigemLead(result.rows[0], req.session) });
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
       throw error;
@@ -2620,11 +2651,11 @@ app.get("/api/agendamentos", async (req, res) => {
       params.push(`%${clean(q.proprietario)}%`);
       conditions.push(`CONCAT_WS(' ', a.proprietario_nome, a.agendado_por_nome, a.responsavel) ILIKE $${params.length}`);
     }
-    if (q.origem) {
+    if (q.origem && canViewLeadOrigin(req.session)) {
       params.push(`%${clean(q.origem)}%`);
       conditions.push(`COALESCE(a.origem,'') ILIKE $${params.length}`);
     }
-    if (q.accessTag) {
+    if (q.accessTag && (canViewLeadOrigin(req.session) || !clean(q.accessTag).toLowerCase().startsWith("origem:"))) {
       params.push(`%${clean(q.accessTag)}%`);
       conditions.push(`COALESCE(a.access_tags,'') ILIKE $${params.length}`);
     }
@@ -2680,7 +2711,8 @@ app.get("/api/agendamentos", async (req, res) => {
     );
     // `capped` continua avisando quando até o resultado já filtrado excede o
     // limite máximo de segurança da resposta.
-    res.json({ ok: true, total: result.rows.length, agendamentos: result.rows, capped: result.rows.length >= limite });
+    const agendamentos = result.rows.map((row) => ocultarOrigemLead(row, req.session));
+    res.json({ ok: true, total: agendamentos.length, agendamentos, capped: agendamentos.length >= limite });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });
   }
@@ -2724,7 +2756,7 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
       });
     }
     const confirmadorCentralNome = clean(
-      b.confirmado_por_central_nome || b.confirmadoPorCentralNome
+      b.confirmado_por_central_nome || b.confirmadoPorCentralNome || req.session.nome
     );
     if (estaConfirmandoLandingPage) {
       const nomeGenerico = ["atendimento central", "central", "usuario autenticado"]
@@ -2865,7 +2897,7 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
       : clean(req.session.nome || "Usuário autenticado");
     const actorEmail = clean(req.session.email);
     const agendadoPorNome = registroLandingPage
-      ? "Setor de Relacionamento e Pós-Vendas"
+      ? "Relacionamento Pós Vendas"
       : actorNome;
 
     // Reagendar para uma nova data sem informar presença/status/resultado junto
@@ -3219,7 +3251,7 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
       } catch (_) {}
     });
 
-    res.json({ ok: true, agendamento: result.rows[0] });
+    res.json({ ok: true, agendamento: ocultarOrigemLead(result.rows[0], req.session) });
   } catch (error) {
     if (responderErroBanco(res, error)) return;
     res.status(500).json({ ok: false, error: error.message });
@@ -3457,7 +3489,7 @@ app.post("/api/clientes", async (req, res) => {
       ]
     );
 
-    res.json({ ok: true, message: "Cliente salvo no banco.", cliente: result.rows[0] });
+    res.json({ ok: true, message: "Cliente salvo no banco.", cliente: ocultarOrigemLead(result.rows[0], req.session) });
   } catch (error) {
     res.status(500).json({ ok: false, message: "Erro ao salvar cliente.", error: error.message });
   }
@@ -3470,7 +3502,8 @@ app.get("/api/clientes", async (req, res) => {
       : req.session.loja
         ? await pool.query(`SELECT * FROM clientes WHERE LOWER(COALESCE(loja_origem,'')) = LOWER($1) ORDER BY id DESC LIMIT 1000`, [req.session.loja])
         : { rows: [] };
-    res.json({ ok: true, total: result.rows.length, clientes: result.rows });
+    const clientes = result.rows.map((row) => ocultarOrigemLead(row, req.session));
+    res.json({ ok: true, total: clientes.length, clientes });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });
   }
@@ -3487,6 +3520,7 @@ app.get("/api/lojas", async (req, res) => {
 
 app.get("/api/origens", async (req, res) => {
   try {
+    if (!canViewLeadOrigin(req.session)) return res.json({ ok: true, origens: [] });
     const result = await pool.query(`SELECT * FROM origens WHERE ativo = true ORDER BY nome ASC`);
     res.json({ ok: true, origens: result.rows });
   } catch (error) {
@@ -3603,7 +3637,7 @@ app.get("/api/faturamentos", async (req, res) => {
       params.push(`%${req.query.proprietario}%`);
       conds.push(`COALESCE(NULLIF(proprietario_nome,''), NULLIF(agendado_por_nome,''), NULLIF(responsavel,''), '') ILIKE $${params.length}`);
     }
-    if (req.query.origem) {
+    if (req.query.origem && canViewLeadOrigin(req.session)) {
       params.push(`%${req.query.origem}%`);
       conds.push(`COALESCE(origem, '') ILIKE $${params.length}`);
     }
@@ -3632,7 +3666,10 @@ app.get("/api/faturamentos", async (req, res) => {
       params
     );
 
-    res.json({ ok: true, total: result.rows.length, faturamentos: result.rows });
+    const faturamentos = canViewLeadOrigin(req.session)
+      ? result.rows
+      : result.rows.map(({ origem: _origem, ...row }) => row);
+    res.json({ ok: true, total: faturamentos.length, faturamentos });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });
   }
@@ -4458,7 +4495,10 @@ app.get("/api/access-tags", async (req, res) => {
       String(r.access_tags || '').split(/[;,|]/).map((x) => x.trim().toLowerCase()).filter(Boolean).forEach((x) => set.add(x));
     });
 
-    const tags = Array.from(set).sort().map((t) => ({ id: t, nome: t }));
+    const tags = Array.from(set)
+      .filter((t) => canViewLeadOrigin(req.session) || !t.startsWith("origem:"))
+      .sort()
+      .map((t) => ({ id: t, nome: t }));
     res.json({ ok: true, accessTags: tags });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });
@@ -4503,7 +4543,7 @@ app.get("/api/historico-agendamentos", async (req, res) => {
       params.push(`%${req.query.cliente}%`);
       conds.push(`cliente_nome ILIKE $${params.length}`);
     }
-    if (req.query.origem) {
+    if (req.query.origem && canViewLeadOrigin(req.session)) {
       params.push(`%${req.query.origem}%`);
       conds.push(`(COALESCE(registro_novo->>'origem','') ILIKE $${params.length} OR COALESCE(registro_anterior->>'origem','') ILIKE $${params.length})`);
     }
@@ -4534,7 +4574,8 @@ app.get("/api/historico-agendamentos", async (req, res) => {
       params
     );
 
-    res.json({ ok: true, total: countRes.rows[0].total, pagina, limite, historicos: result.rows });
+    const historicos = result.rows.map((row) => ocultarOrigemHistorico(row, req.session));
+    res.json({ ok: true, total: countRes.rows[0].total, pagina, limite, historicos });
   } catch (error) {
     res.status(500).json({ ok: false, message: "Erro ao carregar histórico.", error: error.message });
   }
@@ -5385,7 +5426,7 @@ app.get("/api/admin/dashboard-executivo", requireAdmin, async (req, res) => {
       WHEN LOWER(COALESCE(a.origem_sync,'')) = 'landing_page'
         OR LOWER(COALESCE(a.origem,'')) LIKE '%landing%'
         OR LOWER(COALESCE(a.origem,'')) LIKE '%site%'
-        OR LOWER(COALESCE(a.access_tags,'')) LIKE '%origem:site%' THEN 'Landing Page (Teste de Visão)'
+        OR LOWER(COALESCE(a.access_tags,'')) LIKE '%origem:site%' THEN 'Relacionamento Pós Vendas'
       WHEN LOWER(COALESCE(a.origem,'')) LIKE '%whatsapp%'
         OR LOWER(COALESCE(a.access_tags,'')) LIKE '%origem:whatsapp%' THEN 'Atendimento Central'
       WHEN LOWER(COALESCE(a.origem_sync,'')) = 'kommo_bot'
@@ -5427,9 +5468,9 @@ app.get("/api/admin/dashboard-executivo", requireAdmin, async (req, res) => {
 
     const resumo = executiveMetricRow(resumoResult.rows[0]);
     const origensMedidas = origensResult.rows.map(executiveMetricRow);
-    const nomesCanaisSempreExibidos = ["Atendimento Central", "Landing Page (Teste de Visão)", "Loja"];
+    const nomesCanaisSempreExibidos = ["Atendimento Central", "Relacionamento Pós Vendas", "Loja"];
     const canaisSempreExibidos = new Set(nomesCanaisSempreExibidos);
-    const canaisMarketing = new Set(["Atendimento Central", "Landing Page (Teste de Visão)"]);
+    const canaisMarketing = new Set(["Atendimento Central", "Relacionamento Pós Vendas"]);
     const origens = nomesCanaisSempreExibidos.map((nome) => origensMedidas.find((row) => row.origem === nome)
       || executiveMetricRow({ origem: nome })).concat(origensMedidas.filter((row) => !canaisSempreExibidos.has(row.origem)));
     const marketing = origens.filter((row) => canaisMarketing.has(row.origem)).reduce((acc, row) => ({
@@ -5473,11 +5514,11 @@ app.get("/api/admin/dashboard-executivo", requireAdmin, async (req, res) => {
       resumo,
       lojas: lojasResult.rows.map(executiveMetricRow),
       consultores: consultoresResult.rows.map(executiveMetricRow),
-      origens,
+      origens: canViewLeadOrigin(req.session) ? origens : [],
       lojaPerfil: lojaPerfilResult.rows.map(executiveMetricRow),
-      marketing,
+      marketing: canViewLeadOrigin(req.session) ? marketing : null,
       tendencia: tendenciaResult.rows.map(executiveMetricRow),
-      setores,
+      setores: canViewLeadOrigin(req.session) ? setores : setores.filter((item) => item.setor !== "Marketing"),
       metas: metasResult.rows,
       alertas
     });

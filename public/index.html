@@ -1090,6 +1090,24 @@ function roleName() {
 }
 function canFinance() { return !!(state.user && state.user.permissions && state.user.permissions.canViewFinance); }
 function canManageOS() { return !!(state.user && state.user.permissions && state.user.permissions.canManageOS); }
+function canViewLeadOrigin() { return !!(state.user && state.user.permissions && state.user.permissions.canViewLeadOrigin); }
+
+function aplicarPrivacidadeOrigem() {
+  if (canViewLeadOrigin()) return;
+  ['origem', 'filtroOrigem', 'finOrigem', 'histFiltroOrigem', 'editOrigem'].forEach(function(id) {
+    var el = byId(id);
+    if (!el) return;
+    var container = el.closest('div');
+    if (container) container.classList.add('hidden');
+    else el.classList.add('hidden');
+  });
+  var origemKpi = byId('kOrigemTop');
+  if (origemKpi && origemKpi.closest('.kpi')) origemKpi.closest('.kpi').classList.add('hidden');
+  var execClientes = byId('execClientes');
+  if (execClientes) execClientes.classList.add('hidden');
+  var execClientesTab = document.querySelector('[data-exec-tab="clientes"]');
+  if (execClientesTab) execClientesTab.classList.add('hidden');
+}
 
 // usuarios.nome vem provisionado como "Nome Completo - Loja" (ver provision-profile-users.js);
 // aqui só nos interessa o nome, o " - Loja" é ruído para o campo Consultor/Vendedor da OS.
@@ -1305,7 +1323,7 @@ function mapAgendamentoDb(r) {
         normalizeKey(r.proprietario_nome || '') === 'landing page' ||
         normalizeKey(r.access_tags || '').indexOf('origem:site') > -1;
       if (origemLanding) {
-        return 'Setor de Relacionamento e Pós-Vendas';
+        return 'Relacionamento Pós Vendas';
       }
       if (real && normalizeKey(real) !== normalizeKey(conta)) {
         return conta ? real + ' (' + conta + ')' : real;
@@ -1661,6 +1679,7 @@ function fazerLogin() {
       byId('lojaUsuario').textContent = 'Loja: ' + ((res.user.loja && res.user.loja !== '') ? res.user.loja : 'Todas');
       byId('versaoServidor').textContent = 'Versão do servidor: ' + (res.serverVersion || '');
       aplicarPermissoesTela();
+      aplicarPrivacidadeOrigem();
       preencherConsultorSessao();
       byId('passwordLogin').value = '';
       return carregarInfoBase().then(function() {
@@ -3186,6 +3205,7 @@ function gerarRelatorioCSV() {
     'Responsavel','DataAgendamento','Horario','StatusAgenda','Compareceu','ResultadoOptometrista','NumeroOS','StatusOS',
     'DataAberturaOS','DataEntradaOS','DataFinalizacaoOS','DataEntregaOS','ValorVenda','Desconto',
     'VendedorNome','AccessTags','LeadTimeDias','AgendadoPorNome','UltimaAlteracaoPorNome','UltimaAlteracaoEm','Observacao'];
+  if (!canViewLeadOrigin()) cols = cols.filter(function(c) { return c !== 'Origem'; });
   function esc(v) { var s = String(v === null || v === undefined ? '' : v); return '"' + s.replace(/"/g, '""') + '"'; }
   var csv = cols.join(';') + '\n' + rows.map(function(r) {
     return cols.map(function(c) { return esc(r[c]); }).join(';');
