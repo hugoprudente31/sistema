@@ -1,5 +1,6 @@
 // Kommo cold-lead recovery - native Salesbot launcher
 
+const { pool } = require("../lib/db");
 const kommo = require("./client");
 const SM = require("./bot/stateManager");
 const labels = require("./labels");
