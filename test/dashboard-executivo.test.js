@@ -54,7 +54,7 @@ test('dashboard executivo consolida grupo, lojas, consultores, origens, setores,
     assert.equal(body.lojas.length, 1);
     assert.equal(body.consultores[0].id, 12);
     assert.equal(body.origens[0].origem, 'Atendimento Central');
-    for (const canal of ['Atendimento Central', 'Relacionamento Pós Vendas', 'Loja']) assert.ok(body.origens.some((row) => row.origem === canal));
+    for (const canal of ['Atendimento Central', 'Setor de Relacionamento Pós Vendas', 'Loja']) assert.ok(body.origens.some((row) => row.origem === canal));
     const agendadoPelaLoja = body.origens.find((row) => row.origem === 'Loja');
     assert.equal(agendadoPelaLoja.clientes, 4);
     assert.equal(body.marketing.clientes, 8, 'Loja não deve contar como canal de marketing rastreado');
@@ -128,12 +128,12 @@ test('a query de loja órfã usa comparação insensível a acento/caixa contra 
   assert.match(routeBody, /storeSql\("l\.nome", "a\.loja"\)/, 'deve reusar o helper storeSql (mesma normalização de acento\\/caixa usada no resto do sistema)');
 });
 
-test('dashboard normaliza Atendimento Central, Relacionamento Pós Vendas, Loja e a loja Target', () => {
+test('dashboard normaliza Atendimento Central, Setor de Relacionamento Pós Vendas, Loja e a loja Target', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
   assert.match(source, /maria cristina[\s\S]*Atendimento Central/i);
-  for (const canal of ['Atendimento Central', 'Relacionamento Pós Vendas', 'Loja']) assert.match(source, new RegExp(canal));
+  for (const canal of ['Atendimento Central', 'Setor de Relacionamento Pós Vendas', 'Loja']) assert.match(source, new RegExp(canal));
   const channelRule = source.slice(source.indexOf('const executiveChannelSql'), source.indexOf('const [resumoResult'));
-  const landingPos = channelRule.indexOf("THEN 'Relacionamento Pós Vendas");
+  const landingPos = channelRule.indexOf("THEN 'Setor de Relacionamento Pós Vendas");
   const lojaStaffPos = channelRule.indexOf("THEN 'Loja'");
   const kommoLinkPos = channelRule.indexOf('a.kommo_lead_id IS NOT NULL');
   assert.ok(landingPos > -1 && kommoLinkPos > -1 && landingPos < kommoLinkPos, 'landing page deve ter prioridade sobre vínculo Kommo');
@@ -142,7 +142,7 @@ test('dashboard normaliza Atendimento Central, Relacionamento Pós Vendas, Loja 
   assert.match(channelRule, /kommo_lead_id IS NOT NULL[\s\S]*THEN 'Atendimento Central'/, 'Kommo (catch-all raso) continua caindo em Atendimento Central como último recurso');
   assert.match(source, /LIKE '%target%' THEN 'Óticas Target'/);
   assert.match(source, /Clientes dos canais rastreados/);
-  assert.match(source, /canaisMarketing = new Set\(\["Atendimento Central", "Relacionamento Pós Vendas"\]\)/, 'Loja deve ficar fora da soma de Marketing');
+  assert.match(source, /canaisMarketing = new Set\(\["Atendimento Central", "Setor de Relacionamento Pós Vendas"\]\)/, 'Loja deve ficar fora da soma de Marketing');
 });
 
 test('interface Admin contém todas as áreas empresariais e uma fonte executiva única', () => {

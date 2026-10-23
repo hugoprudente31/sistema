@@ -483,7 +483,7 @@
 
     <div class="card hidden" id="cardAgendamento">
       <h3>Novo Agendamento</h3>
-      <div class="notice"><strong>Regras de horário</strong>Segunda a sexta: <b>10:00 às 18:00</b><br>Sábado: <b>10:00 às 16:00</b><br>Domingo e feriados: <b>bloqueados</b></div>
+      <div class="notice"><strong>Regras de horário</strong>Segunda a sexta: <b>10:00 às 18:00</b><br>Sábado: <b>Santos 10:00 às 16:00 · Guarujá 10:00 às 15:00</b><br>Domingo e feriados: <b>bloqueados</b></div>
       <div class="row"><div><label>Origem *</label><select id="origem"></select></div><div><label>Nome completo *</label><input id="nomeCompleto" type="text" placeholder="Nome do cliente"></div></div>
       <div class="row"><div><label>WhatsApp *</label><input id="whatsApp" type="text" placeholder="13999999999"></div><div><label>Email *</label><input id="emailCliente" type="email" placeholder="cliente@email.com"></div></div>
       <div class="row"><div><label>Loja *</label><select id="loja" onchange="carregarOptometristas()"></select></div><div><label>Optometrista *</label><select id="optometrista"></select></div></div>
@@ -1302,6 +1302,7 @@ function mapAgendamentoDb(r) {
     StatusOS: r.status_os || '',
     AccessTags: r.access_tags || '',
     OrigemSync: r.origem_sync || '',
+    SetorRelacionamento: r.setor_relacionamento === true,
     LeadTimeDias: r.lead_time_dias || '',
     VendedorNome: r.vendedor_nome || '',
     VendedorConsultorId: r.vendedor_consultor_id || '',
@@ -1317,13 +1318,14 @@ function mapAgendamentoDb(r) {
     AgendadoPorNome: (function() {
       var conta = r.agendado_por_nome || '';
       var real = r.proprietario_nome || r.vendedor_nome || r.responsavel || '';
-      var origemLanding = normalizeKey(r.origem_sync || '') === 'landing_page' ||
+      var origemLanding = r.setor_relacionamento === true ||
+        normalizeKey(r.origem_sync || '') === 'landing_page' ||
         normalizeKey(r.origem || '').indexOf('landing page') > -1 ||
         normalizeKey(r.responsavel || '') === 'landing page' ||
         normalizeKey(r.proprietario_nome || '') === 'landing page' ||
         normalizeKey(r.access_tags || '').indexOf('origem:site') > -1;
       if (origemLanding) {
-        return 'Relacionamento Pós Vendas';
+        return 'Setor de Relacionamento Pós Vendas';
       }
       if (real && normalizeKey(real) !== normalizeKey(conta)) {
         return conta ? real + ' (' + conta + ')' : real;
@@ -2488,7 +2490,13 @@ function validarHorarioVisual() {
   var minutes = parts[0] * 60 + parts[1];
   if (day === 0) return 'Domingo não está disponível para agendamento.';
   if (day >= 1 && day <= 5 && (minutes < 600 || minutes > 1080)) return 'De segunda a sexta, escolha um horário entre 10:00 e 18:00.';
-  if (day === 6 && (minutes < 600 || minutes > 960)) return 'Aos sábados, escolha um horário entre 10:00 e 16:00.';
+  if (day === 6) {
+    // Sábado: Santos (Gonzaga) até 16:00; lojas do Guarujá até 15:00.
+    var lojaSabado = normalizeKey(byId('loja') ? byId('loja').value : '');
+    var santos = lojaSabado.indexOf('gonzaga') > -1 || lojaSabado.indexOf('santos') > -1;
+    var fimSabado = santos ? 960 : 900;
+    if (minutes < 600 || minutes > fimSabado) return 'Aos sábados, escolha um horário entre 10:00 e ' + (santos ? '16:00' : '15:00') + '.';
+  }
   if ((minutes - 600) % 20 !== 0) return 'Escolha um horário da grade de atendimento, com intervalos de 20 minutos.';
   return null;
 }
@@ -2826,6 +2834,7 @@ function runAction(fn, id) {
     patch.statusAgenda = 'Confirmado';
     var row = (state.agendamentos || []).find(function(item) { return String(item.ID) === String(id); });
     var landingPage = row && (
+      row.SetorRelacionamento === true ||
       normalizeKey(row.OrigemSync || '') === 'landing_page' ||
       normalizeKey(row.Origem || '').indexOf('landing page') > -1 ||
       normalizeKey(row.Responsavel || '') === 'landing page' ||
@@ -3140,7 +3149,8 @@ function getActionHtml(r) {
   var gerente = role === 'gerente de loja' && ownStore;
   var comprador = role === 'comprador' && ownStore;
   var consultor = ['consultor de vendas', 'vendedor', 'outros'].indexOf(role) > -1 && ownStore;
-  var landingPage = normalizeKey(r.OrigemSync || '') === 'landing_page' ||
+  var landingPage = r.SetorRelacionamento === true ||
+    normalizeKey(r.OrigemSync || '') === 'landing_page' ||
     normalizeKey(r.Origem || '').indexOf('landing page') > -1 ||
     normalizeKey(r.Responsavel || '') === 'landing page' ||
     normalizeKey(r.AccessTags || '').indexOf('origem:site') > -1;
@@ -4025,7 +4035,11 @@ function desativarUnidade(id) {
 
 function horarioPadraoGrade(dia) {
   if (dia === 0) return { aberto:false, hora_inicio:'', hora_fim:'', intervalo_inicio:'', intervalo_fim:'' };
-  return { aberto:true, hora_inicio:'10:00', hora_fim:dia === 6 ? '16:00' : '18:00', intervalo_inicio:dia === 6 ? '' : '13:00', intervalo_fim:dia === 6 ? '' : '14:00' };
+  // Sábado: Santos (Gonzaga) até 16:00; Guarujá até 15:00. No padrão global
+  // (nenhuma loja selecionada) vale o horário mais comum, o do Guarujá.
+  var lojaGrade = normalizeKey(byId('gradeHorarioLoja') ? byId('gradeHorarioLoja').value : '');
+  var santos = lojaGrade.indexOf('gonzaga') > -1 || lojaGrade.indexOf('santos') > -1;
+  return { aberto:true, hora_inicio:'10:00', hora_fim:dia === 6 ? (santos ? '16:00' : '15:00') : '18:00', intervalo_inicio:dia === 6 ? '' : '13:00', intervalo_fim:dia === 6 ? '' : '14:00' };
 }
 
 function renderizarGradeHorario(rows) {

@@ -19,7 +19,17 @@ const { startFollowupCron } = require("./kommo/followups");
 const { startOperationalWhatsappCron } = require("./lib/operationalWhatsapp");
 const mailingboss = require("./mailingboss");
 const kommoClient = require("./kommo/client");
-const { INTERVALO_ATENDIMENTO_MINUTOS, jornadaPadrao, resolverJornadaLoja, estaOptometristaDisponivel, gerarSlotsJornada } = require("./lib/horarios");
+const {
+  INTERVALO_ATENDIMENTO_MINUTOS,
+  STATUS_QUE_OCUPAM_HORARIO,
+  sqlHorarioConflita,
+  horaFimSabado,
+  minutosFimSabado,
+  jornadaPadrao,
+  resolverJornadaLoja,
+  estaOptometristaDisponivel,
+  gerarSlotsJornada
+} = require("./lib/horarios");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -406,9 +416,63 @@ function canViewLeadOrigin(session) {
   return isSuperAdmin(session);
 }
 
+const SETOR_RELACIONAMENTO_NOME = "Setor de Relacionamento Pós Vendas";
+const SETOR_RELACIONAMENTO_EMAIL = "relacionamento.posvendas@sistema.local";
+
+function normalizarTextoOrigem(valor) {
+  return clean(valor).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+// Mesmo critério usado no PATCH para reconhecer um lead criado pela LP.
+function isRegistroSetorRelacionamento(record) {
+  if (!record) return false;
+  return normalizarTextoOrigem(record.origem_sync) === "landing_page" ||
+    normalizarTextoOrigem(record.origem).includes("landing page") ||
+    normalizarTextoOrigem(record.responsavel) === "landing page" ||
+    normalizarTextoOrigem(record.proprietario_nome) === "landing page" ||
+    normalizarTextoOrigem(record.access_tags).includes("origem:site");
+}
+
+// Trechos da observação que denunciam o canal de captação (montados por
+// montarObservacaoPublica). Só o Super Admin enxerga.
+const PREFIXOS_OBSERVACAO_ORIGEM = ["landing page:", "campanha:", "canal:", "utm:"];
+
+function ocultarOrigemObservacao(texto) {
+  const valor = clean(texto);
+  if (!valor) return texto;
+  return valor
+    .split(" | ")
+    .filter((parte) => !PREFIXOS_OBSERVACAO_ORIGEM.some((prefixo) => normalizarTextoOrigem(parte).startsWith(prefixo)))
+    .join(" | ");
+}
+
+// Origem gravada quando quem cria o agendamento não enxerga (nem escolhe)
+// a origem do lead -- sem isso os relatórios perderiam o canal.
+function origemPadraoPainel(session) {
+  return roleOf(session) === "atendimento central" ? "Atendimento Central" : "Loja";
+}
+
 function ocultarOrigemLead(record, session) {
   if (!record || canViewLeadOrigin(session)) return record;
   const sanitized = { ...record };
+  if (isRegistroSetorRelacionamento(record)) {
+    // Para quem não é Super Admin o lead da LP é apenas do Setor de
+    // Relacionamento Pós Vendas; nenhum campo pode indicar a Landing Page.
+    sanitized.setor_relacionamento = true;
+    ["responsavel", "proprietario_nome", "agendado_por_nome"].forEach((campo) => {
+      if (Object.prototype.hasOwnProperty.call(sanitized, campo)) sanitized[campo] = SETOR_RELACIONAMENTO_NOME;
+    });
+    ["criado_por_email", "agendado_por_email"].forEach((campo) => {
+      if (Object.prototype.hasOwnProperty.call(sanitized, campo)) sanitized[campo] = SETOR_RELACIONAMENTO_EMAIL;
+    });
+    if (Object.prototype.hasOwnProperty.call(sanitized, "proprietario_id")) sanitized.proprietario_id = "setor-relacionamento";
+  }
+  if (Object.prototype.hasOwnProperty.call(sanitized, "observacao")) {
+    sanitized.observacao = ocultarOrigemObservacao(sanitized.observacao);
+  }
+  if (Object.prototype.hasOwnProperty.call(sanitized, "observacoes")) {
+    sanitized.observacoes = ocultarOrigemObservacao(sanitized.observacoes);
+  }
   delete sanitized.origem;
   delete sanitized.origem_sync;
   if (Object.prototype.hasOwnProperty.call(sanitized, "access_tags")) {
@@ -613,12 +677,7 @@ async function saveAppointmentBackup(db, { before = null, after = null, action, 
 // CONFIGURAÇÃO PÚBLICA — LANDING PAGES
 // ===============================
 
-const PUBLIC_BLOCKING_STATUSES = [
-  "Agendado",
-  "Confirmado",
-  "Compareceu",
-  "OS em Andamento"
-];
+const PUBLIC_BLOCKING_STATUSES = STATUS_QUE_OCUPAM_HORARIO;
 
 // Remove acentos e qualquer pontuacao (hifen, ponto, meia-risca) antes de
 // comparar, para que variacoes como "Target - Santo Antonio" e "Target Sto.
@@ -742,8 +801,8 @@ function horarioValidoPorRegra(data, horario, loja = "") {
     return { ok: false, message: "De segunda a sexta, escolha entre 10:00 e 18:00." };
   }
 
-  if (dia === 6 && (minutos < 600 || minutos > 960)) {
-    return { ok: false, message: "Aos sábados, escolha entre 10:00 e 16:00." };
+  if (dia === 6 && (minutos < 600 || minutos > minutosFimSabado(loja))) {
+    return { ok: false, message: `Aos sábados, escolha entre 10:00 e ${horaFimSabado(loja)}.` };
   }
 
   if ((minutos - 600) % INTERVALO_ATENDIMENTO_MINUTOS !== 0) {
@@ -781,7 +840,7 @@ function gerarHorariosBase(data, loja = "") {
 
   const inicio = 10 * 60;
   const jornadaEspecialGonzaga = isGonzagaSemAlmocoEm29Jul2026(loja, dt);
-  const fim = dia === 6 ? 16 * 60 : (jornadaEspecialGonzaga ? 19 * 60 : 18 * 60);
+  const fim = dia === 6 ? minutosFimSabado(loja) : (jornadaEspecialGonzaga ? 19 * 60 : 18 * 60);
   const horarios = [];
 
   for (let m = inicio; m <= fim; m += INTERVALO_ATENDIMENTO_MINUTOS) {
@@ -866,7 +925,7 @@ async function buscarPrimeiroOptometristaLivre(client, loja, data, horario, opto
        WHERE LOWER(REGEXP_REPLACE(COALESCE(loja,''), '\\s*-\\s*', ' ', 'g')) = LOWER(REGEXP_REPLACE($1, '\\s*-\\s*', ' ', 'g'))
          AND LOWER(COALESCE(optometrista,'')) = LOWER($2)
          AND data_agendamento = $3
-         AND horario = $4
+         AND ${sqlHorarioConflita("horario", "$4")}
          AND status = ANY($5::text[])
          AND excluido_em IS NULL
        LIMIT 1`,
@@ -877,6 +936,35 @@ async function buscarPrimeiroOptometristaLivre(client, loja, data, horario, opto
   }
 
   return "";
+}
+
+// Choque de horário para o painel interno (criação e edição). O índice
+// único do banco só pega horários idênticos; aqui também barramos
+// atendimentos que se sobrepõem (ex.: 10:15 da grade antiga x 10:20).
+async function buscarChoqueHorario(client, { loja, optometrista, data, horario, ignorarId = null }) {
+  const opto = clean(optometrista);
+  const hr = clean(horario);
+  if (!opto || opto.toLowerCase() === "a definir" || !clean(data) || !/^\d{1,2}:\d{2}$/.test(hr)) return null;
+  const result = await client.query(
+    `SELECT id, horario
+       FROM agendamentos
+      WHERE LOWER(REGEXP_REPLACE(COALESCE(loja,''), '\\s*-\\s*', ' ', 'g')) = LOWER(REGEXP_REPLACE($1, '\\s*-\\s*', ' ', 'g'))
+        AND LOWER(COALESCE(optometrista,'')) = LOWER($2)
+        AND data_agendamento = $3
+        AND ${sqlHorarioConflita("horario", "$4")}
+        AND status = ANY($5::text[])
+        AND excluido_em IS NULL
+        AND ($6::int IS NULL OR id <> $6::int)
+      ORDER BY horario
+      LIMIT 1`,
+    [clean(loja), opto, clean(data), hr, PUBLIC_BLOCKING_STATUSES, ignorarId === null ? null : Number(ignorarId)]
+  );
+  return result.rows[0] || null;
+}
+
+function mensagemChoqueHorario(choque) {
+  return `Esse optometrista já tem atendimento às ${clean(choque.horario)} nesse dia. ` +
+    `Os atendimentos duram ${INTERVALO_ATENDIMENTO_MINUTOS} minutos; escolha outro horário ou optometrista.`;
 }
 
 function extrairUtm(req) {
@@ -961,6 +1049,19 @@ function toPgDate(v) {
   return anoRazoavel(Number(resultado.slice(0, 4))) ? resultado : null;
 }
 
+// O driver `pg` devolve colunas DATE como objeto Date (meia-noite local).
+// String(date).slice(0, 10) vira "Fri Oct 23" e nunca bate com
+// "2026-10-23" -- o que fazia toda edição parecer um reagendamento.
+function dataPgDoBanco(v) {
+  if (v instanceof Date) {
+    if (Number.isNaN(v.getTime())) return null;
+    const mm = String(v.getMonth() + 1).padStart(2, "0");
+    const dd = String(v.getDate()).padStart(2, "0");
+    return `${v.getFullYear()}-${mm}-${dd}`;
+  }
+  return toPgDate(v);
+}
+
 function makeGasId(prefix, value) {
   const base = clean(value);
   if (base) return `${prefix}:${base}`;
@@ -982,6 +1083,55 @@ async function addColumnIfMissing(table, column, definition) {
 // precisar inspecionar o schema de fora do Node, tire um dump do banco
 // (pg_dump --schema-only) em vez de manter um arquivo .sql à mão — não
 // tem como esse arquivo ficar desatualizado se ele simplesmente não existe.
+const SQL_INDICE_SLOT_ATIVO = `
+    CREATE UNIQUE INDEX IF NOT EXISTS uniq_agendamento_ativo_slot
+    ON agendamentos (
+      (LOWER(COALESCE(loja,''))),
+      (LOWER(COALESCE(optometrista,''))),
+      data_agendamento,
+      horario
+    )
+    WHERE status IN ('Agendado','Reagendado','Confirmado','Compareceu','OS em Andamento')
+      AND data_agendamento IS NOT NULL
+      AND horario IS NOT NULL
+      AND horario <> ''
+      AND optometrista IS NOT NULL
+      AND optometrista <> '';
+  `;
+
+// "Reagendado" passou a existir depois que o índice foi criado, então ele
+// não travava o horário. Recriamos o índice uma única vez (quando a definição
+// atual ainda não inclui o status), numa transação: se já houver dois
+// agendamentos ativos no mesmo horário, o índice antigo é mantido e o
+// conflito vai para o log -- o servidor nunca deixa de subir por isso.
+async function garantirIndiceSlotAtivo() {
+  const atual = await pool.query(
+    `SELECT indexdef FROM pg_indexes WHERE indexname = 'uniq_agendamento_ativo_slot'`
+  );
+  if (!atual.rows.length) {
+    await pool.query(SQL_INDICE_SLOT_ATIVO);
+    return;
+  }
+  if (atual.rows[0].indexdef.includes("Reagendado")) return;
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("DROP INDEX IF EXISTS uniq_agendamento_ativo_slot");
+    await client.query(SQL_INDICE_SLOT_ATIVO);
+    await client.query("COMMIT");
+    console.log("[DB] Índice uniq_agendamento_ativo_slot atualizado para incluir Reagendado.");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    console.error(
+      "[DB] Não foi possível incluir Reagendado no índice de horário (provável horário duplicado já gravado). " +
+      "Índice anterior mantido:", error.message
+    );
+  } finally {
+    client.release();
+  }
+}
+
 async function initDatabase() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS agendamentos (
@@ -1461,21 +1611,7 @@ async function initDatabase() {
 
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_agendamentos_data ON agendamentos(data_agendamento);`);
 
-  await pool.query(`
-    CREATE UNIQUE INDEX IF NOT EXISTS uniq_agendamento_ativo_slot
-    ON agendamentos (
-      (LOWER(COALESCE(loja,''))),
-      (LOWER(COALESCE(optometrista,''))),
-      data_agendamento,
-      horario
-    )
-    WHERE status IN ('Agendado','Confirmado','Compareceu','OS em Andamento')
-      AND data_agendamento IS NOT NULL
-      AND horario IS NOT NULL
-      AND horario <> ''
-      AND optometrista IS NOT NULL
-      AND optometrista <> '';
-  `);
+  await garantirIndiceSlotAtivo();
 
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_agendamentos_gas_id ON agendamentos(gas_id);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_clientes_whatsapp ON clientes(whatsapp);`);
@@ -1613,7 +1749,7 @@ async function initDatabase() {
         -- A autoria de um lead criado pela LP pertence permanentemente ao
         -- setor que criou o canal. Nenhuma edicao posterior, inclusive OS,
         -- atendimento ou reagendamento, pode transferir essa autoria.
-        NEW.agendado_por_nome := 'Relacionamento Pós Vendas';
+        NEW.agendado_por_nome := 'Setor de Relacionamento Pós Vendas';
         NEW.agendado_por_email := 'relacionamento.posvendas@sistema.local';
       ELSE
         NEW.agendado_por_nome := COALESCE(NULLIF(NEW.agendado_por_nome, ''), responsavel_registro);
@@ -1630,7 +1766,7 @@ async function initDatabase() {
         AND LOWER(COALESCE(NEW.status_os, '')) NOT IN ('cancelada', 'cancelado', 'reembolso') THEN
         NEW.compareceu := 'Sim';
         IF TRANSLATE(LOWER(COALESCE(NEW.status, '')), 'ãáàâäéèêëíìîïóòôöõúùûüç', 'aaaaaeeeeiiiiooooouuuuc')
-          IN ('agendado', 'confirmado', 'nao compareceu') THEN
+          IN ('agendado', 'reagendado', 'confirmado', 'nao compareceu') THEN
           NEW.status := 'Compareceu';
         END IF;
       END IF;
@@ -1648,7 +1784,7 @@ async function initDatabase() {
   // "Agendado por" siga a mesma autoria institucional aplicada aos novos leads.
   await pool.query(`
     UPDATE agendamentos
-       SET agendado_por_nome = 'Relacionamento Pós Vendas',
+       SET agendado_por_nome = 'Setor de Relacionamento Pós Vendas',
            agendado_por_email = 'relacionamento.posvendas@sistema.local'
      WHERE (
           LOWER(COALESCE(origem_sync, '')) = 'landing_page'
@@ -1658,7 +1794,7 @@ async function initDatabase() {
        OR LOWER(COALESCE(access_tags, '')) LIKE '%origem:site%'
      )
        AND (
-         agendado_por_nome IS DISTINCT FROM 'Relacionamento Pós Vendas'
+         agendado_por_nome IS DISTINCT FROM 'Setor de Relacionamento Pós Vendas'
          OR agendado_por_email IS DISTINCT FROM 'relacionamento.posvendas@sistema.local'
        )
   `);
@@ -1668,7 +1804,7 @@ async function initDatabase() {
     SET compareceu = 'Sim',
         status = CASE
           WHEN TRANSLATE(LOWER(COALESCE(status, '')), 'ãáàâäéèêëíìîïóòôöõúùûüç', 'aaaaaeeeeiiiiooooouuuuc')
-            IN ('agendado', 'confirmado', 'nao compareceu') THEN 'Compareceu'
+            IN ('agendado', 'reagendado', 'confirmado', 'nao compareceu') THEN 'Compareceu'
           ELSE status
         END,
         atualizado_em = CURRENT_TIMESTAMP
@@ -1678,7 +1814,7 @@ async function initDatabase() {
       AND (
         TRANSLATE(LOWER(COALESCE(compareceu, '')), 'ãáàâäéèêëíìîïóòôöõúùûüç', 'aaaaaeeeeiiiiooooouuuuc') <> 'sim'
         OR TRANSLATE(LOWER(COALESCE(status, '')), 'ãáàâäéèêëíìîïóòôöõúùûüç', 'aaaaaeeeeiiiiooooouuuuc')
-          IN ('agendado', 'confirmado', 'nao compareceu')
+          IN ('agendado', 'reagendado', 'confirmado', 'nao compareceu')
       )
     RETURNING id
   `);
@@ -2181,7 +2317,7 @@ app.get("/api/public/horarios-disponiveis", validarLandingApiKey, async (req, re
            WHERE LOWER(REGEXP_REPLACE(COALESCE(loja,''), '\\s*-\\s*', ' ', 'g')) = LOWER(REGEXP_REPLACE($1, '\\s*-\\s*', ' ', 'g'))
              AND LOWER(COALESCE(optometrista,'')) = LOWER($2)
              AND data_agendamento = $3
-             AND horario = $4
+             AND ${sqlHorarioConflita("horario", "$4")}
              AND status = ANY($5::text[])
              AND excluido_em IS NULL
            LIMIT 1`,
@@ -2310,7 +2446,7 @@ app.post("/api/public/agendamentos", validarLandingApiKey, async (req, res) => {
          WHERE LOWER(REGEXP_REPLACE(COALESCE(loja,''), '\\s*-\\s*', ' ', 'g')) = LOWER(REGEXP_REPLACE($1, '\\s*-\\s*', ' ', 'g'))
            AND LOWER(COALESCE(optometrista,'')) = LOWER($2)
            AND data_agendamento = $3
-           AND horario = $4
+           AND ${sqlHorarioConflita("horario", "$4")}
            AND status = ANY($5::text[])
            AND excluido_em IS NULL
          LIMIT 1`,
@@ -2514,6 +2650,18 @@ app.post("/api/agendamentos", async (req, res) => {
           message: `Horário indisponível. ${bloqueioHorario.motivo || "Escolha outro horário."}`.trim()
         });
       }
+      if (dataAgendamento && horarioNovo && dataAgendamento >= hojeBrasil()) {
+        const choque = await buscarChoqueHorario(client, {
+          loja: b.loja || "",
+          optometrista: b.optometrista || "",
+          data: dataAgendamento,
+          horario: horarioNovo
+        });
+        if (choque) {
+          await client.query("ROLLBACK");
+          return res.status(409).json({ ok: false, message: mensagemChoqueHorario(choque) });
+        }
+      }
       await client.query(`SELECT set_config('app.audit_managed', 'true', true)`);
       const result = await client.query(
         `INSERT INTO agendamentos (
@@ -2533,7 +2681,7 @@ app.post("/api/agendamentos", async (req, res) => {
         b.email || null,
         b.loja || null,
         b.optometrista || null,
-        b.origem || null,
+        clean(b.origem) || (canViewLeadOrigin(req.session) ? null : origemPadraoPainel(req.session)),
         dataAgendamento,
         b.horario || null,
         b.observacao || null,
@@ -2647,7 +2795,8 @@ app.get("/api/agendamentos", async (req, res) => {
       params.push(`%${clean(q.vendedor)}%`);
       conditions.push(`CONCAT_WS(' ', a.vendedor_nome, a.consultor_responsavel, a.vendedor_atendeu_nome, a.agendado_por_nome) ILIKE $${params.length}`);
     }
-    if (q.proprietario) {
+    // Filtrar por "landing" revelaria a origem a quem não pode vê-la.
+    if (q.proprietario && (canViewLeadOrigin(req.session) || !normalizarTextoOrigem(q.proprietario).includes("landing"))) {
       params.push(`%${clean(q.proprietario)}%`);
       conditions.push(`CONCAT_WS(' ', a.proprietario_nome, a.agendado_por_nome, a.responsavel) ILIKE $${params.length}`);
     }
@@ -2756,7 +2905,7 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
       });
     }
     const confirmadorCentralNome = clean(
-      b.confirmado_por_central_nome || b.confirmadoPorCentralNome || req.session.nome
+      b.confirmado_por_central_nome || b.confirmadoPorCentralNome
     );
     if (estaConfirmandoLandingPage) {
       const nomeGenerico = ["atendimento central", "central", "usuario autenticado"]
@@ -2897,7 +3046,7 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
       : clean(req.session.nome || "Usuário autenticado");
     const actorEmail = clean(req.session.email);
     const agendadoPorNome = registroLandingPage
-      ? "Relacionamento Pós Vendas"
+      ? "Setor de Relacionamento Pós Vendas"
       : actorNome;
 
     // Reagendar para uma nova data sem informar presença/status/resultado junto
@@ -2913,8 +3062,7 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
       novaDataAgendamento = toPgDate(dataAgendamentoBrutaPatch);
       if (!novaDataAgendamento) return res.status(400).json({ ok: false, message: "Data do agendamento inválida." });
     }
-    const dataAgendamentoAtual = current.rows[0].data_agendamento
-      ? String(current.rows[0].data_agendamento).slice(0, 10) : null;
+    const dataAgendamentoAtual = dataPgDoBanco(current.rows[0].data_agendamento);
     const isReagendamentoDeData = Boolean(novaDataAgendamento) && novaDataAgendamento !== dataAgendamentoAtual;
     const horarioFoiEnviado = Object.prototype.hasOwnProperty.call(b, "horario");
     const isReagendamentoDeHorario = horarioFoiEnviado &&
@@ -2952,8 +3100,16 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
     ].some(([chaves, coluna]) => {
       const chave = chaves.find((nome) => Object.prototype.hasOwnProperty.call(b, nome));
       if (!chave) return false;
+      if (coluna === "origem" && (!canViewLeadOrigin(req.session) || !clean(b[chave]))) {
+        // Quem não enxerga a origem recebe o campo vazio no modal; reenviar
+        // esse vazio não é uma alteração (o UPDATE também preserva a origem).
+        return false;
+      }
       const novo = coluna === "data_agendamento" ? (novaDataAgendamento || clean(b[chave])) : clean(b[chave]);
-      return normalizarCampoReagendamento(novo) !== normalizarCampoReagendamento(current.rows[0][coluna]);
+      const atual = coluna === "data_agendamento"
+        ? dataPgDoBanco(current.rows[0][coluna])
+        : current.rows[0][coluna];
+      return normalizarCampoReagendamento(novo) !== normalizarCampoReagendamento(atual);
     });
     const atualizarAgendadoPor = !registroLandingPage && (isReagendamento || alterouCampoLead);
     // O modal de edição reenvia status e presença mesmo quando o usuário só
@@ -2990,7 +3146,7 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
       statusAgendaNormalizado !== "cancelado" &&
       !["cancelada", "cancelado", "reembolso"].includes(statusOSNormalizado);
     const compareceuVenda = compraAtiva ? "Sim" : null;
-    const statusVenda = compraAtiva && ["agendado", "confirmado", "nao compareceu"].includes(statusAgendaNormalizado)
+    const statusVenda = compraAtiva && ["agendado", "reagendado", "confirmado", "nao compareceu"].includes(statusAgendaNormalizado)
       ? "Compareceu"
       : null;
     // O reset de reagendamento só vale quando não há venda ativa segurando o
@@ -3013,7 +3169,31 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         const lojaFinal = b.loja || current.rows[0].loja || "";
         const dataFinal = novaDataAgendamento || dataAgendamentoAtual || "";
         const horarioFinal = clean(b.horario || current.rows[0].horario || "");
-        if (dataFinal && horarioFinal && dataFinal >= hojeBrasil()) {
+        const optometristaFinal = clean(b.optometrista || current.rows[0].optometrista || "");
+        // O modal de edição sempre reenvia loja/data/horário. Só revalidamos
+        // a grade quando algum deles muda de verdade; assim agendamentos da
+        // grade antiga de 15 minutos (10:15, 10:45...) continuam editáveis
+        // para lançar OS, venda ou corrigir dados do cliente.
+        const mudouAgenda =
+          normalizarCampoReagendamento(lojaFinal) !== normalizarCampoReagendamento(current.rows[0].loja) ||
+          dataFinal !== (dataAgendamentoAtual || "") ||
+          horarioFinal !== clean(current.rows[0].horario || "");
+        const mudouOptometrista =
+          normalizarCampoReagendamento(optometristaFinal) !== normalizarCampoReagendamento(current.rows[0].optometrista);
+        if ((mudouAgenda || mudouOptometrista) && dataFinal && horarioFinal && dataFinal >= hojeBrasil()) {
+          const choque = await buscarChoqueHorario(client, {
+            loja: lojaFinal,
+            optometrista: optometristaFinal,
+            data: dataFinal,
+            horario: horarioFinal,
+            ignorarId: id
+          });
+          if (choque) {
+            await client.query("ROLLBACK");
+            return res.status(409).json({ ok: false, message: mensagemChoqueHorario(choque) });
+          }
+        }
+        if (mudouAgenda && dataFinal && horarioFinal && dataFinal >= hojeBrasil()) {
           const diaSemana = new Date(dataFinal + "T12:00:00").getDay();
           const jornada = await resolverJornadaLoja(client, lojaFinal, diaSemana);
           const horariosDaGrade = jornada.origem === "config"
@@ -3201,7 +3381,7 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         const aSt   = nc3(after.status);
 
         // "Não compareceu" resolvido → reagendou ou marcou compareceu=Sim
-        if (aComp === 'sim' || aComp === 'pendente' || ['agendado','confirmado'].includes(aSt)) {
+        if (aComp === 'sim' || aComp === 'pendente' || ['agendado','reagendado','confirmado'].includes(aSt)) {
           await pool.query(
             `DELETE FROM notificacoes WHERE agendamento_id = $1 AND tipo = 'nao_compareceu'`,
             [after.id]
@@ -3471,7 +3651,10 @@ app.post("/api/clientes", async (req, res) => {
          email = EXCLUDED.email,
          cpf = EXCLUDED.cpf,
          data_nascimento = EXCLUDED.data_nascimento,
-         origem = EXCLUDED.origem,
+         -- Só o Super Admin escolhe a origem; para os demais perfis a origem
+         -- já gravada do cliente nunca é sobrescrita.
+         origem = CASE WHEN $10::boolean THEN EXCLUDED.origem
+                       ELSE COALESCE(NULLIF(clientes.origem, ''), EXCLUDED.origem) END,
          loja_origem = EXCLUDED.loja_origem,
          observacoes = EXCLUDED.observacoes,
          atualizado_em = CURRENT_TIMESTAMP
@@ -3483,9 +3666,10 @@ app.post("/api/clientes", async (req, res) => {
         b.email || null,
         b.cpf || null,
         b.data_nascimento || null,
-        b.origem || null,
+        clean(b.origem) || (canViewLeadOrigin(req.session) ? null : origemPadraoPainel(req.session)),
         lojaOrigem,
-        b.observacoes || null
+        b.observacoes || null,
+        canViewLeadOrigin(req.session) && Boolean(clean(b.origem))
       ]
     );
 
@@ -5426,7 +5610,7 @@ app.get("/api/admin/dashboard-executivo", requireAdmin, async (req, res) => {
       WHEN LOWER(COALESCE(a.origem_sync,'')) = 'landing_page'
         OR LOWER(COALESCE(a.origem,'')) LIKE '%landing%'
         OR LOWER(COALESCE(a.origem,'')) LIKE '%site%'
-        OR LOWER(COALESCE(a.access_tags,'')) LIKE '%origem:site%' THEN 'Relacionamento Pós Vendas'
+        OR LOWER(COALESCE(a.access_tags,'')) LIKE '%origem:site%' THEN 'Setor de Relacionamento Pós Vendas'
       WHEN LOWER(COALESCE(a.origem,'')) LIKE '%whatsapp%'
         OR LOWER(COALESCE(a.access_tags,'')) LIKE '%origem:whatsapp%' THEN 'Atendimento Central'
       WHEN LOWER(COALESCE(a.origem_sync,'')) = 'kommo_bot'
@@ -5468,9 +5652,9 @@ app.get("/api/admin/dashboard-executivo", requireAdmin, async (req, res) => {
 
     const resumo = executiveMetricRow(resumoResult.rows[0]);
     const origensMedidas = origensResult.rows.map(executiveMetricRow);
-    const nomesCanaisSempreExibidos = ["Atendimento Central", "Relacionamento Pós Vendas", "Loja"];
+    const nomesCanaisSempreExibidos = ["Atendimento Central", "Setor de Relacionamento Pós Vendas", "Loja"];
     const canaisSempreExibidos = new Set(nomesCanaisSempreExibidos);
-    const canaisMarketing = new Set(["Atendimento Central", "Relacionamento Pós Vendas"]);
+    const canaisMarketing = new Set(["Atendimento Central", "Setor de Relacionamento Pós Vendas"]);
     const origens = nomesCanaisSempreExibidos.map((nome) => origensMedidas.find((row) => row.origem === nome)
       || executiveMetricRow({ origem: nome })).concat(origensMedidas.filter((row) => !canaisSempreExibidos.has(row.origem)));
     const marketing = origens.filter((row) => canaisMarketing.has(row.origem)).reduce((acc, row) => ({
@@ -5610,7 +5794,7 @@ const CRM_ESTAGIO_CASE_SQL = `CASE
   WHEN LOWER(COALESCE(a.compareceu,'')) IN ('não','nao','não compareceu','nao compareceu')
     OR LOWER(COALESCE(a.status,'')) IN ('cancelado','não compareceu','nao compareceu') THEN 'Perdido'
   WHEN LOWER(COALESCE(a.compareceu,'')) IN ('sim','compareceu') THEN 'Compareceu'
-  WHEN a.id IS NOT NULL AND LOWER(COALESCE(a.status,'')) IN ('agendado','confirmado') THEN 'Agendado'
+  WHEN a.id IS NOT NULL AND LOWER(COALESCE(a.status,'')) IN ('agendado','reagendado','confirmado') THEN 'Agendado'
   WHEN s.etapa = 'transferido' THEN 'Atendimento Humano'
   WHEN s.etapa IS NOT NULL AND s.etapa <> 'boas_vindas' THEN 'Bot Ativo'
   ELSE 'Novo Lead'

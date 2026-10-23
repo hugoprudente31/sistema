@@ -97,11 +97,12 @@ async function swapLabel(leadId, removeGroup, applyName) {
 }
 
 // Atualiza o semáforo de agendamento baseado no status do GAS
-// gasStatus: "Confirmado" | "Agendado" | "Não Compareceu" | "Cancelado"
+// gasStatus: "Confirmado" | "Agendado" | "Reagendado" | "Não Compareceu" | "Cancelado"
 async function applyTrafficLight(leadId, gasStatus) {
   const map = {
     "Confirmado":      LABELS.AGENDADO_CONFIRMADO,
     "Agendado":        LABELS.AGENDADO_PENDENTE,
+    "Reagendado":      LABELS.AGENDADO_PENDENTE,
     "Não Compareceu":  LABELS.NAO_COMPARECEU,
     "Cancelado":       LABELS.CANCELADO,
   };

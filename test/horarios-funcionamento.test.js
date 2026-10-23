@@ -26,8 +26,9 @@ test("jornadaPadrao replica exatamente a regra hardcoded de gerarHorariosBase/ho
   assert.deepEqual(jornadaPadrao("óticas TGT Enseada", 1), {
     aberto: true, horaInicio: "10:00", horaFim: "18:00", intervaloInicio: "13:00", intervaloFim: "14:00", origem: "padrao"
   });
+  // Sábado: lojas do Guarujá atendem até 15:00; Santos (Gonzaga) até 16:00.
   assert.deepEqual(jornadaPadrao("óticas TGT Enseada", 6), {
-    aberto: true, horaInicio: "10:00", horaFim: "16:00", intervaloInicio: "13:00", intervaloFim: "14:00", origem: "padrao"
+    aberto: true, horaInicio: "10:00", horaFim: "15:00", intervaloInicio: "13:00", intervaloFim: "14:00", origem: "padrao"
   });
   assert.deepEqual(jornadaPadrao("óticas TGT - Gonzaga", 1), {
     aberto: true, horaInicio: "10:00", horaFim: "18:00", intervaloInicio: "14:00", intervaloFim: "15:00", origem: "padrao"

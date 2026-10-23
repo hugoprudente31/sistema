@@ -53,7 +53,7 @@ async function getAppointments(date) {
             status
        FROM agendamentos
       WHERE data_agendamento = $1
-        AND status IN ('Agendado', 'Confirmado')
+        AND status IN ('Agendado', 'Reagendado', 'Confirmado')
         AND kommo_lead_id IS NOT NULL
         AND excluido_em IS NULL
         AND lembrete_24h_em IS NULL
@@ -138,7 +138,7 @@ async function getTwoHourAppointments() {
   const { rows } = await pool.query(`
     SELECT id, kommo_lead_id, nome, horario, loja, data_agendamento, status
       FROM agendamentos
-     WHERE status IN ('Agendado', 'Confirmado')
+     WHERE status IN ('Agendado', 'Reagendado', 'Confirmado')
        AND kommo_lead_id IS NOT NULL
        AND excluido_em IS NULL
        AND lembrete_2h_em IS NULL

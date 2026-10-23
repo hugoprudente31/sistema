@@ -31,7 +31,7 @@ async function getActiveAppointment(leadId, db = pool) {
     `SELECT id, status
        FROM agendamentos
       WHERE kommo_lead_id = $1
-        AND status IN ('Agendado', 'Confirmado')
+        AND status IN ('Agendado', 'Reagendado', 'Confirmado')
         AND excluido_em IS NULL
       ORDER BY data_agendamento DESC, horario DESC, id DESC
       LIMIT 1`,
