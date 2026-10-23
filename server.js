@@ -963,7 +963,7 @@ async function buscarChoqueHorario(client, { loja, optometrista, data, horario, 
 }
 
 function mensagemChoqueHorario(choque) {
-  return `Esse optometrista já tem atendimento às ${clean(choque.horario)} nesse dia. ` +
+  return `Esse horário já está ocupado com esse optometrista nessa loja (atendimento às ${clean(choque.horario)}). ` +
     `Os atendimentos duram ${INTERVALO_ATENDIMENTO_MINUTOS} minutos; escolha outro horário ou optometrista.`;
 }
 
