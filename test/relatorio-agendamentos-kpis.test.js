@@ -55,3 +55,11 @@ test('campos legados do banco também entram corretamente nos totais', function(
   assert.equal(totais.comOS, 1);
   assert.equal(totais.valorTotal, 500);
 });
+
+test('relatórios em PDF incluem o WhatsApp do lead', function() {
+  const agenda = html.slice(html.indexOf('function gerarAgendaPDF'), html.indexOf('function gerarFaturamentoPDF'));
+  assert.match(agenda, /'Cliente', 'WhatsApp'/);
+  assert.match(agenda, /r\.WhatsApp \|\| r\.whatsapp/);
+  const faturamento = html.slice(html.indexOf('function gerarFaturamentoPDF'), html.indexOf('function gerarHistoricoPDF'));
+  assert.match(faturamento, /'Cliente', 'WhatsApp'/);
+});
