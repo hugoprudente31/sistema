@@ -3229,7 +3229,7 @@ function exportarFaturamentoCSV() {
   apiGet('/api/faturamentos').then(function(res) {
     var rows = Array.isArray(res.faturamentos) ? res.faturamentos : [];
     if (!rows.length) throw new Error('Nenhum dado de faturamento para exportar.');
-    var cols = ['id','loja','vendedor','valor_total','desconto','status_pagamento','data_venda','observacao'];
+    var cols = ['id','cliente_nome','whatsapp','loja','vendedor','valor_total','desconto','status_pagamento','data_venda','observacao'];
     function esc(v) { var s = String(v === null || v === undefined ? '' : v); return '"' + s.replace(/"/g,'""') + '"'; }
     var csv = cols.join(';') + '\n' + rows.map(function(r) {
       return cols.map(function(c) { return esc(r[c]); }).join(';');
@@ -3497,11 +3497,12 @@ function gerarAgendaPDF() {
     { label: 'Com OS',             valor: totais.comOS },
     { label: 'Valor total',        valor: money(totais.valorTotal) },
   ];
-  var colunas = ['Data', 'Cliente', 'Status', 'Status OS', 'Nº OS', 'Valor', 'Desconto', 'Vendedor', 'Optometrista', 'Loja'];
+  var colunas = ['Data', 'Cliente', 'WhatsApp', 'Status', 'Status OS', 'Nº OS', 'Valor', 'Desconto', 'Vendedor', 'Optometrista', 'Loja'];
   var linhas  = filtered.map(function(r) {
     return [
       formatDateBR(r.DataAgendamento || r.data_agendamento) || '—',
       r.NomeCompleto || r.nome || '—',
+      r.WhatsApp || r.whatsapp || '—',
       r.StatusAgenda || r.status || '—',
       r.StatusOS || r.status_os || '—',
       r.NumeroOS || r.numero_os || '—',
@@ -3528,11 +3529,12 @@ function gerarFaturamentoPDF() {
     { label: 'Ticket médio',    valor: money(pagos ? total/pagos : 0) },
     { label: 'Total de linhas', valor: rows.length },
   ];
-  var colunas = ['Data', 'Cliente', 'Nº OS', 'Status', 'Valor', 'Desconto', 'Vendedor', 'Loja'];
+  var colunas = ['Data', 'Cliente', 'WhatsApp', 'Nº OS', 'Status', 'Valor', 'Desconto', 'Vendedor', 'Loja'];
   var linhas  = rows.map(function(r) {
     return [
       formatDateBR(r.data_venda) || '—',
       r.cliente_nome || '—',
+      r.whatsapp || '—',
       r.numero_os || String(r.id),
       r.status_pagamento || r.status_os || '—',
       money(r.valor_total || 0),

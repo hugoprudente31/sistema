@@ -3836,7 +3836,7 @@ app.get("/api/faturamentos", async (req, res) => {
 
     const where  = `WHERE ${conds.join(" AND ")}`;
     const result = await pool.query(
-      `SELECT id, id AS agendamento_id, nome AS cliente_nome, numero_os, status_os, loja,
+      `SELECT id, id AS agendamento_id, nome AS cliente_nome, COALESCE(whatsapp, '') AS whatsapp, numero_os, status_os, loja,
           COALESCE(origem, '') AS origem,
           COALESCE(NULLIF(vendedor_nome,''), NULLIF(consultor_responsavel,''), NULLIF(vendedor_atendeu_nome,''), proprietario_nome, responsavel, '') AS vendedor,
           COALESCE(NULLIF(proprietario_nome,''), NULLIF(agendado_por_nome,''), NULLIF(responsavel,''), '') AS proprietario_nome,
