@@ -12,7 +12,8 @@ const {
   horaFimSabado,
   resolverJornadaLoja,
   estaOptometristaDisponivel,
-  gerarSlotsJornada
+  gerarSlotsJornada,
+  intervaloAlmocoPadrao
 } = require("../lib/horarios");
 
 // ── Horário do optometrista (menu "Informações" do bot) ───────────
@@ -509,17 +510,10 @@ function getHorariosLoja(loja, data) {
   const day = date.getDay();
   if (day === 0) return [];
 
-  let slots = generateSlots(10, day === 6 ? Number(horaFimSabado(loja).slice(0, 2)) : 18);
-  const lojaKey = stripAccents(loja).replace(/[^a-z]/g, "");
-  const isGonzagaSantos = lojaKey.includes("gonzaga") || lojaKey.includes("santos");
-  // Gonzaga: almoço 14:00–15:00 em dias úteis. Demais lojas: 13:00–14:00.
-  if (isGonzagaSantos && day >= 1 && day <= 5) {
-    slots = slots.filter((h) => h < "14:00" || h >= "15:00");
-  } else if (!isGonzagaSantos) {
-    slots = slots.filter((h) => h < "13:00" || h >= "14:00");
-  }
-
-  return slots;
+  const slots = generateSlots(10, day === 6 ? Number(horaFimSabado(loja).slice(0, 2)) : 18);
+  const almoco = intervaloAlmocoPadrao(loja, day);
+  if (!almoco) return slots;
+  return slots.filter((h) => h < almoco.inicio || h >= almoco.fim);
 }
 
 // Versão ciente da jornada semanal cadastrada no painel de Configurações

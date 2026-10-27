@@ -28,7 +28,8 @@ const {
   jornadaPadrao,
   resolverJornadaLoja,
   estaOptometristaDisponivel,
-  gerarSlotsJornada
+  gerarSlotsJornada,
+  intervaloAlmocoPadrao
 } = require("./lib/horarios");
 
 const app = express();
@@ -809,15 +810,9 @@ function horarioValidoPorRegra(data, horario, loja = "") {
     return { ok: false, message: "Escolha um horário da grade de atendimento, com intervalos de 20 minutos." };
   }
 
-  const lojaKey = clean(loja).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  const isGonzagaSantos = lojaKey.includes("gonzaga") || lojaKey.includes("santos");
-
-  if (!isGonzagaSantos && hr >= "13:00" && hr < "14:00") {
-    return { ok: false, message: "Horário de almoço não disponível. Escolha um horário fora do intervalo 13:00–14:00." };
-  }
-
-  if (isGonzagaSantos && !jornadaEspecialGonzaga && dia >= 1 && dia <= 5 && hr >= "14:00" && hr < "15:00") {
-    return { ok: false, message: "Horário de almoço não disponível em Gonzaga. Escolha um horário fora do intervalo 14:00–15:00." };
+  const almoco = jornadaEspecialGonzaga ? null : intervaloAlmocoPadrao(loja, dia);
+  if (almoco && hr >= almoco.inicio && hr < almoco.fim) {
+    return { ok: false, message: `Horário de almoço não disponível. Escolha um horário fora do intervalo ${almoco.inicio}–${almoco.fim}.` };
   }
 
   // Datas com encerramento antecipado — todas as lojas
@@ -841,18 +836,15 @@ function gerarHorariosBase(data, loja = "") {
   const inicio = 10 * 60;
   const jornadaEspecialGonzaga = isGonzagaSemAlmocoEm29Jul2026(loja, dt);
   const fim = dia === 6 ? minutosFimSabado(loja) : (jornadaEspecialGonzaga ? 19 * 60 : 18 * 60);
+  const almoco = jornadaEspecialGonzaga ? null : intervaloAlmocoPadrao(loja, dia);
   const horarios = [];
 
   for (let m = inicio; m <= fim; m += INTERVALO_ATENDIMENTO_MINUTOS) {
     const hh = String(Math.floor(m / 60)).padStart(2, "0");
     const mm = String(m % 60).padStart(2, "0");
     const h = `${hh}:${mm}`;
-    // Bloqueia a hora de almoço para todas as lojas exceto Gonzaga.
-    const lojaKey = clean(loja).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    const isGonzagaSantos = lojaKey.includes("gonzaga") || lojaKey.includes("santos");
-    const almocoPadrao = h >= "13:00" && h < "14:00";
-    const almocoGonzaga = !jornadaEspecialGonzaga && dia >= 1 && dia <= 5 && h >= "14:00" && h < "15:00";
-    if ((!isGonzagaSantos && !almocoPadrao) || (isGonzagaSantos && !almocoGonzaga)) horarios.push(h);
+    if (almoco && h >= almoco.inicio && h < almoco.fim) continue;
+    horarios.push(h);
   }
 
   // Encerramento antecipado em datas especiais — todas as lojas
@@ -2272,13 +2264,6 @@ app.get("/api/public/horarios-disponiveis", validarLandingApiKey, async (req, re
         });
       }
       horariosBase = gerarSlotsJornada(jornadaConfig);
-    } else {
-      // Unidade Santos/Gonzaga tem almoço 14:00-15:00 em dias úteis (seg-sex).
-      const lojaKey = loja.toLowerCase().replace(/[^a-z]/g, "");
-      const isGonzagaSantos = lojaKey.includes("gonzaga") || lojaKey.includes("santos");
-      if (isGonzagaSantos && !isGonzagaSemAlmocoEm29Jul2026(loja, data) && diaRef >= 1 && diaRef <= 5) {
-        horariosBase = horariosBase.filter(h => h < "14:00" || h >= "15:00");
-      }
     }
     if (bloqueioAgenda?.hora_inicio && bloqueioAgenda?.hora_fim) {
       horariosBase = horariosBase.filter(h => h < bloqueioAgenda.hora_inicio || h >= bloqueioAgenda.hora_fim);
@@ -2410,19 +2395,6 @@ app.post("/api/public/agendamentos", validarLandingApiKey, async (req, res) => {
         ok: false,
         message: `Horário indisponível. ${bloqueioHorario.motivo || "Escolha outro horário."}`.trim()
       });
-    }
-
-    if (!usaJornadaConfig) {
-      // Unidade Santos/Gonzaga: almoço 14:00-15:00 em dias úteis.
-      if (horario >= "14:00" && horario < "15:00") {
-        const lojaKeyPost = loja.toLowerCase().replace(/[^a-z]/g, "");
-        if (lojaKeyPost.includes("gonzaga") || lojaKeyPost.includes("santos")) {
-          const diaPost = new Date(dataAgendamento + "T12:00:00").getDay();
-          if (!isGonzagaSemAlmocoEm29Jul2026(loja, dataAgendamento) && diaPost >= 1 && diaPost <= 5) {
-            return res.status(400).json({ ok: false, message: "Horário de almoço não disponível para esta unidade." });
-          }
-        }
-      }
     }
 
     await client.query("BEGIN");
