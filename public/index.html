@@ -971,7 +971,7 @@
 
     <div class="card hidden" id="cardConfigHorarioOptometrista">
       <div class="topbar" style="margin-bottom:14px;">
-        <div><h3 style="margin:0;">Horário por Optometrista</h3><span class="legend-mini">Sem nenhum dia cadastrado, o optometrista continua disponível em qualquer horário que a loja esteja aberta.</span></div>
+        <div><h3 style="margin:0;">Horário por Optometrista</h3><span class="legend-mini">Selecione a unidade: cada loja edita só os seus optometristas. Sem nenhum dia cadastrado, o optometrista continua disponível em qualquer horário que a loja esteja aberta.</span></div>
         <button class="btn-relatorio secondary" onclick="carregarHorariosOptometrista()">Atualizar</button>
       </div>
       <div class="row-4">
@@ -4283,20 +4283,34 @@ function carregarOptometristasDaLojaConfig() {
   });
 }
 
+// Mesmo fluxo da grade por loja: a tabela só carrega depois de escolher a
+// unidade, e lista apenas os optometristas dela.
 function carregarHorariosOptometrista() {
+  var loja = byId('horOptoLojaSelect').value;
+  if (!loja) {
+    horariosOptometristaCache = [];
+    renderizarHorariosOptometrista();
+    return Promise.resolve();
+  }
   var optometristaId = byId('horOptoSelect').value;
-  var url = '/api/admin/configuracoes/horarios-optometrista' + (optometristaId ? '?optometrista_id=' + encodeURIComponent(optometristaId) : '');
+  var url = '/api/admin/configuracoes/horarios-optometrista?loja=' + encodeURIComponent(loja) +
+    (optometristaId ? '&optometrista_id=' + encodeURIComponent(optometristaId) : '');
   return apiGet(url).then(function(res) {
+    if (byId('horOptoLojaSelect').value !== loja) return;
     horariosOptometristaCache = Array.isArray(res.horarios) ? res.horarios : [];
     renderizarHorariosOptometrista();
   }).catch(function(err) {
-    byId('horariosOptometristaBody').innerHTML = '<tr><td colspan="7" class="err">' + escapeHtml(err.message||String(err)) + '</td></tr>';
+    byId('horariosOptometristaBody').innerHTML = '<tr><td colspan="8" class="err">' + escapeHtml(err.message||String(err)) + '</td></tr>';
   });
 }
 
 function renderizarHorariosOptometrista() {
+  if (!byId('horOptoLojaSelect').value) {
+    byId('horariosOptometristaBody').innerHTML = '<tr><td colspan="8">Selecione a loja para ver e editar os horários dos optometristas dela.</td></tr>';
+    return;
+  }
   if (!horariosOptometristaCache.length) {
-    byId('horariosOptometristaBody').innerHTML = '<tr><td colspan="8">Nenhum optometrista ativo encontrado.</td></tr>';
+    byId('horariosOptometristaBody').innerHTML = '<tr><td colspan="8">Nenhum optometrista ativo encontrado nesta loja.</td></tr>';
     return;
   }
   byId('horariosOptometristaBody').innerHTML = horariosOptometristaCache.map(function(h, idx) {
@@ -4309,7 +4323,9 @@ function renderizarHorariosOptometrista() {
       '<td>' + (h.hora_fim ? h.hora_fim.slice(0,5) : '—') + '</td>' +
       '<td>' + pausa + '</td>' +
       '<td>' + escapeHtml(h.origem||'configurado') + '</td>' +
-      '<td>' + botaoRestaurarHorarioOptometrista(h, idx) + '</td></tr>';
+      '<td><div style="display:flex;gap:6px;">' +
+        '<button class="secondary icon-btn" onclick="editarHorarioOptometrista(' + idx + ')">Editar</button>' +
+        botaoRestaurarHorarioOptometrista(h, idx) + '</div></td></tr>';
   }).join('');
 }
 
@@ -4319,6 +4335,27 @@ function renderizarHorariosOptometrista() {
 function botaoRestaurarHorarioOptometrista(h, idx) {
   if (h.origem === 'segue a loja') return '—';
   return '<button class="danger icon-btn" onclick="restaurarHorarioOptometrista(' + idx + ')">Restaurar padrão</button>';
+}
+
+// "Editar" preenche o formulário com o dia escolhido; o "Salvar dia" grava
+// só para esse optometrista, sem tocar nas outras lojas.
+function editarHorarioOptometrista(idx) {
+  var h = horariosOptometristaCache[idx];
+  if (!h) return;
+  var base = h.hora_inicio ? h : (h.jornada_loja || {});
+  var select = byId('horOptoSelect');
+  select.value = String(h.optometrista_id);
+  if (select.value !== String(h.optometrista_id)) {
+    select.insertAdjacentHTML('beforeend', '<option value="' + escapeHtml(String(h.optometrista_id)) + '">' + escapeHtml(h.optometrista_nome||'') + '</option>');
+    select.value = String(h.optometrista_id);
+  }
+  byId('horOptoDia').value = String(h.dia_semana);
+  byId('horOptoInicio').value = (base.hora_inicio || '').slice(0,5);
+  byId('horOptoFim').value = (base.hora_fim || '').slice(0,5);
+  byId('horOptoPausaInicio').value = (base.intervalo_inicio || '').slice(0,5);
+  byId('horOptoPausaFim').value = (base.intervalo_fim || '').slice(0,5);
+  setMsg('msgHorOpto', 'Editando ' + DIAS_SEMANA_NOMES[h.dia_semana] + ' de ' + (h.optometrista_nome||'') + ' (' + (h.optometrista_loja||'') + '). Ajuste e clique em "Salvar dia".', 'ok');
+  byId('cardConfigHorarioOptometrista').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function restaurarHorarioOptometrista(idx) {
@@ -4354,6 +4391,7 @@ function restaurarHorarioOptometrista(idx) {
 
 function salvarHorarioOptometrista() {
   var optometristaId = byId('horOptoSelect').value;
+  if (!byId('horOptoLojaSelect').value) { setMsg('msgHorOpto', 'Selecione a loja.', 'err'); return; }
   if (!optometristaId) { setMsg('msgHorOpto', 'Selecione o optometrista.', 'err'); return; }
   var payload = {
     optometrista_id: Number(optometristaId),
