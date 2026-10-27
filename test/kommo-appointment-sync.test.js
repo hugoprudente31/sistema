@@ -113,13 +113,17 @@ test("Kommo e landing usam os mesmos horários de atendimento", () => {
   const weekday = "2026-07-16";
   const gonzaga = scheduling.getHorariosLoja("óticas TGT - Gonzaga", weekday);
   const enseada = scheduling.getHorariosLoja("óticas TGT Enseada", weekday);
+  const ademar = scheduling.getHorariosLoja("óticas Target - Ademar de Barros", weekday);
   assert.equal(gonzaga[0], "10:00");
   assert.equal(gonzaga[1], "10:20");
   assert.equal(gonzaga.includes("09:30"), false);
-  assert.equal(gonzaga.includes("13:00"), true);
-  assert.equal(gonzaga.includes("14:00"), false);
+  assert.equal(gonzaga.includes("13:00"), false);
+  assert.equal(gonzaga.includes("14:00"), true);
   assert.equal(enseada.includes("13:00"), false);
   assert.equal(enseada.includes("14:00"), true);
+  assert.equal(ademar.includes("13:00"), true);
+  assert.equal(ademar.includes("14:00"), false);
+  assert.equal(ademar.includes("15:00"), true);
 });
 
 test("webhook ativo processa atualização de lead e bot só confirma registro real", () => {

@@ -31,7 +31,14 @@ test("jornadaPadrao replica exatamente a regra hardcoded de gerarHorariosBase/ho
     aberto: true, horaInicio: "10:00", horaFim: "15:00", intervaloInicio: "13:00", intervaloFim: "14:00", origem: "padrao"
   });
   assert.deepEqual(jornadaPadrao("óticas TGT - Gonzaga", 1), {
+    aberto: true, horaInicio: "10:00", horaFim: "18:00", intervaloInicio: "13:00", intervaloFim: "14:00", origem: "padrao"
+  });
+  // Ademar de Barros almoça das 14:00 às 15:00, inclusive aos sábados.
+  assert.deepEqual(jornadaPadrao("óticas Target - Ademar de Barros", 1), {
     aberto: true, horaInicio: "10:00", horaFim: "18:00", intervaloInicio: "14:00", intervaloFim: "15:00", origem: "padrao"
+  });
+  assert.deepEqual(jornadaPadrao("óticas Target - Ademar de Barros", 6), {
+    aberto: true, horaInicio: "10:00", horaFim: "15:00", intervaloInicio: "14:00", intervaloFim: "15:00", origem: "padrao"
   });
   // Gonzaga aos sábados não tem bloqueio de almoço (mesma regra hoje hardcoded).
   assert.deepEqual(jornadaPadrao("óticas TGT - Gonzaga", 6), {
