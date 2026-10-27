@@ -4299,7 +4299,7 @@ function renderizarHorariosOptometrista() {
     byId('horariosOptometristaBody').innerHTML = '<tr><td colspan="8">Nenhum optometrista ativo encontrado.</td></tr>';
     return;
   }
-  byId('horariosOptometristaBody').innerHTML = horariosOptometristaCache.map(function(h) {
+  byId('horariosOptometristaBody').innerHTML = horariosOptometristaCache.map(function(h, idx) {
     var pausa = (h.intervalo_inicio && h.intervalo_fim) ? (h.intervalo_inicio.slice(0,5) + '–' + h.intervalo_fim.slice(0,5)) : '—';
     return '<tr>' +
       '<td>' + escapeHtml(h.optometrista_nome||'') + '</td>' +
@@ -4309,8 +4309,47 @@ function renderizarHorariosOptometrista() {
       '<td>' + (h.hora_fim ? h.hora_fim.slice(0,5) : '—') + '</td>' +
       '<td>' + pausa + '</td>' +
       '<td>' + escapeHtml(h.origem||'configurado') + '</td>' +
-      '<td>' + (h.id ? '<button class="danger icon-btn" onclick="removerHorarioOptometrista(' + h.id + ')">Restaurar padrão</button>' : '—') + '</td></tr>';
+      '<td>' + botaoRestaurarHorarioOptometrista(h, idx) + '</td></tr>';
   }).join('');
+}
+
+// "Restaurar padrão" volta o dia para a jornada da loja. Quando o
+// optometrista tem outros dias cadastrados, apagar a linha deixaria o dia
+// como "não atende"; por isso o dia é gravado com o horário da loja.
+function botaoRestaurarHorarioOptometrista(h, idx) {
+  if (h.origem === 'segue a loja') return '—';
+  return '<button class="danger icon-btn" onclick="restaurarHorarioOptometrista(' + idx + ')">Restaurar padrão</button>';
+}
+
+function restaurarHorarioOptometrista(idx) {
+  var h = horariosOptometristaCache[idx];
+  if (!h) return;
+  var loja = h.jornada_loja || {};
+  var outrosConfigurados = horariosOptometristaCache.some(function(o) {
+    return o !== h && Number(o.optometrista_id) === Number(h.optometrista_id) && o.id;
+  });
+  var nomeDia = DIAS_SEMANA_NOMES[h.dia_semana];
+  // Sem outros dias cadastrados, remover a linha já devolve o optometrista
+  // à jornada da loja em todos os dias.
+  if (h.id && (!outrosConfigurados || !loja.aberto)) {
+    if (!confirm('Restaurar ' + nomeDia + ' de ' + (h.optometrista_nome||'') + ' para o padrão da loja?')) return;
+    return excluirHorarioOptometrista(h.id);
+  }
+  if (!loja.aberto) { toast('A loja não abre neste dia; o optometrista já segue o padrão.', 'ok'); return; }
+  if (!confirm('Restaurar ' + nomeDia + ' de ' + (h.optometrista_nome||'') + ' para o horário da loja (' +
+    (loja.hora_inicio||'').slice(0,5) + '–' + (loja.hora_fim||'').slice(0,5) + ')?')) return;
+  apiPost('/api/admin/configuracoes/horarios-optometrista', {
+    optometrista_id: Number(h.optometrista_id),
+    dia_semana: Number(h.dia_semana),
+    hora_inicio: (loja.hora_inicio||'').slice(0,5),
+    hora_fim: (loja.hora_fim||'').slice(0,5),
+    intervalo_inicio: loja.intervalo_inicio ? loja.intervalo_inicio.slice(0,5) : null,
+    intervalo_fim: loja.intervalo_fim ? loja.intervalo_fim.slice(0,5) : null
+  }).then(function(res) {
+    if (!res.ok) throw new Error(res.message || 'Erro ao restaurar horário.');
+    toast('Horário restaurado para o padrão da loja.', 'ok');
+    return carregarHorariosOptometrista();
+  }).catch(function(err) { setMsg('msgHorOpto', err.message || String(err), 'err'); });
 }
 
 function salvarHorarioOptometrista() {
@@ -4340,9 +4379,8 @@ function salvarHorarioOptometrista() {
     .finally(function() { showLoading(false); });
 }
 
-function removerHorarioOptometrista(id) {
-  if (!confirm('Remover este horário? O optometrista volta a ficar disponível em qualquer horário da loja.')) return;
-  fetch('/api/admin/configuracoes/horarios-optometrista/' + encodeURIComponent(id), { method: 'DELETE', credentials: 'same-origin' })
+function excluirHorarioOptometrista(id) {
+  return fetch('/api/admin/configuracoes/horarios-optometrista/' + encodeURIComponent(id), { method: 'DELETE', credentials: 'same-origin' })
     .then(function(r) { return r.json(); })
     .then(function(res) {
       if (!res.ok) throw new Error(res.message || 'Erro ao remover horário.');

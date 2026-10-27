@@ -4238,9 +4238,19 @@ app.get("/api/admin/configuracoes/horarios-optometrista", requireAdminOuCentral,
     for (const optometrista of optometristas.rows) {
       const configurados = porOptometrista.get(Number(optometrista.id));
       for (const diaSemana of DIA_SEMANA_VALIDOS) {
+        // Jornada da loja no dia: é o "padrão" que o painel usa para
+        // restaurar qualquer linha, inclusive dias marcados como "não atende".
+        const jornadaLoja = await resolverJornadaLoja(pool, optometrista.loja, diaSemana);
+        const jornada_loja = {
+          aberto: jornadaLoja.aberto,
+          hora_inicio: jornadaLoja.horaInicio,
+          hora_fim: jornadaLoja.horaFim,
+          intervalo_inicio: jornadaLoja.intervaloInicio,
+          intervalo_fim: jornadaLoja.intervaloFim
+        };
         const configurado = configurados?.get(diaSemana);
         if (configurado) {
-          horarios.push({ ...configurado, disponivel: true, origem: "configurado" });
+          horarios.push({ ...configurado, disponivel: true, origem: "configurado", jornada_loja });
           continue;
         }
         if (configurados?.size) {
@@ -4255,11 +4265,11 @@ app.get("/api/admin/configuracoes/horarios-optometrista", requireAdminOuCentral,
             intervalo_inicio: null,
             intervalo_fim: null,
             disponivel: false,
-            origem: "não atende"
+            origem: "não atende",
+            jornada_loja
           });
           continue;
         }
-        const jornadaLoja = await resolverJornadaLoja(pool, optometrista.loja, diaSemana);
         horarios.push({
           id: null,
           optometrista_id: optometrista.id,
@@ -4271,7 +4281,8 @@ app.get("/api/admin/configuracoes/horarios-optometrista", requireAdminOuCentral,
           intervalo_inicio: jornadaLoja.intervaloInicio,
           intervalo_fim: jornadaLoja.intervaloFim,
           disponivel: jornadaLoja.aberto,
-          origem: "segue a loja"
+          origem: "segue a loja",
+          jornada_loja
         });
       }
     }
