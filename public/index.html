@@ -890,8 +890,8 @@
 
     <div class="card hidden" id="cardConfigGradeHorario">
       <div class="topbar" style="margin-bottom:14px;">
-        <div><h3 style="margin:0;">Horários de Atendimento</h3><span class="legend-mini">Edite o padrão global ou selecione uma unidade específica.</span></div>
-        <div style="min-width:390px"><label>Editando:</label><select id="gradeHorarioLoja" onchange="carregarGradeHorario()"><option value="">Padrão Global (vale para todas as unidades)</option></select></div>
+        <div><h3 style="margin:0;">Horários de Atendimento</h3><span class="legend-mini">Selecione a unidade: cada loja tem a sua própria jornada.</span></div>
+        <div style="min-width:390px"><label>Editando:</label><select id="gradeHorarioLoja" onchange="carregarGradeHorario()"><option value="">Selecione a unidade</option></select></div>
       </div>
       <div class="scroll-x"><table><thead><tr><th>Dia</th><th>Fechado</th><th>Abre</th><th>Fecha</th><th>Pausa início</th><th>Pausa fim</th></tr></thead><tbody id="gradeHorarioBody"></tbody></table></div>
       <button style="margin-top:14px" onclick="salvarGradeHorario()">Salvar Horários</button>
@@ -4035,8 +4035,7 @@ function desativarUnidade(id) {
 
 function horarioPadraoGrade(dia) {
   if (dia === 0) return { aberto:false, hora_inicio:'', hora_fim:'', intervalo_inicio:'', intervalo_fim:'' };
-  // Sábado: Santos (Gonzaga) até 16:00; Guarujá até 15:00. No padrão global
-  // (nenhuma loja selecionada) vale o horário mais comum, o do Guarujá.
+  // Sábado: Santos (Gonzaga) até 16:00; Guarujá até 15:00.
   var lojaGrade = normalizeKey(byId('gradeHorarioLoja') ? byId('gradeHorarioLoja').value : '');
   var santos = lojaGrade.indexOf('gonzaga') > -1 || lojaGrade.indexOf('santos') > -1;
   return { aberto:true, hora_inicio:'10:00', hora_fim:dia === 6 ? (santos ? '16:00' : '15:00') : '18:00', intervalo_inicio:dia === 6 ? '' : '13:00', intervalo_fim:dia === 6 ? '' : '14:00' };
@@ -4065,7 +4064,11 @@ function carregarGradeHorario() {
 
 function salvarGradeHorario() {
   var lojaSelecionada = byId('gradeHorarioLoja').value;
-  var lojas = lojaSelecionada ? [lojaSelecionada] : (state.lojas||[]).map(function(l){return l.nome||l.Loja;});
+  // Cada loja tem jornada própria: nunca grava a mesma grade em todas as
+  // unidades de uma vez (isso sobrescrevia o horário individual de cada loja).
+  if (!lojaSelecionada) { setMsg('msgGradeHorario', 'Selecione a unidade antes de salvar os horários.', 'err'); return; }
+  var lojas = [lojaSelecionada];
+  setMsg('msgGradeHorario', '', '');
   var linhas = byId('gradeHorarioBody').querySelectorAll('tr[data-grade-dia]');
   var requisicoes = [];
   linhas.forEach(function(tr) {
@@ -4080,7 +4083,7 @@ function salvarGradeHorario() {
     lojas.forEach(function(loja){ requisicoes.push(apiPost('/api/admin/configuracoes/horarios-loja', Object.assign({loja:loja}, payloadBase))); });
   });
   showLoading(true);
-  Promise.all(requisicoes).then(function(){toast('Horários salvos e sincronizados.','ok');return carregarHorariosLoja();})
+  Promise.all(requisicoes).then(function(){toast('Horários de ' + lojaSelecionada + ' salvos e sincronizados.','ok');return Promise.all([carregarGradeHorario(), carregarHorariosLoja()]);})
     .catch(function(err){setMsg('msgGradeHorario',err.message||String(err),'err');}).finally(function(){showLoading(false);});
 }
 
@@ -4150,7 +4153,7 @@ function prepararLojasConfig() {
   var grade = byId('gradeHorarioLoja');
   if (grade) {
     var gradeAtual = grade.value;
-    grade.innerHTML = '<option value="">Padrão Global (vale para todas as unidades)</option>' +
+    grade.innerHTML = '<option value="">Selecione a unidade</option>' +
       (state.lojas || []).map(function(l) {
         var nome = l.Loja || l.nome || '';
         return '<option value="' + escapeHtml(nome) + '">' + escapeHtml(nome) + '</option>';
