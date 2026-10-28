@@ -52,7 +52,7 @@ function ag(extra) {
   return Object.assign({
     id: 100, nome: 'Maria Silva', whatsapp: '13999999999', email: 'maria@x.com',
     loja: E, optometrista: 'Ana', status: 'Confirmado', observacao: '',
-    compareceu: 'Pendente', numero_os: null, valor_venda: 0, kommo_lead_id: null,
+    compareceu: 'Pendente', numero_os: '123', valor_venda: 0, kommo_lead_id: null,
     excluido_em: null, horario: '10:15', data_agendamento: new Date(QUARTA_DATE.getTime())
   }, extra || {});
 }
@@ -166,7 +166,7 @@ test('origem vazia reenviada por quem não vê a origem não transfere a autoria
   try {
     const r = await fetch(baseUrl + '/api/agendamentos/100', {
       method: 'PATCH', headers: H(tok('gerente de loja', E)),
-      body: JSON.stringify(payloadModal({ horario: '10:20', numeroOS: '999' }))
+      body: JSON.stringify(payloadModal({ horario: '10:20', numeroOS: '999', valorVenda: '350' }))
     });
     assert.equal(r.status, 200);
     assert.equal(c.captured.params[31], false, 'só lançar OS não muda o Agendado por');
