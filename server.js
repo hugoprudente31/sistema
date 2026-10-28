@@ -4207,26 +4207,33 @@ app.delete("/api/admin/configuracoes/horarios-loja/:id", requireAdminOuCentral, 
 
 app.get("/api/admin/configuracoes/horarios-optometrista", requireAdminOuCentral, async (req, res) => {
   try {
+    // Filtros opcionais: optometrista e/ou loja. Com a loja, o painel lista e
+    // edita só os optometristas daquela unidade, sem misturar as outras lojas.
     const params = [];
-    let where = "";
+    const filtros = [];
     const optometristaFiltro = clean(req.query.optometrista_id);
     if (optometristaFiltro) {
       params.push(Number(optometristaFiltro));
-      where = "WHERE ho.optometrista_id = $1";
+      filtros.push(`o.id = $${params.length}`);
+    }
+    const lojaFiltro = clean(req.query.loja) ? (normalizeLojaPublica(req.query.loja) || clean(req.query.loja)) : "";
+    if (lojaFiltro) {
+      params.push(lojaFiltro);
+      filtros.push(`LOWER(REGEXP_REPLACE(o.loja, '\\s*-\\s*', ' ', 'g')) = LOWER(REGEXP_REPLACE($${params.length}, '\\s*-\\s*', ' ', 'g'))`);
     }
     const result = await pool.query(
       `SELECT ho.*, o.nome AS optometrista_nome, o.loja AS optometrista_loja
          FROM horarios_optometrista ho
          JOIN optometristas o ON o.id = ho.optometrista_id
-         ${where}
+         ${filtros.length ? "WHERE " + filtros.join(" AND ") : ""}
         ORDER BY o.nome ASC, ho.dia_semana ASC`,
       params
     );
     const optometristas = await pool.query(
-      `SELECT id, nome, loja FROM optometristas
-       WHERE ativo = true ${optometristaFiltro ? "AND id = $1" : ""}
-       ORDER BY nome ASC`,
-      optometristaFiltro ? [Number(optometristaFiltro)] : []
+      `SELECT o.id, o.nome, o.loja FROM optometristas o
+       WHERE o.ativo = true ${filtros.length ? "AND " + filtros.join(" AND ") : ""}
+       ORDER BY o.nome ASC`,
+      params
     );
     const porOptometrista = new Map();
     for (const row of result.rows) {
