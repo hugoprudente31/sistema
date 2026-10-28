@@ -630,7 +630,7 @@
           <div class="row"><div><label>Número da OS</label><input id="editNumeroOS" type="text"></div><div><label>Data de Abertura da OS</label><input id="editDataAberturaOS" type="date"></div></div>
           <div class="row"><div><label>Data de Entrada da OS</label><input id="editDataEntradaOS" type="date"></div><div><label>Data prevista de entrega</label><input id="editDataEntregaOS" type="date"></div></div>
           <div class="row"><div><label>Data de Finalização da OS</label><input id="editDataFinalizacaoOS" type="date"></div><div><label>Vendedor Nome</label><input id="editVendedorNome" type="text"></div></div>
-          <div class="row"><div><label>Valor Venda</label><input id="editValorVenda" type="number" min="0" step="0.01"></div><div><label>Desconto</label><input id="editDesconto" type="number" min="0" step="0.01"></div></div>
+          <div class="row"><div><label>Valor Venda (obrigatório com OS)</label><input id="editValorVenda" type="number" min="0" step="0.01"></div><div><label>Desconto</label><input id="editDesconto" type="number" min="0" step="0.01"></div></div>
           <div><label>Observação</label><textarea id="editObservacao"></textarea></div>
           <div class="row" style="margin-top:14px"><div><button id="editSalvarBtn" onclick="salvarEdicaoLinha()">Salvar edição</button></div><div><button class="secondary" onclick="fecharModalEdicao()">Cancelar</button></div></div>
           <div id="msgEdit" class="msg"></div>
@@ -2730,6 +2730,17 @@ function salvarEdicaoLinha() {
     setMsg('msgEdit', 'ID do agendamento não encontrado.', 'err');
     return;
   }
+  // Com número de OS preenchido, o valor da OS é obrigatório (todas as lojas).
+  // Igual ao servidor: só cobra quando a OS ou o valor foram alterados, para
+  // não travar a edição de registros antigos que já tinham OS sem valor.
+  var linhaOriginal = state.editingRow || {};
+  var osOuValorAlterado = payload.numeroOS !== String(linhaOriginal.NumeroOS || '').trim() ||
+    (Number(String(payload.valorVenda).replace(',', '.')) || 0) !== (Number(linhaOriginal.ValorVenda) || 0);
+  if (state.editingMode !== 'reagendar' && payload.numeroOS && osOuValorAlterado && !byId('editValorVenda').disabled &&
+      !(Number(String(payload.valorVenda).replace(',', '.')) > 0)) {
+    setMsg('msgEdit', 'Informe o valor da OS para registrar a OS.', 'err');
+    return;
+  }
 
   showLoading(true);
   apiPatch('/api/agendamentos/' + encodeURIComponent(id), payload)
@@ -2888,10 +2899,14 @@ function runAction(fn, id) {
 function abrirModalOS(id, row) {
   row = row || {};
   var podeVerFinanceiroOS = !!(state.user && state.user.permissions && state.user.permissions.canViewFinance);
+  // O valor da OS é obrigatório para todo perfil que registra OS, em todas as
+  // lojas; desconto e vendedor continuam restritos a quem vê o financeiro.
+  var campoValorOS = '<div><label>Valor da OS (R$) *</label><input id="osValor" type="number" min="0.01" step="0.01" required value="' + escapeHtml(String(row.ValorVenda||'')) + '"></div>';
   var camposFinanceirosOS = podeVerFinanceiroOS ?
-    ('<div class="row"><div><label>Valor da OS (R$)</label><input id="osValor" type="number" min="0" step="0.01" value="' + escapeHtml(String(row.ValorVenda||'')) + '"></div>' +
+    ('<div class="row">' + campoValorOS +
     '<div><label>Desconto (R$)</label><input id="osDesconto" type="number" min="0" step="0.01" value="' + escapeHtml(String(row.Desconto||'')) + '"></div></div>' +
-    '<div><label>Vendedor responsável</label><input id="osVendedor" type="text" value="' + escapeHtml(row.VendedorNome||row.AgendadoPorNome||row.ProprietarioNome||'') + '"></div>') : '';
+    '<div><label>Vendedor responsável</label><input id="osVendedor" type="text" value="' + escapeHtml(row.VendedorNome||row.AgendadoPorNome||row.ProprietarioNome||'') + '"></div>') :
+    ('<div class="row">' + campoValorOS + '</div>');
   var backdrop = document.createElement('div');
   backdrop.id = 'osModalBackdrop';
   backdrop.className = 'modal-backdrop';
@@ -2919,16 +2934,22 @@ function salvarOS_Modal(id) {
     document.getElementById('msgOSModal').className = 'msg err';
     return;
   }
+  var valorOS = (document.getElementById('osValor')||{}).value || '';
+  if (!(Number(String(valorOS).replace(',', '.')) > 0)) {
+    document.getElementById('msgOSModal').textContent = 'Valor da OS é obrigatório.';
+    document.getElementById('msgOSModal').className = 'msg err';
+    return;
+  }
   var payload = {
     numeroOS: numeroOS.trim(),
+    valorVenda: valorOS,
     statusOS: (document.getElementById('osStatus')||{}).value || '',
     dataAberturaOS: (document.getElementById('osAbertura')||{}).value || '',
     dataEntradaOS: (document.getElementById('osEntrada')||{}).value || '',
     dataEntregaOS: (document.getElementById('osEntrega')||{}).value || '',
     dataFinalizacaoOS: (document.getElementById('osFinal')||{}).value || ''
   };
-  if (document.getElementById('osValor')) {
-    payload.valorVenda = document.getElementById('osValor').value || '';
+  if (document.getElementById('osDesconto')) {
     payload.desconto = (document.getElementById('osDesconto')||{}).value || '';
     payload.vendedorNome = (document.getElementById('osVendedor')||{}).value || '';
   }

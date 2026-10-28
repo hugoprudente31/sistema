@@ -176,7 +176,7 @@ test('admin: PATCH com campos OS em qualquer loja — 200', async function() {
   try {
     const r = await fetch(baseUrl + '/api/agendamentos/100', {
       method: 'PATCH', headers: H(tok('admin', G)),
-      body: JSON.stringify({ numero_os: 'OS999' })
+      body: JSON.stringify({ numero_os: 'OS999', valor_venda: 450 })
     });
     assert.equal(r.status, 200);
   } finally { r1(); r2(); }
@@ -624,7 +624,7 @@ test('gerente Gonzaga: PATCH com OS na própria loja — 200', async function() 
   try {
     const r = await fetch(baseUrl + '/api/agendamentos/100', {
       method: 'PATCH', headers: H(tok('gerente de loja', G)),
-      body: JSON.stringify({ numero_os: 'OS100' })
+      body: JSON.stringify({ numero_os: 'OS100', valor_venda: 320 })
     });
     assert.equal(r.status, 200);
   } finally { r1(); r2(); }
@@ -767,7 +767,7 @@ test('comprador Enseada: PATCH OS na própria loja — 200', async function() {
   try {
     const r = await fetch(baseUrl + '/api/agendamentos/100', {
       method: 'PATCH', headers: H(tok('comprador', E)),
-      body: JSON.stringify({ numero_os: 'OS200', status_os: 'Aberta' })
+      body: JSON.stringify({ numero_os: 'OS200', status_os: 'Aberta', valor_venda: 280 })
     });
     assert.equal(r.status, 200);
   } finally { r1(); r2(); }
@@ -959,7 +959,7 @@ test('Landing Page: atualização de OS preserva permanentemente a autoria de Se
   try {
     const response = await fetch(baseUrl + '/api/agendamentos/100', {
       method: 'PATCH', headers: H(tok('gerente de loja', P)),
-      body: JSON.stringify({ numeroOS: 'OS-LP-1' })
+      body: JSON.stringify({ numeroOS: 'OS-LP-1', valorVenda: '199.90' })
     });
     assert.equal(response.status, 200);
     assert.equal(r2.params.params[IDX_AGENDADO_POR_NOME], 'Setor de Relacionamento Pós Vendas');
@@ -1060,13 +1060,53 @@ test('vendedor Gonzaga: PATCH data_abertura_os — 200 (OS liberada)', async fun
   } finally { r1(); r2(); }
 });
 
+// OS sem valor: obrigatória em todas as lojas, para todos os perfis que registram OS.
+for (const [perfil, loja] of [['admin', E], ['gerente de loja', G], ['comprador', P], ['atendimento central', A], ['consultor de vendas', G]]) {
+  test(`${perfil} (${loja}): registrar OS sem valor — 400`, async function() {
+    const r1 = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(loja)] } });
+    const r2 = withConnect(ag(loja, { numero_os: 'OS-SEM-VALOR' }));
+    try {
+      for (const body of [{ numero_os: 'OS-SEM-VALOR' }, { numeroOS: 'OS-SEM-VALOR', valorVenda: '' }, { numero_os: 'OS-SEM-VALOR', valor_venda: 0 }]) {
+        const r = await fetch(baseUrl + '/api/agendamentos/100', {
+          method: 'PATCH', headers: H(tok(perfil, loja)), body: JSON.stringify(body)
+        });
+        assert.equal(r.status, 400, JSON.stringify(body));
+        assert.match((await r.json()).message, /valor da OS/);
+      }
+    } finally { r1(); r2(); }
+  });
+}
+
+test('OS antiga sem valor: editar outro campo continua liberado; zerar valor de OS é bloqueado', async function() {
+  const legado = ag(E, { numero_os: 'OS-ANTIGA', valor_venda: 0 });
+  const r1 = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [legado] } });
+  const r2 = withConnect(legado);
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('gerente de loja', E)),
+      body: JSON.stringify({ numeroOS: 'OS-ANTIGA', valorVenda: '', observacao: 'ligar amanhã' })
+    });
+    assert.equal(r.status, 200);
+  } finally { r1(); r2(); }
+
+  const comValor = ag(E, { numero_os: 'OS-1', valor_venda: 300 });
+  const r3 = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [comValor] } });
+  const r4 = withConnect(comValor);
+  try {
+    const r = await fetch(baseUrl + '/api/agendamentos/100', {
+      method: 'PATCH', headers: H(tok('gerente de loja', E)), body: JSON.stringify({ valorVenda: 0 })
+    });
+    assert.equal(r.status, 400);
+  } finally { r3(); r4(); }
+});
+
 test('consultor Gonzaga: PATCH numero_os — 200 (OS liberada)', async function() {
   const r1 = withQuery({ 'SELECT * FROM agendamentos WHERE id': { rows: [ag(G)] } });
   const r2 = withConnect(ag(G, { numero_os: 'OS-GONZAGA-1' }));
   try {
     const r = await fetch(baseUrl + '/api/agendamentos/100', {
       method: 'PATCH', headers: H(tok('consultor de vendas', G)),
-      body: JSON.stringify({ numero_os: 'OS-GONZAGA-1' })
+      body: JSON.stringify({ numero_os: 'OS-GONZAGA-1', valor_venda: 500 })
     });
     assert.equal(r.status, 200);
   } finally { r1(); r2(); }

@@ -3109,6 +3109,23 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
       ? b.valor_venda
       : (Object.prototype.hasOwnProperty.call(b, "valorVenda") ? b.valorVenda : current.rows[0].valor_venda);
     const valorVendaFinal = Number(String(valorVendaRecebido ?? 0).replace(",", ".")) || 0;
+    // Toda OS registrada precisa ter valor, em todas as lojas e para todos os
+    // perfis que registram OS. Só validamos quando a requisição mexe no número
+    // da OS ou no valor, para não travar edições de registros antigos sem valor.
+    const valorVendaAtual = Number(current.rows[0].valor_venda) || 0;
+    const valorVendaEnviado = Object.prototype.hasOwnProperty.call(b, "valor_venda") ||
+      Object.prototype.hasOwnProperty.call(b, "valorVenda");
+    const valorVendaEfetivo = valorVendaEnviado && clean(valorVendaRecebido) !== ""
+      ? valorVendaFinal
+      : valorVendaAtual;
+    const numeroOSAtual = clean(current.rows[0].numero_os);
+    const numeroOSEnviado = clean(b.numero_os || b.numeroOS);
+    const numeroOSFinal = numeroOSEnviado || numeroOSAtual;
+    const alterouNumeroOS = Boolean(numeroOSEnviado) && numeroOSEnviado !== numeroOSAtual;
+    const alterouValorVenda = valorVendaEnviado && valorVendaEfetivo !== valorVendaAtual;
+    if (numeroOSFinal && (alterouNumeroOS || alterouValorVenda) && !(valorVendaEfetivo > 0)) {
+      return res.status(400).json({ ok: false, message: "Informe o valor da OS (maior que zero) para registrar a OS." });
+    }
     const statusAgendaSolicitado = clean(statusResultadoOptometrista || b.status || b.statusAgenda || current.rows[0].status);
     const statusOSSolicitado = clean(b.status_os || b.statusOS || current.rows[0].status_os);
     const normalizarStatus = (valor) => clean(valor).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
