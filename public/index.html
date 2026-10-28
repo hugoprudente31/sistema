@@ -484,6 +484,7 @@
     <div class="card hidden" id="cardAgendamento">
       <h3>Novo Agendamento</h3>
       <div class="notice"><strong>Regras de horário</strong>Segunda a sexta: <b>10:00 às 18:00</b><br>Sábado: <b>Santos 10:00 às 16:00 · Guarujá 10:00 às 15:00</b><br>Domingo e feriados: <b>bloqueados</b></div>
+      <div class="row"><div><label>Tipo de atendimento *</label><select id="tipoAtendimento"><option value="Exame de vista">Exame de vista</option><option value="Garantia">Garantia</option></select></div><div></div></div>
       <div class="row"><div><label>Origem *</label><select id="origem"></select></div><div><label>Nome completo *</label><input id="nomeCompleto" type="text" placeholder="Nome do cliente"></div></div>
       <div class="row"><div><label>WhatsApp *</label><input id="whatsApp" type="text" placeholder="13999999999"></div><div><label>Email *</label><input id="emailCliente" type="email" placeholder="cliente@email.com"></div></div>
       <div class="row"><div><label>Loja *</label><select id="loja" onchange="carregarOptometristas()"></select></div><div><label>Optometrista *</label><select id="optometrista"></select></div></div>
@@ -533,6 +534,7 @@
           <div><label>Vendedor / Consultor</label><input id="filtroVendedor" type="text" oninput="debouncedReload()" placeholder="Nome do vendedor ou consultor"></div>
           <div><label>Origem</label><select id="filtroOrigem" onchange="recarregarComFiltros()"><option value="">Todas</option></select></div>
           <div><label>Tag de acesso</label><select id="filtroAccessTag" onchange="recarregarComFiltros()"></select></div>
+          <div><label>Tipo de atendimento</label><select id="filtroTipoAtendimento" onchange="recarregarComFiltros()"><option value="">Todos</option><option value="Exame de vista">Exame de vista</option><option value="Garantia">Garantia</option></select></div>
         </div>
         <div style="display:flex;gap:20px;align-items:center;margin-top:6px;">
           <div class="checkbox-line"><input id="filtroMeus" type="checkbox" onchange="recarregarComFiltros()"><label for="filtroMeus" style="margin:0;">Meus Serviços</label></div>
@@ -626,7 +628,7 @@
           <div class="row"><div><label>Loja</label><select id="editLoja"></select></div><div><label>Optometrista</label><input id="editOptometrista" type="text"></div></div>
           <div class="row"><div><label>Data do Agendamento</label><input id="editDataAgendamento" type="date"></div><div><label>Horário</label><input id="editHorario" type="time" step="1200"></div></div>
           <div class="row"><div><label>Status do Agendamento</label><select id="editStatusAgenda"><option>Agendado</option><option>Reagendado</option><option>Confirmado</option><option>Compareceu</option><option>Não Compareceu</option><option>OS em Andamento</option><option>Concluído</option><option>Cancelado</option></select></div><div><label>Presença</label><select id="editCompareceu"><option value="Pendente">Pendente</option><option value="Sim">Sim — compareceu</option><option value="Não">Não — não compareceu</option></select></div></div>
-          <div class="row"><div><label>Status da OS</label><select id="editStatusOS"><option value=""></option><option>Aberta</option><option>Em produção</option><option>Recebida</option><option>Pronta</option><option>Entregue</option><option>Concluído</option><option>Cancelada</option><option>Cancelado</option><option>Reembolso</option></select></div><div></div></div>
+          <div class="row"><div><label>Status da OS</label><select id="editStatusOS"><option value=""></option><option>Aberta</option><option>Em produção</option><option>Recebida</option><option>Pronta</option><option>Entregue</option><option>Concluído</option><option>Cancelada</option><option>Cancelado</option><option>Reembolso</option></select></div><div><label>Tipo de atendimento</label><select id="editTipoAtendimento"><option value="Exame de vista">Exame de vista</option><option value="Garantia">Garantia</option></select></div></div>
           <div class="row"><div><label>Número da OS</label><input id="editNumeroOS" type="text"></div><div><label>Data de Abertura da OS</label><input id="editDataAberturaOS" type="date"></div></div>
           <div class="row"><div><label>Data de Entrada da OS</label><input id="editDataEntradaOS" type="date"></div><div><label>Data prevista de entrega</label><input id="editDataEntregaOS" type="date"></div></div>
           <div class="row"><div><label>Data de Finalização da OS</label><input id="editDataFinalizacaoOS" type="date"></div><div><label>Vendedor Nome</label><input id="editVendedorNome" type="text"></div></div>
@@ -1281,6 +1283,7 @@ function mapAgendamentoDb(r) {
     DataAgendamentoBR: r.data_agendamento,
     Horario: r.horario || '',
     Observacao: r.observacao || '',
+    TipoAtendimento: normalizeKey(r.tipo_atendimento).indexOf('garantia') > -1 ? 'Garantia' : 'Exame de vista',
     StatusAgenda: r.status || 'Agendado',
     Compareceu: r.compareceu || 'Pendente',
     ResultadoOptometrista: (r.resultado_optometrista && normalizeKey(r.resultado_optometrista) !== 'pendente') ? r.resultado_optometrista : (normalizeKey(r.patologia) === 'sim' ? 'Patologia' : (normalizeKey(r.compareceu) === 'sim' ? 'Check-in Sim veio' : (normalizeKey(r.compareceu) === 'nao' ? 'Check-in Não veio' : 'Pendente'))),
@@ -1360,6 +1363,7 @@ function buildAgendamentosUrl(extra) {
   if (f.proprietario)p.push('proprietario='+ encodeURIComponent(f.proprietario));
   if (f.origem)      p.push('origem='      + encodeURIComponent(f.origem));
   if (f.accessTag)   p.push('accessTag='   + encodeURIComponent(f.accessTag));
+  if (f.tipoAtendimento) p.push('tipoAtendimento=' + encodeURIComponent(f.tipoAtendimento));
   if (f.resultado && f.resultado.length) p.push('resultado=' + encodeURIComponent(f.resultado.join('|')));
   if (f.meus === 'true') p.push('meus=true');
   if (f.minhasOSAtivas === 'true') p.push('minhasOSAtivas=true');
@@ -2396,6 +2400,7 @@ function coletarFiltros() {
     proprietario: byId('filtroOwner') ? byId('filtroOwner').value.trim() : '',
     origem: byId('filtroOrigem') ? byId('filtroOrigem').value.trim() : '',
     accessTag: byId('filtroAccessTag').value.trim(),
+    tipoAtendimento: byId('filtroTipoAtendimento') ? byId('filtroTipoAtendimento').value.trim() : '',
     periodoDias: byId('filtroPeriodoDias').value.trim(),
     resultado: (function() {
       var ativos = [];
@@ -2434,7 +2439,7 @@ function coletarFiltros() {
 }
 
 function limparFiltros() {
-  ['filtroCliente', 'filtroOptometrista', 'filtroVendedor', 'filtroOwner', 'filtroOrigem', 'filtroStatus', 'filtroStatusOS', 'filtroEstagio', 'filtroAccessTag', 'filtroPeriodoDias'].forEach(function(id) {
+  ['filtroCliente', 'filtroOptometrista', 'filtroVendedor', 'filtroOwner', 'filtroOrigem', 'filtroStatus', 'filtroStatusOS', 'filtroEstagio', 'filtroAccessTag', 'filtroTipoAtendimento', 'filtroPeriodoDias'].forEach(function(id) {
     if (byId(id)) byId(id).value = '';
   });
   aplicarFiltroMesAtual(true);
@@ -2520,6 +2525,7 @@ function salvarAgendamento() {
     observacao: byId('observacao').value.trim(),
     statusAgenda: byId('statusAgenda').value.trim(),
     accessTags: byId('accessTag').value.trim(),
+    tipoAtendimento: byId('tipoAtendimento').value || 'Exame de vista',
     consultorNome: (byId('consultorVendedor') ? byId('consultorVendedor').value.trim() : '')
   };
 
@@ -2559,7 +2565,8 @@ function salvarAgendamento() {
       vendedor_nome: payload.consultorNome,
       vendedor_atendeu_nome: payload.consultorNome,
       consultor_responsavel: payload.consultorNome,
-      access_tags: payload.accessTags || null
+      access_tags: payload.accessTags || null,
+      tipo_atendimento: payload.tipoAtendimento
     }).then(function(agendaRes) {
       return { cliente: clienteRes, agenda: agendaRes };
     });
@@ -2587,6 +2594,7 @@ function limparFormulario(clearMsg) {
   byId('origem').value = '';
   byId('statusAgenda').value = '';
   byId('accessTag').value = '';
+  byId('tipoAtendimento').value = 'Exame de vista';
   if (!byId('loja').disabled) {
     byId('loja').value = '';
     byId('optometrista').innerHTML = '<option value="">Selecione a loja primeiro</option>';
@@ -2625,6 +2633,7 @@ function abrirModalEdicao(id, modo) {
   byId('editValorVenda').value = row.ValorVenda || '';
   byId('editDesconto').value = row.Desconto || '';
   byId('editObservacao').value = row.Observacao || '';
+  byId('editTipoAtendimento').value = row.TipoAtendimento || 'Exame de vista';
   aplicarPermissoesModal();
   if (state.editingMode === 'reagendar') {
     byId('editModalTitulo').textContent = 'Reagendar atendimento';
@@ -2633,7 +2642,7 @@ function abrirModalEdicao(id, modo) {
     ['editOrigem', 'editNomeCompleto', 'editWhatsApp', 'editEmail', 'editLoja', 'editOptometrista',
       'editStatusAgenda', 'editCompareceu', 'editStatusOS', 'editNumeroOS', 'editDataAberturaOS',
       'editDataEntradaOS', 'editDataEntregaOS', 'editDataFinalizacaoOS', 'editVendedorNome',
-      'editValorVenda', 'editDesconto', 'editObservacao']
+      'editValorVenda', 'editDesconto', 'editObservacao', 'editTipoAtendimento']
       .forEach(function(campo) { byId(campo).disabled = true; });
     camposReagendamento.forEach(function(campo) { byId(campo).disabled = false; });
   } else {
@@ -2653,7 +2662,7 @@ function fecharModalEdicao() {
 
 function aplicarPermissoesModal() {
   var role = roleName();
-  var main = ['editOrigem', 'editNomeCompleto', 'editWhatsApp', 'editEmail', 'editLoja', 'editOptometrista', 'editDataAgendamento', 'editHorario', 'editStatusAgenda', 'editCompareceu', 'editObservacao'];
+  var main = ['editOrigem', 'editNomeCompleto', 'editWhatsApp', 'editEmail', 'editLoja', 'editOptometrista', 'editDataAgendamento', 'editHorario', 'editStatusAgenda', 'editCompareceu', 'editObservacao', 'editTipoAtendimento'];
   var os = ['editNumeroOS', 'editDataAberturaOS', 'editDataEntradaOS', 'editDataEntregaOS', 'editDataFinalizacaoOS', 'editStatusOS', 'editVendedorNome', 'editValorVenda', 'editDesconto'];
 
   // Habilita tudo por padrão
@@ -2717,6 +2726,7 @@ function salvarEdicaoLinha() {
     desconto: byId('editDesconto').value.trim(),
     observacao: byId('editObservacao').value.trim()
   };
+  if (!byId('editTipoAtendimento').disabled) payload.tipoAtendimento = byId('editTipoAtendimento').value;
   if (!byId('editCompareceu').disabled) payload.compareceu = byId('editCompareceu').value;
   if (state.editingMode === 'reagendar') {
     payload = {
@@ -3069,7 +3079,7 @@ function renderAgenda(rowsParam) {
     return '<tr class="' + rowClassAtendimento(r) + '">' +
       '<td>' + escapeHtml(r.ID) + '</td>' +
       '<td>' + escapeHtml(formatDateBR(r.DataCadastroBR || r.DataCadastro || '')) + '</td>' +
-      '<td>' + escapeHtml(r.NomeCompleto) + '</td>' +
+      '<td>' + escapeHtml(r.NomeCompleto) + (r.TipoAtendimento === 'Garantia' ? '<div style="margin-top:6px;"><span class="pill" title="Tipo de atendimento">Garantia</span></div>' : '') + '</td>' +
       '<td>' + escapeHtml(agendadoPor) + '</td>' +
       '<td>' + escapeHtml(ultimaAlt) + ultimaAltData + '</td>' +
       '<td>' + escapeHtml(formatDateBR(r.DataAgendamentoBR || r.DataAgendamento || '')) + '<br>' + escapeHtml(r.Horario || '') + '</td>' +

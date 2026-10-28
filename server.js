@@ -995,6 +995,16 @@ function clean(v) {
   return String(v).trim();
 }
 
+// Tipo de atendimento do agendamento. Tudo que não for Garantia é o exame
+// de vista padrão — registros antigos (sem a coluna preenchida) também.
+const TIPO_ATENDIMENTO_PADRAO = "Exame de vista";
+const TIPO_ATENDIMENTO_GARANTIA = "Garantia";
+
+function normalizarTipoAtendimento(valor) {
+  const texto = clean(valor).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return texto.includes("garantia") ? TIPO_ATENDIMENTO_GARANTIA : TIPO_ATENDIMENTO_PADRAO;
+}
+
 // new Date().toISOString() sempre devolve a data em UTC, ignorando o fuso do
 // processo — perto/depois das 21h em Brasília (horário de verão à parte) isso
 // já é "amanhã" em UTC, quebrando qualquer filtro de "hoje"/período padrão.
@@ -1417,6 +1427,7 @@ async function initDatabase() {
   await addColumnIfMissing("agendamentos", "nao_compareceu_proxima_tentativa_em", "TIMESTAMPTZ");
   await addColumnIfMissing("agendamentos", "nao_compareceu_erro", "TEXT");
   await addColumnIfMissing("agendamentos", "nao_compareceu_falha_em", "TIMESTAMPTZ");
+  await addColumnIfMissing("agendamentos", "tipo_atendimento", "TEXT DEFAULT 'Exame de vista'");
 
   await pool.query(`
     CREATE OR REPLACE FUNCTION normalizar_identidade_comercial_tgt(valor TEXT)
@@ -2348,6 +2359,8 @@ app.post("/api/public/agendamentos", validarLandingApiKey, async (req, res) => {
     const accessTags = clean(b.access_tags || b.accessTags || "origem:site;origem:trafego-pago;fluxo:pendente-confirmacao");
     const campanha = clean(b.campanha || "");
     const landingPage = clean(b.landing_page || b.landingPage || "");
+    // A landing page pode mandar o tipo explícito ou só o "servico" escolhido.
+    const tipoAtendimento = normalizarTipoAtendimento(b.tipo_atendimento || b.tipoAtendimento || b.servico);
 
     if (!nome || nome.length < 3) {
       return res.status(400).json({ ok: false, message: "Nome completo é obrigatório." });
@@ -2471,13 +2484,13 @@ app.post("/api/public/agendamentos", validarLandingApiKey, async (req, res) => {
         gas_id, nome, whatsapp, email, loja, optometrista, origem,
         data_agendamento, horario, observacao, status, compareceu,
         responsavel, criado_por_email, proprietario_id, proprietario_nome,
-        access_tags, origem_sync, criado_em, atualizado_em
+        access_tags, tipo_atendimento, origem_sync, criado_em, atualizado_em
       )
       VALUES (
         $1,$2,$3,$4,$5,$6,$7,
         $8,$9,$10,$11,'Pendente',
         'Landing Page','landingpage@sistema.local','landing-page','Landing Page',
-        $12,'landing_page',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+        $12,$13,'landing_page',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
       )
       RETURNING *`,
       [
@@ -2492,7 +2505,8 @@ app.post("/api/public/agendamentos", validarLandingApiKey, async (req, res) => {
         horario,
         observacao,
         status,
-        accessTags
+        accessTags,
+        tipoAtendimento
       ]
     );
 
@@ -2506,6 +2520,7 @@ app.post("/api/public/agendamentos", validarLandingApiKey, async (req, res) => {
         data_agendamento: dataAgendamento,
         horario,
         optometrista,
+        tipo_atendimento: tipoAtendimento,
         campanha,
         landing_page: landingPage,
         ip: req.ip
@@ -2642,9 +2657,9 @@ app.post("/api/agendamentos", async (req, res) => {
         responsavel, criado_por_email, proprietario_id, proprietario_nome,
         agendado_por_nome, agendado_por_email, vendedor_atendeu_nome, vendedor_atendeu_email,
         ultima_alteracao_por_nome, ultima_alteracao_por_email, ultima_alteracao_em,
-        access_tags, origem_sync
+        access_tags, tipo_atendimento, origem_sync
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,CURRENT_TIMESTAMP,$23,'postgres')
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,CURRENT_TIMESTAMP,$23,$24,'postgres')
         RETURNING *`,
         [
         b.gas_id || null,
@@ -2669,7 +2684,8 @@ app.post("/api/agendamentos", async (req, res) => {
         b.vendedor_atendeu_email || null,
         actorNome,
         actorEmail || null,
-        b.access_tags || b.accessTags || null
+        b.access_tags || b.accessTags || null,
+        normalizarTipoAtendimento(b.tipo_atendimento || b.tipoAtendimento)
         ]
       );
       await saveAppointmentBackup(client, {
@@ -2779,6 +2795,10 @@ app.get("/api/agendamentos", async (req, res) => {
     if (q.accessTag && (canViewLeadOrigin(req.session) || !clean(q.accessTag).toLowerCase().startsWith("origem:"))) {
       params.push(`%${clean(q.accessTag)}%`);
       conditions.push(`COALESCE(a.access_tags,'') ILIKE $${params.length}`);
+    }
+    if (q.tipoAtendimento) {
+      params.push(normalizarTipoAtendimento(q.tipoAtendimento));
+      conditions.push(`COALESCE(NULLIF(a.tipo_atendimento,''), '${TIPO_ATENDIMENTO_PADRAO}') = $${params.length}`);
     }
 
     const filtroDoUsuarioAtual = () => {
@@ -3013,6 +3033,9 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
       return res.status(400).json({ ok: false, message: "Não é permitido cadastrar cliente com nome TESTE." });
     }
 
+    const tipoAtendimentoEnviado = clean(b.tipo_atendimento || b.tipoAtendimento);
+    const tipoAtendimentoAtualizado = tipoAtendimentoEnviado ? normalizarTipoAtendimento(tipoAtendimentoEnviado) : null;
+
     const actorNome = estaConfirmandoLandingPage
       ? confirmadorCentralNome
       : clean(req.session.nome || "Usuário autenticado");
@@ -3065,6 +3088,7 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
       [["data_agendamento", "dataAgendamento"], "data_agendamento"],
       [["horario"], "horario"],
       [["observacao"], "observacao"],
+      [["tipo_atendimento", "tipoAtendimento"], "tipo_atendimento"],
       [["status", "statusAgenda"], "status"],
       [["compareceu"], "compareceu"],
       [["patologia"], "patologia"],
@@ -3219,6 +3243,7 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         data_finalizacao_os = COALESCE($26, data_finalizacao_os),
         data_entrega_os = COALESCE($27, data_entrega_os),
         patologia = COALESCE($29, patologia),
+        tipo_atendimento = COALESCE($33, tipo_atendimento),
         resultado_optometrista = CASE WHEN $31::text = 'LIMPAR' THEN NULL ELSE COALESCE($30, resultado_optometrista) END,
         agendado_por_nome = CASE
           WHEN $32::boolean THEN COALESCE(NULLIF($19,''), agendado_por_nome)
@@ -3267,7 +3292,8 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         patologiaAtualizada,
         resultadoOptometristaAtualizado,
         limparResultadoOptometrista ? 'LIMPAR' : null,
-        atualizarAgendadoPor
+        atualizarAgendadoPor,
+        tipoAtendimentoAtualizado
         ]
       );
       if (!result.rows.length) {
@@ -6308,6 +6334,7 @@ async function sincronizarAgendamentoKommo(ag) {
       `• Data: ${dtBR(ag.data_agendamento)} às ${ag.horario || ''}`,
       `• Loja: ${ag.loja || ''}`,
       ag.optometrista ? `• Optometrista: ${ag.optometrista}` : '',
+      `• Tipo de atendimento: ${normalizarTipoAtendimento(ag.tipo_atendimento)}`,
       `• Origem: ${ag.origem || 'Sistema'}`,
       ag.agendado_por_nome ? `• Agendado por: ${ag.agendado_por_nome}` : ''
     ].filter(Boolean).join('\n');
@@ -6532,6 +6559,7 @@ module.exports = {
   publicUser,
   normalizeLojaPublica,
   toPgDate,
+  normalizarTipoAtendimento,
   encryptSecret,
   decryptSecret,
   hasRole,
