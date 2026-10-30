@@ -27,6 +27,27 @@ test('relatório inclui os cartões Faltas e Só realizou o exame', function() {
   assert.match(html, /label: 'Só realizou o exame \(não comprou\)'/);
 });
 
+test('relatório em PDF traz a coluna WhatsApp logo depois do cliente', function() {
+  const inicio = html.indexOf('\nfunction gerarAgendaPDF');
+  const corpo = html.slice(inicio, html.indexOf('\nfunction gerarFaturamentoPDF', inicio));
+  assert.match(corpo, /'Cliente', 'WhatsApp', 'Status'/);
+  assert.match(corpo, /formatarWhatsAppRelatorio\(r\.WhatsApp \|\| r\.whatsapp\)/);
+});
+
+test('WhatsApp do relatório sai formatado e tolera número fora do padrão', function() {
+  const inicio = html.indexOf('function formatarWhatsAppRelatorio');
+  const fim = html.indexOf('\nfunction gerarAgendaPDF', inicio);
+  const contexto = {};
+  vm.runInNewContext(html.slice(inicio, fim), contexto);
+  const fmt = contexto.formatarWhatsAppRelatorio;
+  assert.equal(fmt('11912345678'), '(11) 91234-5678');
+  assert.equal(fmt('+55 (13) 99876-5432'), '(13) 99876-5432');
+  assert.equal(fmt('1332345678'), '(13) 3234-5678');
+  assert.equal(fmt(''), '—');
+  assert.equal(fmt(null), '—');
+  assert.equal(fmt('9876-5432'), '9876-5432');
+});
+
 test('totais distinguem falta, exame sem compra e comparecimento com OS', function() {
   const calcular = carregarCalculadora();
   const totais = calcular([
