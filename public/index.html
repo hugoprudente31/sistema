@@ -3516,6 +3516,17 @@ function calcularTotaisAgendaRelatorio(rows) {
   }, { compareceram: 0, faltas: 0, somenteExame: 0, comOS: 0, valorTotal: 0 });
 }
 
+// Exibe o WhatsApp como (11) 91234-5678; números fora do padrão saem como foram digitados.
+function formatarWhatsAppRelatorio(valor) {
+  var bruto = String(valor == null ? '' : valor).trim();
+  var d = bruto.replace(/\D/g, '');
+  if (!d) return '—';
+  if ((d.length === 12 || d.length === 13) && d.indexOf('55') === 0) d = d.slice(2);
+  if (d.length === 11) return '(' + d.slice(0, 2) + ') ' + d.slice(2, 7) + '-' + d.slice(7);
+  if (d.length === 10) return '(' + d.slice(0, 2) + ') ' + d.slice(2, 6) + '-' + d.slice(6);
+  return bruto;
+}
+
 function gerarAgendaPDF() {
   var filtered = aplicarFiltrosInteligentes(state.agendamentos || []);
   if (!filtered.length) { toast('Nenhum dado para exportar.', 'err'); return; }
@@ -3528,11 +3539,12 @@ function gerarAgendaPDF() {
     { label: 'Com OS',             valor: totais.comOS },
     { label: 'Valor total',        valor: money(totais.valorTotal) },
   ];
-  var colunas = ['Data', 'Cliente', 'Status', 'Status OS', 'Nº OS', 'Valor', 'Desconto', 'Vendedor', 'Optometrista', 'Loja'];
+  var colunas = ['Data', 'Cliente', 'WhatsApp', 'Status', 'Status OS', 'Nº OS', 'Valor', 'Desconto', 'Vendedor', 'Optometrista', 'Loja'];
   var linhas  = filtered.map(function(r) {
     return [
       formatDateBR(r.DataAgendamento || r.data_agendamento) || '—',
       r.NomeCompleto || r.nome || '—',
+      formatarWhatsAppRelatorio(r.WhatsApp || r.whatsapp),
       r.StatusAgenda || r.status || '—',
       r.StatusOS || r.status_os || '—',
       r.NumeroOS || r.numero_os || '—',
