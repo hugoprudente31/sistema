@@ -3539,7 +3539,7 @@ function gerarAgendaPDF() {
     { label: 'Com OS',             valor: totais.comOS },
     { label: 'Valor total',        valor: money(totais.valorTotal) },
   ];
-  var colunas = ['Data', 'Cliente', 'WhatsApp', 'Status', 'Status OS', 'Nº OS', 'Valor', 'Desconto', 'Vendedor', 'Optometrista', 'Loja'];
+  var colunas = ['Data', 'Cliente', 'WhatsApp', 'Status', 'Status OS', 'Nº OS', 'Valor', 'Desconto', 'Agendado por', 'Vendedor', 'Optometrista', 'Loja'];
   var linhas  = filtered.map(function(r) {
     return [
       formatDateBR(r.DataAgendamento || r.data_agendamento) || '—',
@@ -3550,6 +3550,9 @@ function gerarAgendaPDF() {
       r.NumeroOS || r.numero_os || '—',
       money(r.ValorVenda || r.valor_venda || 0),
       money(r.Desconto || r.desconto || 0),
+      // Mesmo valor da coluna da agenda: lead de Landing Page já chega como
+      // "Setor de Relacionamento Pós Vendas" para quem não pode ver a origem.
+      r.AgendadoPorNome || r.ProprietarioNome || '—',
       r.VendedorNome || r.vendedor_nome || '—',
       r.Optometrista || r.optometrista || '—',
       r.Loja || r.loja || '—',
