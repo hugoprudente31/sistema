@@ -34,6 +34,34 @@ test('relatório em PDF traz a coluna WhatsApp logo depois do cliente', function
   assert.match(corpo, /formatarWhatsAppRelatorio\(r\.WhatsApp \|\| r\.whatsapp\)/);
 });
 
+test('relatório em PDF traz a coluna Agendado por alinhada com o valor', function() {
+  const inicio = html.indexOf('function calcularTotaisAgendaRelatorio');
+  const fim = html.indexOf('\nfunction gerarFaturamentoPDF', inicio);
+  let gerado = null;
+  const contexto = {
+    state: { agendamentos: [
+      { NomeCompleto: 'Maria', AgendadoPorNome: 'Eduarda', VendedorNome: 'Carlos' },
+      { NomeCompleto: 'João', ProprietarioNome: 'Bruna' },
+      { NomeCompleto: 'Ana' }
+    ] },
+    aplicarFiltrosInteligentes: (rows) => rows,
+    normalizeKey: (v) => String(v || '').toLowerCase(),
+    formatDateBR: () => '',
+    money: (v) => String(v),
+    toast() {},
+    construirDescFiltros: () => '',
+    abrirJanelaPDF(titulo, filtros, kpis, colunas, linhas) { gerado = { colunas, linhas }; }
+  };
+  vm.runInNewContext(html.slice(inicio, fim) + '\ngerarAgendaPDF();', contexto);
+
+  const idx = gerado.colunas.indexOf('Agendado por');
+  assert.ok(idx >= 0, 'coluna Agendado por ausente');
+  assert.equal(gerado.colunas[idx + 1], 'Vendedor');
+  gerado.linhas.forEach((linha) => assert.equal(linha.length, gerado.colunas.length));
+  assert.deepEqual(gerado.linhas.map((l) => l[idx]), ['Eduarda', 'Bruna', '—']);
+  assert.equal(gerado.linhas[0][idx + 1], 'Carlos');
+});
+
 test('WhatsApp do relatório sai formatado e tolera número fora do padrão', function() {
   const inicio = html.indexOf('function formatarWhatsAppRelatorio');
   const fim = html.indexOf('\nfunction gerarAgendaPDF', inicio);
