@@ -13,7 +13,8 @@ const {
   resolverJornadaLoja,
   estaOptometristaDisponivel,
   gerarSlotsJornada,
-  intervaloAlmocoPadrao
+  intervaloAlmocoPadrao,
+  liberarPausaDaLoja
 } = require("../lib/horarios");
 
 // ── Horário do optometrista (menu "Informações" do bot) ───────────
@@ -526,8 +527,12 @@ async function getHorariosLojaComConfig(loja, data) {
 
   const dia = new Date(pgDate + "T12:00:00").getDay();
   const jornada = await resolverJornadaLoja(pool, loja, dia);
-  if (jornada.origem !== "config") return getHorariosLoja(loja, data);
-  return jornada.aberto ? gerarSlotsJornada(jornada) : [];
+  let grade;
+  if (jornada.origem !== "config") grade = getHorariosLoja(loja, data);
+  else grade = jornada.aberto ? gerarSlotsJornada(jornada) : [];
+  // Almoço da loja volta para a grade quando algum optometrista tem horário
+  // próprio; buscarPrimeiroOptometristaLivre barra quem segue a loja.
+  return liberarPausaDaLoja(pool, loja, dia, grade);
 }
 
 function lojaComparableSql(columnSql) {

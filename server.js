@@ -29,7 +29,10 @@ const {
   resolverJornadaLoja,
   estaOptometristaDisponivel,
   gerarSlotsJornada,
-  intervaloAlmocoPadrao
+  intervaloAlmocoPadrao,
+  algumOptometristaComHorarioProprio,
+  horarioNaPausaDaLoja,
+  liberarPausaDaLoja
 } = require("./lib/horarios");
 
 const app = express();
@@ -780,7 +783,21 @@ function isGonzagaSemAlmocoEm29Jul2026(loja, data) {
     (lojaKey.includes("gonzaga") || lojaKey.includes("santos"));
 }
 
-function horarioValidoPorRegra(data, horario, loja = "") {
+// Painel: um horário dentro do almoço da loja só é aceito para o optometrista
+// que tem horário próprio cadastrado e atende nesse horário. Devolve a
+// mensagem de erro, ou null quando está liberado.
+async function validarPausaDaLojaPainel(client, { loja, data, horario, optometrista }) {
+  const diaSemana = new Date(data + "T12:00:00").getDay();
+  if (!(await horarioNaPausaDaLoja(client, loja, diaSemana, horario))) return null;
+  const nome = clean(optometrista);
+  if (nome && nome.toLowerCase() !== "a definir" &&
+      await estaOptometristaDisponivel(client, { nome, loja, diaSemana, horario })) {
+    return null;
+  }
+  return "Horário de almoço da loja. Ele só fica livre para o optometrista que tem horário próprio cadastrado e atende nesse horário.";
+}
+
+function horarioValidoPorRegra(data, horario, loja = "", { ignorarAlmoco = false } = {}) {
   const dt = toPgDate(data);
   const hr = clean(horario);
 
@@ -810,7 +827,7 @@ function horarioValidoPorRegra(data, horario, loja = "") {
     return { ok: false, message: "Escolha um horário da grade de atendimento, com intervalos de 20 minutos." };
   }
 
-  const almoco = jornadaEspecialGonzaga ? null : intervaloAlmocoPadrao(loja, dia);
+  const almoco = jornadaEspecialGonzaga || ignorarAlmoco ? null : intervaloAlmocoPadrao(loja, dia);
   if (almoco && hr >= almoco.inicio && hr < almoco.fim) {
     return { ok: false, message: `Horário de almoço não disponível. Escolha um horário fora do intervalo ${almoco.inicio}–${almoco.fim}.` };
   }
@@ -2276,6 +2293,7 @@ app.get("/api/public/horarios-disponiveis", validarLandingApiKey, async (req, re
       }
       horariosBase = gerarSlotsJornada(jornadaConfig);
     }
+    horariosBase = await liberarPausaDaLoja(client, loja, diaRef, horariosBase);
     if (bloqueioAgenda?.hora_inicio && bloqueioAgenda?.hora_fim) {
       horariosBase = horariosBase.filter(h => h < bloqueioAgenda.hora_inicio || h >= bloqueioAgenda.hora_fim);
     }
@@ -2390,13 +2408,17 @@ app.post("/api/public/agendamentos", validarLandingApiKey, async (req, res) => {
         return res.status(400).json({ ok: false, message: "Loja fechada nesta data (horário configurado)." });
       }
       if (/^\d{2}:\d{2}$/.test(horario)) {
-        const horariosDaGrade = gerarSlotsJornada(jornadaConfigPost);
+        const horariosDaGrade = await liberarPausaDaLoja(client, loja, diaAgendamento, gerarSlotsJornada(jornadaConfigPost));
         if (!horariosDaGrade.includes(horario)) {
           return res.status(400).json({ ok: false, message: "Horário fora da grade configurada de 20 minutos para esta loja." });
         }
       }
     } else {
-      const regraHorario = horarioValidoPorRegra(dataAgendamento, horario, loja);
+      // O optometrista é escolhido logo abaixo por buscarPrimeiroOptometristaLivre,
+      // que barra o almoço de quem segue o padrão da loja.
+      const regraHorario = horarioValidoPorRegra(dataAgendamento, horario, loja, {
+        ignorarAlmoco: await algumOptometristaComHorarioProprio(client, loja, diaAgendamento)
+      });
       if (!regraHorario.ok) {
         return res.status(400).json(regraHorario);
       }
@@ -2613,15 +2635,22 @@ app.post("/api/agendamentos", async (req, res) => {
       if (dataAgendamento && horarioNovo && dataAgendamento >= hojeBrasil()) {
         const diaSemana = new Date(dataAgendamento + "T12:00:00").getDay();
         const jornada = await resolverJornadaLoja(client, b.loja || "", diaSemana);
-        const horariosDaGrade = jornada.origem === "config"
+        const horariosDaGrade = await liberarPausaDaLoja(client, b.loja || "", diaSemana, jornada.origem === "config"
           ? gerarSlotsJornada(jornada)
-          : gerarHorariosBase(dataAgendamento, b.loja || "");
+          : gerarHorariosBase(dataAgendamento, b.loja || ""));
         if (!horariosDaGrade.includes(horarioNovo)) {
           await client.query("ROLLBACK");
           return res.status(400).json({
             ok: false,
             message: "Escolha um horário da grade de atendimento, com intervalos de 20 minutos."
           });
+        }
+        const erroPausa = await validarPausaDaLojaPainel(client, {
+          loja: b.loja || "", data: dataAgendamento, horario: horarioNovo, optometrista: b.optometrista
+        });
+        if (erroPausa) {
+          await client.query("ROLLBACK");
+          return res.status(400).json({ ok: false, message: erroPausa });
         }
       }
       const bloqueioHorario = await buscarBloqueioDisponibilidade(
@@ -3209,15 +3238,24 @@ app.patch("/api/agendamentos/:id", async (req, res) => {
         if (mudouAgenda && dataFinal && horarioFinal && dataFinal >= hojeBrasil()) {
           const diaSemana = new Date(dataFinal + "T12:00:00").getDay();
           const jornada = await resolverJornadaLoja(client, lojaFinal, diaSemana);
-          const horariosDaGrade = jornada.origem === "config"
+          const horariosDaGrade = await liberarPausaDaLoja(client, lojaFinal, diaSemana, jornada.origem === "config"
             ? gerarSlotsJornada(jornada)
-            : gerarHorariosBase(dataFinal, lojaFinal);
+            : gerarHorariosBase(dataFinal, lojaFinal));
           if (!horariosDaGrade.includes(horarioFinal)) {
             await client.query("ROLLBACK");
             return res.status(400).json({
               ok: false,
               message: "Escolha um horário da grade de atendimento, com intervalos de 20 minutos."
             });
+          }
+        }
+        if ((mudouAgenda || mudouOptometrista) && dataFinal && horarioFinal && dataFinal >= hojeBrasil()) {
+          const erroPausa = await validarPausaDaLojaPainel(client, {
+            loja: lojaFinal, data: dataFinal, horario: horarioFinal, optometrista: optometristaFinal
+          });
+          if (erroPausa) {
+            await client.query("ROLLBACK");
+            return res.status(400).json({ ok: false, message: erroPausa });
           }
         }
         const bloqueioHorario = await buscarBloqueioDisponibilidade(
