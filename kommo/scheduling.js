@@ -687,9 +687,20 @@ async function criarAgendamento({ nome, whatsapp, email, loja, data, horario, le
       };
     }
 
-    const gasId = agendamentoExistente?.gas_id || (leadId
+    let gasId = agendamentoExistente?.gas_id || (leadId
       ? makeId("kommo", String(leadId))
       : makeId("kommo", stableHash({ nomeNormalizado, whatsappNormalizado, lojaNormalizada, dataPg, horarioNormalizado })));
+
+    // Proteção contra sobrescrita: sem agendamento ATIVO para o lead, o gas_id
+    // fixo "kommo-<lead>" pode já pertencer a um atendimento anterior
+    // (Compareceu, Não compareceu, Cancelado, com OS/venda). O INSERT ... ON
+    // CONFLICT (gas_id) DO UPDATE abaixo apagava esse histórico, voltando o
+    // registro para "Agendado/Pendente" com outra data — o lead "sumia" dos
+    // filtros de comparecimento. Agora um novo agendamento ganha gas_id próprio.
+    if (!agendamentoExistente) {
+      const ocupado = await client.query(`SELECT 1 FROM agendamentos WHERE gas_id = $1 LIMIT 1`, [gasId]);
+      if (ocupado.rows.length) gasId = makeId("kommo", `${leadId || "semlead"}-${Date.now()}`);
+    }
 
     const optometristaLivre = await buscarPrimeiroOptometristaLivre(
       client,
