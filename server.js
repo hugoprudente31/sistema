@@ -18,6 +18,7 @@ const { startReminderCron, runReminders, runTwoHourReminders, scheduleDaily } = 
 const { startFollowupCron } = require("./kommo/followups");
 const { startOperationalWhatsappCron } = require("./lib/operationalWhatsapp");
 const mailingboss = require("./mailingboss");
+const { criarMarca } = require("./lib/marca");
 const kommoClient = require("./kommo/client");
 const {
   INTERVALO_ATENDIMENTO_MINUTOS,
@@ -77,6 +78,10 @@ app.use((req, res, next) => {
 });
 
 const publicPath = path.join(__dirname, "public");
+// Logo da barra e ícone do app trocados pelo Super Admin (lib/marca.js).
+// Precisa vir antes do express.static para substituir os ícones padrão.
+const marca = criarMarca({ getConfigValor, setConfigValor, publicPath });
+app.use(marca.middleware);
 // Sem build/hash de assets: todo o painel vive em public/index.html. Sem
 // cache-control explicito, navegadores (e proxies corporativos) podem servir
 // uma copia antiga da pagina indefinidamente apos um deploy, escondendo
@@ -537,6 +542,11 @@ async function carregarConfiguracoesPainelDoBanco() {
       : appearanceCache;
   } catch (error) {
     console.error("Não foi possível carregar permissões/aparência:", error.message);
+  }
+  try {
+    await marca.carregar();
+  } catch (error) {
+    console.error("Não foi possível carregar logo/ícone do app:", error.message);
   }
 }
 
@@ -4015,7 +4025,28 @@ app.post("/api/admin/configuracoes/kommo/testar", requireAdminOuCentral, async (
 });
 
 app.get("/api/public/aparencia", (_req, res) => {
-  res.json({ ok: true, aparencia: appearanceCache });
+  res.json({ ok: true, aparencia: appearanceCache, marca: marca.resumo() });
+});
+
+// ===== Logo da barra de navegação e ícone do app (somente Super Admin) =====
+app.get("/api/admin/configuracoes/marca", requireSuperAdmin, (_req, res) => {
+  res.json({ ok: true, marca: marca.resumo() });
+});
+
+app.post("/api/admin/configuracoes/marca/logo-barra", requireSuperAdmin, async (req, res) => {
+  const b = req.body || {};
+  const resultado = b.remover
+    ? await marca.removerLogoBarra(req.session.email)
+    : await marca.salvarLogoBarra(b.dataUrl, req.session.email);
+  res.status(resultado.ok ? 200 : 400).json({ ...resultado, marca: marca.resumo() });
+});
+
+app.post("/api/admin/configuracoes/marca/icone", requireSuperAdmin, async (req, res) => {
+  const b = req.body || {};
+  const resultado = b.remover
+    ? await marca.removerIcones(req.session.email)
+    : await marca.salvarIcone(clean(b.tamanho), b.dataUrl, req.session.email);
+  res.status(resultado.ok ? 200 : 400).json({ ...resultado, marca: marca.resumo() });
 });
 
 app.get("/api/admin/configuracoes/permissoes", requireAdmin, (_req, res) => {

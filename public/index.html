@@ -129,6 +129,16 @@
 
     .meta { font-size: 13px; color: var(--muted); line-height: 1.7; }
 
+    /* Logo da barra de navegação (trocado pelo Super Admin em Configurações) */
+    .nav-brand { display: flex; align-items: center; gap: 12px; }
+    .nav-brand-logo { height: 44px; max-width: 150px; object-fit: contain; flex-shrink: 0; }
+    /* Mostra o logo só na primeira barra visível, sem repetir no cartão de baixo. */
+    #adminWorkspaceNav:not(.hidden) ~ #cardIdentidadeUsuario .nav-brand-logo,
+    #centralWorkspaceNav:not(.hidden) ~ #cardIdentidadeUsuario .nav-brand-logo { display: none; }
+    .marca-preview { display: flex; align-items: center; justify-content: center; min-height: 90px; background: #fff; border: 1px dashed var(--line); border-radius: 12px; padding: 10px; }
+    .marca-preview img { max-height: 70px; max-width: 260px; object-fit: contain; }
+    .marca-preview img.icone { width: 72px; height: 72px; border-radius: 16px; box-shadow: 0 4px 10px rgba(0,0,0,.15); }
+
     .pill {
       display: inline-block;
       padding: 6px 10px;
@@ -402,7 +412,7 @@
   <div id="app" class="hidden">
     <div class="card hidden admin-workspace-nav" id="adminWorkspaceNav">
       <div class="topbar">
-        <div><h3 style="margin:0 0 4px;">Área de trabalho do Admin</h3><div class="legend-mini">Escolha uma área para trabalhar com mais foco.</div></div>
+        <div class="nav-brand"><img class="nav-brand-logo" onerror="this.style.display='none'" src="https://global-files-nginx.builderall.com/184d08cd-6b72-40d2-882c-efd891ebcb21/f5c399ecf564642e5009ea51be228289ab8b18a12e4e198786ad8732a9d9dca9.png" alt="Óticas TGT"><div><h3 style="margin:0 0 4px;">Área de trabalho do Admin</h3><div class="legend-mini">Escolha uma área para trabalhar com mais foco.</div></div></div>
         <div class="pill" id="adminAreaAtual">Visão Executiva</div>
       </div>
       <div class="admin-nav-buttons" style="margin-top:12px;">
@@ -420,7 +430,7 @@
 
     <div class="card hidden admin-workspace-nav" id="centralWorkspaceNav">
       <div class="topbar">
-        <div><h3 style="margin:0 0 4px;">Área de Atendimento Central</h3><div class="legend-mini">Ferramentas liberadas para o seu perfil.</div></div>
+        <div class="nav-brand"><img class="nav-brand-logo" onerror="this.style.display='none'" src="https://global-files-nginx.builderall.com/184d08cd-6b72-40d2-882c-efd891ebcb21/f5c399ecf564642e5009ea51be228289ab8b18a12e4e198786ad8732a9d9dca9.png" alt="Óticas TGT"><div><h3 style="margin:0 0 4px;">Área de Atendimento Central</h3><div class="legend-mini">Ferramentas liberadas para o seu perfil.</div></div></div>
         <div class="pill" id="centralAreaAtual">Painel de Agendados</div>
       </div>
       <div class="admin-nav-buttons" style="margin-top:12px;">
@@ -436,7 +446,7 @@
     <div class="card" id="cardIdentidadeUsuario">
       <div class="topbar">
         <div>
-          <h2>Sistema de Agendamento</h2>
+          <div class="nav-brand"><img class="nav-brand-logo" onerror="this.style.display='none'" src="https://global-files-nginx.builderall.com/184d08cd-6b72-40d2-882c-efd891ebcb21/f5c399ecf564642e5009ea51be228289ab8b18a12e4e198786ad8732a9d9dca9.png" alt="Óticas TGT"><h2>Sistema de Agendamento</h2></div>
           <div class="meta">
             <div><strong id="nomeUsuario"></strong></div>
             <div id="perfilUsuario"></div>
@@ -929,6 +939,28 @@
       <div id="msgAparencia" class="msg"></div>
     </div>
 
+    <div class="card hidden" id="cardConfigMarca">
+      <h3>Logo do App e da Barra de Navegação</h3>
+      <p class="legend-mini">Exclusivo do Super Admin. As mudanças valem para todos os usuários.</p>
+      <div class="row">
+        <div>
+          <label>Logo da barra de navegação (PNG ou JPG, até ~700 KB)</label>
+          <div id="marcaLogoBarraPreview" class="marca-preview"></div>
+          <input id="marcaLogoBarraArquivo" type="file" accept="image/png,image/jpeg" onchange="previewArquivoMarca(this,'marcaLogoBarraPreview',false)">
+          <div style="display:flex;gap:10px;margin-top:10px"><button class="secondary" style="max-width:190px" onclick="restaurarLogoBarra()">Voltar ao padrão</button><button onclick="salvarLogoBarra()">Salvar logo da barra</button></div>
+        </div>
+        <div>
+          <label>Ícone do aplicativo TGT Agenda (de preferência quadrado, PNG ou JPG)</label>
+          <div id="marcaIconePreview" class="marca-preview"></div>
+          <input id="marcaIconeArquivo" type="file" accept="image/png,image/jpeg" onchange="previewArquivoMarca(this,'marcaIconePreview',true)">
+          <div style="display:flex;gap:10px;align-items:center;margin-top:10px"><label style="margin:0;white-space:nowrap">Cor de fundo</label><input id="marcaIconeFundo" type="color" value="#ffffff" style="max-width:64px"></div>
+          <div style="display:flex;gap:10px;margin-top:10px"><button class="secondary" style="max-width:190px" onclick="restaurarIconeApp()">Voltar ao padrão</button><button onclick="salvarIconeApp()">Salvar ícone do app</button></div>
+        </div>
+      </div>
+      <div class="notice" style="margin-top:14px"><strong>Sobre o ícone do celular</strong>O logo da barra muda na hora para todos. O ícone do app muda na aba do navegador e em novas instalações. Em celulares que já instalaram o app, o Android costuma atualizar sozinho em alguns dias; no iPhone é preciso remover o app da tela inicial e adicionar de novo pelo Safari. O APK nativo (pasta mobile) só muda o ícone gerando uma nova versão.</div>
+      <div id="msgMarca" class="msg"></div>
+    </div>
+
     <div class="card hidden" id="cardConfigKommo">
       <div class="topbar" style="margin-bottom:14px;">
         <div><h3 style="margin:0;">Integração Kommo</h3><span class="legend-mini">Credenciais de conexão com o CRM Kommo</span></div>
@@ -1091,7 +1123,7 @@ var state = {
 
 document.addEventListener('DOMContentLoaded', function() {
   aplicarFiltroMesAtual(false);
-  fetch('/api/public/aparencia').then(function(r){return r.json();}).then(function(res){aplicarAparencia(res.aparencia);}).catch(function(){});
+  fetch('/api/public/aparencia').then(function(r){return r.json();}).then(function(res){aplicarAparencia(res.aparencia);aplicarMarca(res.marca);}).catch(function(){});
 });
 
 function byId(id) { return document.getElementById(id); }
@@ -1775,7 +1807,7 @@ var ADMIN_AREAS = {
   configuracoes: {
     titulo: 'Configurações',
     resumo: 'Usuários, unidades, horários, permissões, aparência e integrações.',
-    cards: ['cardUsuarios','cardConfigUnidades','cardConfigHorarioLoja','cardConfigHorarioOptometrista','cardConfigPermissoes','cardConfigAparencia','cardConfigGradeHorario','cardConfigBloqueiosAgenda','cardConfigKommo']
+    cards: ['cardUsuarios','cardConfigUnidades','cardConfigHorarioLoja','cardConfigHorarioOptometrista','cardConfigPermissoes','cardConfigAparencia','cardConfigMarca','cardConfigGradeHorario','cardConfigBloqueiosAgenda','cardConfigKommo']
   },
   tecnica: {
     titulo: 'Central Técnica',
@@ -1871,6 +1903,7 @@ function aplicarPermissoesTela() {
   if (roleName() === 'atendimento central') byId('centralWorkspaceNav').classList.remove('hidden');
   if (p.isSuperAdmin) byId('areaTecnica').classList.remove('hidden');
   if (p.isSuperAdmin) byId('adminNavTecnica').classList.remove('hidden');
+  if (p.isSuperAdmin) { byId('cardConfigMarca').classList.remove('hidden'); carregarMarcaPainel(); }
   if (p.isAdmin) byId('btnLixeira').classList.remove('hidden');
   if (p.isAdmin) byId('cardUsuarios').classList.remove('hidden');
   if (p.isAdmin) {
@@ -4191,6 +4224,129 @@ function salvarAparenciaPainel() {
   else promessa=enviar('');
   Promise.resolve(promessa).then(function(res){if(!res.ok)throw new Error(res.message);removerLogoPendente=false;aplicarAparencia(res.aparencia);toast('Aparência salva.','ok');return carregarAparenciaPainel();})
     .catch(function(err){setMsg('msgAparencia',err.message||String(err),'err');});
+}
+
+// ===== Logo da barra e ícone do app (Super Admin) =====
+var MARCA_LOGO_PADRAO = 'https://global-files-nginx.builderall.com/184d08cd-6b72-40d2-882c-efd891ebcb21/f5c399ecf564642e5009ea51be228289ab8b18a12e4e198786ad8732a9d9dca9.png';
+var ICONES_APP = [
+  { nome: 'icon192', tamanho: 192, margem: 0 },
+  { nome: 'icon512', tamanho: 512, margem: 0 },
+  { nome: 'iconMaskable512', tamanho: 512, margem: 0.1 },
+  { nome: 'appleTouch', tamanho: 180, margem: 0 }
+];
+var marcaAtual = null;
+
+function aplicarMarca(m) {
+  if (!m) return;
+  marcaAtual = m;
+  var logo = m.temLogoBarra ? '/marca/logo-barra?v=' + m.versao : MARCA_LOGO_PADRAO;
+  document.querySelectorAll('.nav-brand-logo').forEach(function(img){ img.style.display = ''; img.src = logo; });
+  if (m.versao) {
+    var icone = document.querySelector('link[rel="icon"]');
+    var apple = document.querySelector('link[rel="apple-touch-icon"]');
+    if (icone) icone.href = '/icons/icon-192.png?v=' + m.versao;
+    if (apple) apple.href = '/icons/apple-touch-icon.png?v=' + m.versao;
+  }
+  var prevLogo = byId('marcaLogoBarraPreview');
+  if (prevLogo) prevLogo.innerHTML = '<img src="' + logo + '" alt="Logo da barra">';
+  var prevIcone = byId('marcaIconePreview');
+  if (prevIcone) prevIcone.innerHTML = '<img class="icone" src="/icons/icon-192.png' + (m.versao ? '?v=' + m.versao : '') + '" alt="Ícone do app">';
+}
+
+function carregarMarcaPainel() {
+  return apiGet('/api/admin/configuracoes/marca').then(function(res){ if (res && res.ok) aplicarMarca(res.marca); }).catch(function(){});
+}
+
+function lerArquivoComoDataUrl(arquivo) {
+  return new Promise(function(resolve, reject) {
+    var r = new FileReader();
+    r.onload = function(){ resolve(r.result); };
+    r.onerror = function(){ reject(new Error('Não foi possível ler a imagem.')); };
+    r.readAsDataURL(arquivo);
+  });
+}
+
+function carregarImagem(src) {
+  return new Promise(function(resolve, reject) {
+    var img = new Image();
+    img.onload = function(){ resolve(img); };
+    img.onerror = function(){ reject(new Error('Imagem inválida.')); };
+    img.src = src;
+  });
+}
+
+// Desenha a imagem centralizada num quadrado com fundo sólido (o celular não
+// aceita transparência em todos os formatos). "margem" deixa a área segura
+// do ícone "maskable" do Android, que é recortado em círculo.
+function gerarIconeQuadrado(img, tamanho, margem, fundo) {
+  var canvas = document.createElement('canvas');
+  canvas.width = tamanho; canvas.height = tamanho;
+  var ctx = canvas.getContext('2d');
+  ctx.fillStyle = fundo || '#ffffff';
+  ctx.fillRect(0, 0, tamanho, tamanho);
+  var area = tamanho * (1 - 2 * margem);
+  var escala = Math.min(area / img.width, area / img.height);
+  var w = img.width * escala, h = img.height * escala;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, (tamanho - w) / 2, (tamanho - h) / 2, w, h);
+  return canvas.toDataURL('image/png');
+}
+
+function previewArquivoMarca(input, previewId, icone) {
+  var arquivo = input.files && input.files[0];
+  if (!arquivo) return;
+  lerArquivoComoDataUrl(arquivo).then(function(url) {
+    if (!icone) { byId(previewId).innerHTML = '<img src="' + url + '" alt="Prévia">'; return; }
+    return carregarImagem(url).then(function(img) {
+      byId(previewId).innerHTML = '<img class="icone" src="' + gerarIconeQuadrado(img, 192, 0, byId('marcaIconeFundo').value) + '" alt="Prévia">';
+    });
+  }).catch(function(err){ setMsg('msgMarca', err.message || String(err), 'err'); });
+}
+
+function respostaMarca(res, mensagem) {
+  if (!res || !res.ok) throw new Error((res && res.message) || 'Não foi possível salvar.');
+  aplicarMarca(res.marca);
+  setMsg('msgMarca', mensagem, 'ok');
+  toast(mensagem, 'ok');
+}
+
+function salvarLogoBarra() {
+  var arquivo = byId('marcaLogoBarraArquivo').files[0];
+  if (!arquivo) { setMsg('msgMarca', 'Escolha a imagem do logo da barra.', 'err'); return; }
+  if (arquivo.size > 700 * 1024) { setMsg('msgMarca', 'O logo deve ter no máximo 700 KB. Reduza a imagem e tente de novo.', 'err'); return; }
+  lerArquivoComoDataUrl(arquivo)
+    .then(function(url){ return apiPost('/api/admin/configuracoes/marca/logo-barra', { dataUrl: url }); })
+    .then(function(res){ byId('marcaLogoBarraArquivo').value = ''; respostaMarca(res, 'Logo da barra salvo.'); })
+    .catch(function(err){ setMsg('msgMarca', err.message || String(err), 'err'); });
+}
+
+function restaurarLogoBarra() {
+  apiPost('/api/admin/configuracoes/marca/logo-barra', { remover: true })
+    .then(function(res){ respostaMarca(res, 'Logo da barra voltou ao padrão.'); })
+    .catch(function(err){ setMsg('msgMarca', err.message || String(err), 'err'); });
+}
+
+function salvarIconeApp() {
+  var arquivo = byId('marcaIconeArquivo').files[0];
+  if (!arquivo) { setMsg('msgMarca', 'Escolha a imagem do ícone do app.', 'err'); return; }
+  var fundo = byId('marcaIconeFundo').value;
+  setMsg('msgMarca', 'Gerando e enviando os tamanhos do ícone...', '');
+  lerArquivoComoDataUrl(arquivo).then(carregarImagem).then(function(img) {
+    // Um envio por tamanho, para cada requisição caber no limite da API.
+    return ICONES_APP.reduce(function(fila, icone) {
+      return fila.then(function() {
+        return apiPost('/api/admin/configuracoes/marca/icone', { tamanho: icone.nome, dataUrl: gerarIconeQuadrado(img, icone.tamanho, icone.margem, fundo) })
+          .then(function(res){ if (!res || !res.ok) throw new Error((res && res.message) || 'Não foi possível salvar o ícone.'); return res; });
+      });
+    }, Promise.resolve());
+  }).then(function(res){ byId('marcaIconeArquivo').value = ''; respostaMarca(res, 'Ícone do app salvo.'); })
+    .catch(function(err){ setMsg('msgMarca', err.message || String(err), 'err'); });
+}
+
+function restaurarIconeApp() {
+  apiPost('/api/admin/configuracoes/marca/icone', { remover: true })
+    .then(function(res){ respostaMarca(res, 'Ícone do app voltou ao padrão.'); })
+    .catch(function(err){ setMsg('msgMarca', err.message || String(err), 'err'); });
 }
 
 function prepararLojasConfig() {
