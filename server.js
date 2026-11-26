@@ -14,7 +14,7 @@ const {
 } = require("./lib/databaseMaintenance");
 
 const { startRecoveryCron } = require("./kommo/recovery");
-const { startReminderCron, runReminders, runTwoHourReminders, scheduleDaily } = require("./kommo/reminder");
+const { startReminderCron, runReminders, runTwoHourReminders, runThirtyMinuteReminders, scheduleDaily } = require("./kommo/reminder");
 const { startFollowupCron } = require("./kommo/followups");
 const { startOperationalWhatsappCron } = require("./lib/operationalWhatsapp");
 const mailingboss = require("./mailingboss");
@@ -1858,6 +1858,8 @@ async function initDatabase() {
   await negociacaoRoutes.initNegociacaoTables(pool);
   await pool.query(`ALTER TABLE agendamentos ADD COLUMN IF NOT EXISTS lembrete_24h_em TIMESTAMPTZ`);
   await pool.query(`ALTER TABLE agendamentos ADD COLUMN IF NOT EXISTS lembrete_2h_em TIMESTAMPTZ`);
+  await pool.query(`ALTER TABLE agendamentos ADD COLUMN IF NOT EXISTS lembrete_30min_em TIMESTAMPTZ`);
+  await pool.query(`ALTER TABLE agendamentos ADD COLUMN IF NOT EXISTS lembrete_30min_ref TEXT`);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS bloqueios_disponibilidade (
       id SERIAL PRIMARY KEY,
@@ -6594,6 +6596,11 @@ app.post('/api/admin/lembretes/disparar', requireSuperAdmin, async (req, res) =>
 
 app.post('/api/admin/lembretes/2h/disparar', requireAdmin, async (req, res) => {
   const resultado = await runTwoHourReminders();
+  res.json({ ok: true, ...resultado });
+});
+
+app.post('/api/admin/lembretes/30min/disparar', requireAdmin, async (req, res) => {
+  const resultado = await runThirtyMinuteReminders();
   res.json({ ok: true, ...resultado });
 });
 
