@@ -1,0 +1,21 @@
+{
+  "name": "tgt-agenda-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Aplicativo Android e iPhone do sistema de agendamentos das Óticas TGT (Capacitor)",
+  "scripts": {
+    "sync": "cap sync",
+    "android": "cap open android",
+    "ios": "cap open ios",
+    "icons": "capacitor-assets generate --android --ios --iconBackgroundColor '#fc5102' --splashBackgroundColor '#fff5ef'"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.6.3",
+    "@capacitor/core": "^8.6.3",
+    "@capacitor/ios": "^8.6.3"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^4.0.0",
+    "@capacitor/cli": "^8.6.3"
+  }
+}
