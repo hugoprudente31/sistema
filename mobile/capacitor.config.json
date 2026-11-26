@@ -1,0 +1,16 @@
+{
+  "appId": "br.com.oticastgt.agenda",
+  "appName": "TGT Agenda",
+  "webDir": "www",
+  "server": {
+    "url": "https://sistema.oticastgt.com.br",
+    "cleartext": false,
+    "errorPath": "offline.html"
+  },
+  "android": {
+    "allowMixedContent": false
+  },
+  "ios": {
+    "contentInset": "automatic"
+  }
+}

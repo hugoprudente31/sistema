@@ -85,7 +85,9 @@ const publicPath = path.join(__dirname, "public");
 if (fs.existsSync(publicPath)) {
   app.use(express.static(publicPath, {
     setHeaders: (res, filePath) => {
-      if (filePath.endsWith(".html")) {
+      // sw.js e o manifesto do app instalável também precisam revalidar a cada
+      // acesso, senão o celular pode ficar preso numa versão antiga do app.
+      if (filePath.endsWith(".html") || filePath.endsWith("sw.js") || filePath.endsWith(".webmanifest")) {
         res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
       }
     }
