@@ -9,6 +9,7 @@ const { runMonitoredJob } = require("../lib/jobMonitor");
 
 let reminder24hRunning = false;
 let reminder2hRunning = false;
+let reminder30mRunning = false;
 
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
@@ -27,6 +28,16 @@ function buildTwoHourMessage(appointment) {
   const horario = appointment.horario || "hora marcada";
   return `Olá, *${name}*! 😊 Faltam ~*2 horas* para sua *Avaliação Visual* às ${horario} na ${loja}. ` +
     `Já preparamos tudo pra te receber. Até já! 👓`;
+}
+
+// Mesmo limite de 256 caracteres do lembrete de 2h (ver comentário acima).
+function buildThirtyMinuteMessage(appointment) {
+  const name = firstName(appointment.nome);
+  const loja = appointment.loja || "Óticas TGT";
+  const horario = appointment.horario || "hora marcada";
+  const data = appointment.data_agendamento ? ` (${appointment.data_agendamento})` : "";
+  return `Oi, *${name}*! ⏰ Sua *Avaliação Visual* é daqui a *30 minutos*: hoje${data} às *${horario}* na *${loja}*. ` +
+    `Estamos te esperando! 👓`;
 }
 
 function tomorrowForDatabase() {
@@ -202,6 +213,96 @@ async function runTwoHourReminders() {
   }
 }
 
+// O lembrete de 30 minutos guarda em lembrete_30min_ref a data+horário para o
+// qual foi enviado. Se o agendamento for remarcado por qualquer tela (bot,
+// painel, landing page), a referência deixa de bater e o novo horário recebe
+// o seu próprio lembrete; no mesmo horário, nunca sai duas vezes.
+const SLOT_30MIN_SQL = "(data_agendamento::text || ' ' || horario)";
+
+async function getThirtyMinuteAppointments() {
+  const { rows } = await pool.query(`
+    SELECT id, kommo_lead_id, nome, horario, loja,
+           TO_CHAR(data_agendamento, 'DD/MM/YYYY') AS data_agendamento,
+           ${SLOT_30MIN_SQL} AS slot_ref,
+           status
+      FROM agendamentos
+     WHERE status IN ('Agendado', 'Reagendado', 'Confirmado')
+       AND kommo_lead_id IS NOT NULL
+       AND excluido_em IS NULL
+       AND horario ~ '^\\d{2}:\\d{2}$'
+       AND lembrete_30min_ref IS DISTINCT FROM ${SLOT_30MIN_SQL}
+       AND ((data_agendamento::text || ' ' || horario)::timestamp AT TIME ZONE 'America/Sao_Paulo')
+           > NOW() + INTERVAL '15 minutes'
+       AND ((data_agendamento::text || ' ' || horario)::timestamp AT TIME ZONE 'America/Sao_Paulo')
+           <= NOW() + INTERVAL '35 minutes'
+     ORDER BY data_agendamento, horario, id
+  `);
+  return rows;
+}
+
+async function sendThirtyMinuteReminder(appointment) {
+  if (!appointment.kommo_lead_id) throw new Error("Agendamento sem lead vinculado");
+  // Reserva o envio antes de disparar: se outra instância já reservou este
+  // mesmo horário, não envia de novo.
+  const claim = await pool.query(
+    `UPDATE agendamentos
+        SET lembrete_30min_ref = $2, lembrete_30min_em = NOW()
+      WHERE id = $1 AND lembrete_30min_ref IS DISTINCT FROM $2`,
+    [appointment.id, appointment.slot_ref]
+  );
+  if (!claim.rowCount) return false;
+  try {
+    const message = buildThirtyMinuteMessage(appointment);
+    await kommo.sendProactiveMessage(String(appointment.kommo_lead_id), message);
+  } catch (error) {
+    // Libera a reserva para a próxima verificação tentar de novo.
+    await pool.query(
+      "UPDATE agendamentos SET lembrete_30min_ref = NULL, lembrete_30min_em = NULL WHERE id = $1 AND lembrete_30min_ref = $2",
+      [appointment.id, appointment.slot_ref]
+    ).catch(() => null);
+    throw error;
+  }
+  await kommo.addNote(
+    String(appointment.kommo_lead_id),
+    `Lembrete 30min enviado - ${appointment.data_agendamento} as ${appointment.horario}`
+  ).catch(() => null);
+  return true;
+}
+
+async function runThirtyMinuteReminders() {
+  if (process.env.BOT_ENABLED === "false" || process.env.REMINDER_30MIN_AUTOMATION_ENABLED === "false") {
+    return { enviados: 0, erros: 0, desativado: true };
+  }
+  if (reminder30mRunning) return { enviados: 0, erros: 0, em_execucao: true };
+  reminder30mRunning = true;
+
+  try {
+    let appointments;
+    try {
+      appointments = await getThirtyMinuteAppointments();
+    } catch (error) {
+      console.error("[Reminder30min] Erro ao consultar banco:", error.message);
+      return { enviados: 0, erros: 1 };
+    }
+
+    let enviados = 0;
+    let erros = 0;
+    for (const appointment of appointments) {
+      try {
+        if (await sendThirtyMinuteReminder(appointment)) enviados++;
+      } catch (error) {
+        erros++;
+        console.error(`[Reminder30min] Erro no agendamento ${appointment.id}:`, error.message);
+      }
+      await sleep(800);
+    }
+    if (appointments.length) console.log(`[Reminder30min] Concluido: ${enviados} enviados, ${erros} erros.`);
+    return { enviados, erros };
+  } finally {
+    reminder30mRunning = false;
+  }
+}
+
 function scheduleDaily(label, targetHour, job) {
   const scheduleNext = () => {
     const now = new Date();
@@ -255,6 +356,11 @@ function startReminderCron() {
     scheduleEveryMinutes("Reminder2h", intervalMinutes,
       () => runMonitoredJob("reminder_2h", runTwoHourReminders));
   }
+  if (process.env.REMINDER_30MIN_AUTOMATION_ENABLED !== "false") {
+    const intervalMinutes = Number.parseInt(process.env.REMINDER_30MIN_INTERVAL_MINUTES || "5", 10);
+    scheduleEveryMinutes("Reminder30min", intervalMinutes,
+      () => runMonitoredJob("reminder_30min", runThirtyMinuteReminders));
+  }
 }
 
 module.exports = {
@@ -262,6 +368,8 @@ module.exports = {
   runReminders,
   runTwoHourReminders,
   buildTwoHourMessage,
+  runThirtyMinuteReminders,
+  buildThirtyMinuteMessage,
   scheduleDaily,
   scheduleEveryMinutes,
   keepLeadScheduled,
