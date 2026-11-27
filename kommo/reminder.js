@@ -240,6 +240,34 @@ async function getThirtyMinuteAppointments() {
   return rows;
 }
 
+// O WhatsApp oficial (WABA) só entrega texto livre se o cliente escreveu nas
+// últimas 24h; fora dessa janela a mensagem precisa ser um modelo aprovado.
+// Com KOMMO_REMINDER_30MIN_SALESBOT_ID configurado, o lembrete sai por um
+// Salesbot próprio que envia o modelo aprovado, lendo data, horário e loja do
+// campo de detalhes do agendamento (o mesmo usado pelo lembrete de 24h).
+// Sem a variável, continua usando o Salesbot genérico de texto livre.
+async function deliverThirtyMinuteReminder(appointment) {
+  const leadId = String(appointment.kommo_lead_id);
+  const message = buildThirtyMinuteMessage(appointment);
+  const botId = process.env.KOMMO_REMINDER_30MIN_SALESBOT_ID;
+  if (!botId) return kommo.sendProactiveMessage(leadId, message);
+
+  const detailsFieldId = Number(process.env.KOMMO_APPOINTMENT_DETAILS_FIELD_ID || 773261);
+  const textFieldId = Number(process.env.KOMMO_GENERIC_MESSAGE_FIELD_ID || 773487);
+  const details = [
+    `Data: ${appointment.data_agendamento}`,
+    `Horario: ${appointment.horario || "a confirmar"}`,
+    `Loja: ${appointment.loja || "Oticas TGT"}`,
+  ].join(" | ");
+  await kommo.updateLead(leadId, {
+    custom_fields_values: [
+      { field_id: detailsFieldId, values: [{ value: details }] },
+      { field_id: textFieldId, values: [{ value: message.slice(0, 256) }] },
+    ],
+  });
+  return kommo.launchSalesbot(botId, leadId);
+}
+
 async function sendThirtyMinuteReminder(appointment) {
   if (!appointment.kommo_lead_id) throw new Error("Agendamento sem lead vinculado");
   // Reserva o envio antes de disparar: se outra instância já reservou este
@@ -252,8 +280,7 @@ async function sendThirtyMinuteReminder(appointment) {
   );
   if (!claim.rowCount) return false;
   try {
-    const message = buildThirtyMinuteMessage(appointment);
-    await kommo.sendProactiveMessage(String(appointment.kommo_lead_id), message);
+    await deliverThirtyMinuteReminder(appointment);
   } catch (error) {
     // Libera a reserva para a próxima verificação tentar de novo.
     await pool.query(
