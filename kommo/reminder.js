@@ -147,7 +147,8 @@ async function runReminders() {
 
 async function getTwoHourAppointments() {
   const { rows } = await pool.query(`
-    SELECT id, kommo_lead_id, nome, horario, loja, data_agendamento, status
+    SELECT id, kommo_lead_id, nome, horario, loja, status,
+           TO_CHAR(data_agendamento, 'DD/MM/YYYY') AS data_br
       FROM agendamentos
      WHERE status IN ('Agendado', 'Reagendado', 'Confirmado')
        AND kommo_lead_id IS NOT NULL
@@ -160,14 +161,13 @@ async function getTwoHourAppointments() {
            <= NOW() + INTERVAL '125 minutes'
      ORDER BY data_agendamento, horario, id
   `);
-  return rows;
+  return rows.map(({ data_br, ...row }) => ({ ...row, data_agendamento: data_br }));
 }
 
 async function sendTwoHourReminder(appointment) {
   if (!appointment.kommo_lead_id) throw new Error("Agendamento sem lead vinculado");
   await keepLeadScheduled(appointment);
-  const message = buildTwoHourMessage(appointment);
-  await kommo.sendProactiveMessage(String(appointment.kommo_lead_id), message);
+  await deliverTwoHourReminder(appointment);
   await kommo.addNote(
     String(appointment.kommo_lead_id),
     `Lembrete 2h enviado - ${appointment.data_agendamento} as ${appointment.horario}`
@@ -247,9 +247,18 @@ async function getThirtyMinuteAppointments() {
 // campo de detalhes do agendamento (o mesmo usado pelo lembrete de 24h).
 // Sem a variável, continua usando o Salesbot genérico de texto livre.
 async function deliverThirtyMinuteReminder(appointment) {
+  return deliverReminderMessage(appointment, buildThirtyMinuteMessage(appointment),
+    process.env.KOMMO_REMINDER_30MIN_SALESBOT_ID);
+}
+
+// Mesma regra para o lembrete de 2h, com KOMMO_REMINDER_2H_SALESBOT_ID.
+async function deliverTwoHourReminder(appointment) {
+  return deliverReminderMessage(appointment, buildTwoHourMessage(appointment),
+    process.env.KOMMO_REMINDER_2H_SALESBOT_ID);
+}
+
+async function deliverReminderMessage(appointment, message, botId) {
   const leadId = String(appointment.kommo_lead_id);
-  const message = buildThirtyMinuteMessage(appointment);
-  const botId = process.env.KOMMO_REMINDER_30MIN_SALESBOT_ID;
   if (!botId) return kommo.sendProactiveMessage(leadId, message);
 
   const detailsFieldId = Number(process.env.KOMMO_APPOINTMENT_DETAILS_FIELD_ID || 773261);
@@ -370,7 +379,7 @@ async function sendTestReminders(whatsapp) {
     await kommo.updateLead(leadId, { custom_fields_values: [{ field_id: fieldId, values: [{ value: details }] }] });
     await kommo.launchSalesbot(botId, leadId);
   });
-  await tentar("2h", () => kommo.sendProactiveMessage(leadId, buildTwoHourMessage(appointment)));
+  await tentar("2h", () => deliverTwoHourReminder(appointment));
   await tentar("30min", () => deliverThirtyMinuteReminder(appointment));
 
   await kommo.addNote(leadId, `TESTE de lembretes (24h, 2h, 30min) - ${JSON.stringify(resultados)}`).catch(() => null);

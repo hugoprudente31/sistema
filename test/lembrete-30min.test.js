@@ -105,3 +105,38 @@ test('teste manual envia os 3 lembretes sem marcar envio no banco', async functi
     db.pool.query = orig.query;
   }
 });
+
+test('lembrete 2h usa Salesbot próprio (modelo aprovado) quando configurado', async function() {
+  const kommo = require('../kommo/client');
+  const db = require('../lib/db');
+  const orig = { update: kommo.updateLead, launch: kommo.launchSalesbot, proativa: kommo.sendProactiveMessage, note: kommo.addNote, getLead: kommo.getLead, move: kommo.moveToStage, query: db.pool.query };
+  const labels = require('../kommo/labels'); const origMark = labels.markScheduled;
+  const chamadas = [];
+  kommo.updateLead = async (id, body) => { chamadas.push(['update', body]); };
+  kommo.launchSalesbot = async (bot) => { chamadas.push(['bot', bot]); };
+  kommo.sendProactiveMessage = async () => { chamadas.push(['proativa']); };
+  kommo.addNote = async () => {};
+  kommo.getLead = async () => ({ pipeline_id: 1 });
+  kommo.moveToStage = async () => {};
+  labels.markScheduled = async () => {};
+  db.pool.query = async (sql) => /SELECT/.test(sql)
+    ? { rows: [{ id: 2, kommo_lead_id: '77', nome: 'Ana', horario: '16:00', loja: 'Enseada', data_br: '27/11/2026', status: 'Agendado' }] }
+    : { rowCount: 1, rows: [] };
+  process.env.KOMMO_REMINDER_2H_SALESBOT_ID = '222';
+  const stageAnterior = process.env.KOMMO_STAGE_AGENDAR;
+  process.env.KOMMO_STAGE_AGENDAR = '333';
+  try {
+    const r = await reminder.runTwoHourReminders();
+    assert.equal(r.enviados, 1);
+    const bot = chamadas.find(c => c[0] === 'bot');
+    assert.equal(bot[1], '222');
+    assert.ok(!chamadas.some(c => c[0] === 'proativa'));
+    const upd = chamadas.find(c => c[0] === 'update' && /Data: 27\/11\/2026 \| Horario: 16:00 \| Loja: Enseada/.test(JSON.stringify(c[1])));
+    assert.ok(upd, 'detalhes do agendamento gravados');
+  } finally {
+    delete process.env.KOMMO_REMINDER_2H_SALESBOT_ID;
+    if (stageAnterior === undefined) delete process.env.KOMMO_STAGE_AGENDAR; else process.env.KOMMO_STAGE_AGENDAR = stageAnterior;
+    Object.assign(kommo, { updateLead: orig.update, launchSalesbot: orig.launch, sendProactiveMessage: orig.proativa, addNote: orig.note, getLead: orig.getLead, moveToStage: orig.move });
+    labels.markScheduled = origMark; db.pool.query = orig.query;
+  }
+});
