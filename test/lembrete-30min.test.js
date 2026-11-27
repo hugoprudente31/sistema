@@ -81,3 +81,27 @@ test('lembrete 30min usa Salesbot próprio (modelo aprovado) quando configurado'
     kommo.sendProactiveMessage = originais.proativa; kommo.addNote = originais.note; db.pool.query = originais.query;
   }
 });
+
+test('teste manual envia os 3 lembretes sem marcar envio no banco', async function() {
+  const kommo = require('../kommo/client');
+  const db = require('../lib/db');
+  const orig = { update: kommo.updateLead, launch: kommo.launchSalesbot, proativa: kommo.sendProactiveMessage, note: kommo.addNote, query: db.pool.query };
+  const chamadas = []; const sqls = [];
+  kommo.updateLead = async () => { chamadas.push('update'); };
+  kommo.launchSalesbot = async (bot) => { chamadas.push('bot:' + bot); };
+  kommo.sendProactiveMessage = async () => { chamadas.push('proativa'); };
+  kommo.addNote = async () => {};
+  db.pool.query = async (sql, params) => { sqls.push(sql); return { rows: [{ id: 7, kommo_lead_id: '55', nome: 'Hugo', horario: '15:00', loja: 'Gonzaga', data_agendamento: '27/11/2026' }] }; };
+  process.env.KOMMO_REMINDER_SALESBOT_ID = '111';
+  try {
+    const r = await reminder.sendTestReminders('(13) 99999-0000');
+    assert.equal(r.agendamento_id, 7);
+    assert.deepEqual(r.resultados, { '24h': 'enviado ao Kommo', '2h': 'enviado ao Kommo', '30min': 'enviado ao Kommo' });
+    assert.deepEqual(chamadas, ['update', 'bot:111', 'proativa', 'proativa']);
+    assert.ok(sqls.every(s => !/UPDATE/.test(s)));
+  } finally {
+    delete process.env.KOMMO_REMINDER_SALESBOT_ID;
+    Object.assign(kommo, { updateLead: orig.update, launchSalesbot: orig.launch, sendProactiveMessage: orig.proativa, addNote: orig.note });
+    db.pool.query = orig.query;
+  }
+});

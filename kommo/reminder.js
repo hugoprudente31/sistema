@@ -330,6 +330,54 @@ async function runThirtyMinuteReminders() {
   }
 }
 
+// Teste manual (Central Técnica): envia na hora os 3 lembretes para o
+// agendamento mais recente de um WhatsApp, sem marcar nada como enviado.
+// Cada tipo é tentado separadamente para o resultado mostrar qual falhou.
+async function sendTestReminders(whatsapp) {
+  const digitos = String(whatsapp || "").replace(/\D/g, "");
+  if (digitos.length < 8) throw new Error("Informe o WhatsApp com DDD");
+  const { rows } = await pool.query(
+    `SELECT id, kommo_lead_id, nome, horario, loja, status,
+            TO_CHAR(data_agendamento, 'DD/MM/YYYY') AS data_agendamento
+       FROM agendamentos
+      WHERE excluido_em IS NULL
+        AND kommo_lead_id IS NOT NULL
+        AND RIGHT(REGEXP_REPLACE(COALESCE(whatsapp, ''), '\\D', '', 'g'), 8) = RIGHT($1, 8)
+      ORDER BY id DESC
+      LIMIT 1`,
+    [digitos]
+  );
+  const appointment = rows[0];
+  if (!appointment) throw new Error("Nenhum agendamento com lead no Kommo para esse WhatsApp");
+
+  const leadId = String(appointment.kommo_lead_id);
+  const resultados = {};
+  const tentar = async (tipo, fn) => {
+    try { await fn(); resultados[tipo] = "enviado ao Kommo"; }
+    catch (error) { resultados[tipo] = `erro: ${error.message}`; }
+    await sleep(1500);
+  };
+
+  await tentar("24h", async () => {
+    const botId = process.env.KOMMO_REMINDER_SALESBOT_ID;
+    if (!botId) throw new Error("KOMMO_REMINDER_SALESBOT_ID nao configurado");
+    const fieldId = Number(process.env.KOMMO_APPOINTMENT_DETAILS_FIELD_ID || 773261);
+    const details = [
+      `Data: ${appointment.data_agendamento}`,
+      `Horario: ${appointment.horario || "a confirmar"}`,
+      `Loja: ${appointment.loja || "Oticas TGT"}`,
+    ].join(" | ");
+    await kommo.updateLead(leadId, { custom_fields_values: [{ field_id: fieldId, values: [{ value: details }] }] });
+    await kommo.launchSalesbot(botId, leadId);
+  });
+  await tentar("2h", () => kommo.sendProactiveMessage(leadId, buildTwoHourMessage(appointment)));
+  await tentar("30min", () => deliverThirtyMinuteReminder(appointment));
+
+  await kommo.addNote(leadId, `TESTE de lembretes (24h, 2h, 30min) - ${JSON.stringify(resultados)}`).catch(() => null);
+  console.log(`[ReminderTeste] Agendamento ${appointment.id} lead ${leadId}: ${JSON.stringify(resultados)}`);
+  return { agendamento_id: appointment.id, nome: appointment.nome, resultados };
+}
+
 function scheduleDaily(label, targetHour, job) {
   const scheduleNext = () => {
     const now = new Date();
@@ -396,6 +444,7 @@ module.exports = {
   runTwoHourReminders,
   buildTwoHourMessage,
   runThirtyMinuteReminders,
+  sendTestReminders,
   buildThirtyMinuteMessage,
   scheduleDaily,
   scheduleEveryMinutes,
