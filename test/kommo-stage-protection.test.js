@@ -78,3 +78,20 @@ test("recuperação falha fechada e reagendamento restaura funil agendado", () =
   assert.match(flowSource, /await labels\.markScheduled\(leadId, "Agendado"\)/);
   assert.match(flowSource, /await moveStage\(leadId, "agendado", loja\.prefix\)/);
 });
+
+test("recuperação usa o pool do banco quando nenhum db é passado (caminho de produção)", async () => {
+  const { pool } = require("../lib/db");
+  const originalQuery = pool.query;
+  let params;
+  pool.query = async (_sql, p) => {
+    params = p;
+    return { rows: [] };
+  };
+  try {
+    const appointment = await recovery.getActiveAppointment(321);
+    assert.equal(appointment, null);
+    assert.deepEqual(params, ["321"]);
+  } finally {
+    pool.query = originalQuery;
+  }
+});

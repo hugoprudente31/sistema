@@ -4,6 +4,7 @@ const kommo = require("./client");
 const SM = require("./bot/stateManager");
 const labels = require("./labels");
 const { runMonitoredJob } = require("../lib/jobMonitor");
+const { pool } = require("../lib/db");
 
 const HOURS_72 = 72 * 60 * 60 * 1000;
 let recoveryRunning = false;
