@@ -14,7 +14,7 @@ const {
 } = require("./lib/databaseMaintenance");
 
 const { startRecoveryCron } = require("./kommo/recovery");
-const { startReminderCron, runReminders, runTwoHourReminders, runThirtyMinuteReminders, scheduleDaily } = require("./kommo/reminder");
+const { startReminderCron, runReminders, runTwoHourReminders, runThirtyMinuteReminders, sendTestReminders, scheduleDaily } = require("./kommo/reminder");
 const { startFollowupCron } = require("./kommo/followups");
 const { startOperationalWhatsappCron } = require("./lib/operationalWhatsapp");
 const mailingboss = require("./mailingboss");
@@ -6597,6 +6597,15 @@ app.post('/api/admin/lembretes/disparar', requireSuperAdmin, async (req, res) =>
 app.post('/api/admin/lembretes/2h/disparar', requireAdmin, async (req, res) => {
   const resultado = await runTwoHourReminders();
   res.json({ ok: true, ...resultado });
+});
+
+app.post('/api/admin/lembretes/testar', requireSuperAdmin, async (req, res) => {
+  try {
+    const resultado = await sendTestReminders(req.body && req.body.whatsapp);
+    res.json({ ok: true, ...resultado });
+  } catch (e) {
+    res.status(400).json({ ok: false, message: e.message });
+  }
 });
 
 app.post('/api/admin/lembretes/30min/disparar', requireAdmin, async (req, res) => {

@@ -1076,6 +1076,7 @@
         <button id="btnSyncKommo" onclick="syncRetroativoKommo()" style="background:#b45309">Sincronizar agendamentos → Kommo</button>
         <button id="btnGerarNotifRetro" onclick="gerarNotificacoesRetroativas()" style="background:#0369a1">Gerar notificações retroativas</button>
         <button id="btnDispararLembretes" onclick="dispararLembretes24h()" style="background:#047857">Disparar lembretes 24h</button>
+        <button id="btnTestarLembretes" onclick="testarLembretesAgora()" style="background:#be185d">Testar lembretes agora</button>
         <button onclick="executarDiagnostico()">Executar diagnóstico completo</button>
       </div>
       <div style="height:12px"></div><pre id="diagnosticoOut">Diagnóstico ainda não executado.</pre>
@@ -5126,6 +5127,25 @@ function dispararLembretes24h() {
     })
     .catch(function(err) { toast('Erro: ' + (err.message || String(err)), 'err'); })
     .finally(function() { if (btn) { btn.disabled = false; btn.textContent = 'Disparar lembretes 24h'; } });
+}
+
+function testarLembretesAgora() {
+  var btn = byId('btnTestarLembretes');
+  var whatsapp = prompt('WhatsApp do agendamento de teste (com DDD).\nOs lembretes de 24h, 2h e 30 min serão enviados AGORA para o agendamento mais recente desse número.');
+  if (!whatsapp) return;
+  if (btn) { btn.disabled = true; btn.textContent = 'Enviando...'; }
+  fetch('/api/admin/lembretes/testar', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ whatsapp: whatsapp }) })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      if (!res || !res.ok) throw new Error(res && res.message ? res.message : 'Erro');
+      var r = res.resultados || {};
+      var texto = 'Teste para ' + (res.nome || 'agendamento') + ' (#' + res.agendamento_id + '):\n' +
+        '24h: ' + r['24h'] + '\n2h: ' + r['2h'] + '\n30 min: ' + r['30min'];
+      var out = byId('diagnosticoOut'); if (out) out.textContent = texto;
+      toast('Teste enviado. Confira o WhatsApp.', 'ok');
+    })
+    .catch(function(err) { toast('Erro: ' + (err.message || String(err)), 'err'); })
+    .finally(function() { if (btn) { btn.disabled = false; btn.textContent = 'Testar lembretes agora'; } });
 }
 
 function gerarNotificacoesRetroativas() {
